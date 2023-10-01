@@ -28,7 +28,7 @@ class MatplotlibWidget(QWidget):
     def plot_data(self, df, title, events):
         self.axis.clear()
         x = pd.to_datetime(df['timestamp'])  # Automatically parses the timestamp
-        self.axis.plot(x, df['anglez'], label='anglez')
+        self.axis.plot(x, df['anglez'] / 75.0, label='anglez')
         self.axis.plot(x, df['enmo'], label='enmo')
 
         for event_time, event_type in events:
