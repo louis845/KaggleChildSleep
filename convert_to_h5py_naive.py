@@ -32,14 +32,14 @@ if __name__ == "__main__":
 
             # Load the events
             series_events = events.loc[events["series_id"] == series_id]
-            sleeping_timesteps = np.zeros(accel_data.shape[0], dtype=np.uint8)
+            sleeping_timesteps = np.zeros((accel_data.shape[0],), dtype=np.uint8)
             for k in range(0, len(series_events), 2):
                 single_event_onset = series_events.iloc[k]
                 single_event_wakeup = series_events.iloc[k + 1]
                 has_event = not (pd.isna(single_event_onset["step"]) or pd.isna(single_event_wakeup["step"]))
                 if has_event:
-                    start = single_event_onset["step"]
-                    end = single_event_wakeup["step"]
+                    start = int(single_event_onset["step"])
+                    end = int(single_event_wakeup["step"])
                     sleeping_timesteps[start:(end + 1)] = 1
             group.create_dataset("sleeping_timesteps", data=sleeping_timesteps, dtype=np.uint8, compression="gzip", compression_opts=0)
 

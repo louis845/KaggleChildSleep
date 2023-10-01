@@ -20,20 +20,20 @@ class MatplotlibWidget(QWidget):
         self.layout.addWidget(self.toolbar)
         self.layout.addWidget(self.canvas)
 
-        self.close_button = QPushButton('Close')
+        self.close_button = QPushButton("Close")
         self.layout.addWidget(self.close_button)
 
         self.plot_data(df, title, events)
 
     def plot_data(self, df, title, events):
         self.axis.clear()
-        x = pd.to_datetime(df['timestamp'])  # Automatically parses the timestamp
-        self.axis.plot(x, df['anglez'] / 75.0, label='anglez')
-        self.axis.plot(x, df['enmo'], label='enmo')
+        x = pd.to_datetime(df["timestamp"])  # Automatically parses the timestamp
+        self.axis.plot(x, df["anglez"] / 75.0, label="anglez")
+        self.axis.plot(x, df["enmo"], label="enmo")
 
         for event_time, event_type in events:
-            color = 'blue' if event_type == 1 else 'red'
-            self.axis.axvline(pd.to_datetime(event_time), color=color, alpha=0.5, linestyle='--')
+            color = "blue" if event_type == 1 else "red"
+            self.axis.axvline(pd.to_datetime(event_time), color=color, alpha=0.5, linestyle="--")
 
         self.axis.set_title(title)
         self.axis.legend()
@@ -65,13 +65,13 @@ class MainWidget(QWidget):
         self.load_file_names()
 
     def load_file_names(self):
-        for file in os.listdir('./individual_train_series'):
-            if file.endswith('.parquet'):
-                item = QListWidgetItem(file.replace('.parquet', ''))
+        for file in os.listdir("./individual_train_series"):
+            if file.endswith(".parquet"):
+                item = QListWidgetItem(file.replace(".parquet", ""))
                 self.file_list.addItem(item)
 
     def open_file(self, item):
-        filename = './individual_train_series/' + item.text() + '.parquet'
+        filename = "./individual_train_series/" + item.text() + ".parquet"
         df = pd.read_parquet(filename)
         events = load_extra_events(item.text())
         plot_widget = MatplotlibWidget(df, item.text(), events)
