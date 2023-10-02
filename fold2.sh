@@ -1,1 +1,1 @@
-python training_resnet.py --device 0 --memory_limit 0.495 --model model_fold2 --train_data fold_2_train --val_data fold_2_val --num_extra_steps 3 --hidden_channels 8 --hidden_blocks 4 6 8 12 8
+python training_resnet.py --device 0 --memory_limit 0.495 --model model_fold2_noshift --train_data fold_2_train --val_data fold_2_val --num_extra_steps 3 --hidden_channels 8 --hidden_blocks 4 6 8 12 8 --disable_odd_random_shift
