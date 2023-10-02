@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
             # Load the events
             series_events = events.loc[events["series_id"] == series_id]
-            sleeping_timesteps = np.zeros((accel_data.shape[0],), dtype=np.uint8)
+            sleeping_timesteps = np.zeros((accel_data.shape[1],), dtype=np.uint8)
             for k in range(0, len(series_events), 2):
                 single_event_onset = series_events.iloc[k]
                 single_event_wakeup = series_events.iloc[k + 1]

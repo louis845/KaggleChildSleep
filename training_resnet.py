@@ -61,8 +61,9 @@ def training_step(record: bool):
 
                 left_erosion = np.random.randint(16)
                 right_erosion = np.random.randint(16)
-                accel_data_batch = accel_data_batch[:, left_erosion:-right_erosion]
-                labels_batch = labels_batch[left_erosion:-right_erosion]
+                length = accel_data_batch.shape[-1]
+                accel_data_batch = accel_data_batch[:, left_erosion:length - right_erosion]
+                labels_batch = labels_batch[left_erosion:length - right_erosion]
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device).unsqueeze(0)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
 

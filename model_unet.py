@@ -103,9 +103,9 @@ class ResConv1DBlock(torch.nn.Module):
         assert x.shape == (N, self.out_channels // self.bottleneck_factor, T)
 
         if self.downsample:
-            if self.downsample_method == 1:
+            if downsampling_method == 1:
                 x = torch.nn.functional.pad(x, (1, 0), "replicate")
-            elif self.downsample_method == 2:
+            elif downsampling_method == 2:
                 x = torch.nn.functional.pad(x, (0, 1), "replicate")
             x = self.conv2(x)
             if downsampling_method == 0:
@@ -152,8 +152,9 @@ class ResConv1D(torch.nn.Module):
     def __init__(self, in_channels: int, out_channels: int, num_blocks: int, downsample=False,
                  bottleneck_factor: int=1, squeeze_excitation=False, squeeze_excitation_bottleneck_factor: int=4):
         super(ResConv1D, self).__init__()
-
         assert in_channels <= out_channels
+        if out_channels <= 32:
+            bottleneck_factor = 1
 
         self.conv_res = torch.nn.ModuleList()
         self.conv_res.append(ResConv1DBlock(in_channels, out_channels, downsample=downsample,
@@ -187,7 +188,7 @@ class ResNetBackbone(torch.nn.Module):
         self.initial_batch_norm = torch.nn.InstanceNorm1d(hidden_channels)
         self.initial_nonlin = torch.nn.GELU()
 
-        self.conv_down.append(ResConv1D(in_channels, hidden_channels, blocks[0], downsample=False,
+        self.conv_down.append(ResConv1D(hidden_channels, hidden_channels, blocks[0], downsample=False,
                                    bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                                    squeeze_excitation_bottleneck_factor=squeeze_excitation_bottleneck_factor))
         for i in range(self.pyramid_height - 1):
@@ -198,11 +199,9 @@ class ResNetBackbone(torch.nn.Module):
 
     def forward(self, x, downsampling_method: list[int]):
         assert len(downsampling_method) == self.pyramid_height, "downsampling method must be specified for each level"
-
-        if self.use_initial_conv:
-            x = self.initial_conv(x)
-            x = self.initial_batch_norm(x)
-            x = self.initial_nonlin(x)
+        x = self.initial_conv(x)
+        x = self.initial_batch_norm(x)
+        x = self.initial_nonlin(x)
 
         # contracting path
         ret = []
@@ -224,15 +223,21 @@ class Unet(torch.nn.Module):
         self.upsample_conv = torch.nn.ModuleList()
         self.upsample_norms = torch.nn.ModuleList()
         for k in range(self.pyramid_height - 1):
-            self.upsample_conv.append(torch.nn.Conv1d(hidden_channels * (2 ** (k + 1)), hidden_channels * (2 ** k),
-                                                      kernel_size=kernel_size, bias=False, padding="same", padding_mode="replicate"))
+            if (hidden_channels * (2 ** k)) % 4 == 0:
+                num_groups = (hidden_channels * (2 ** k)) // 4
+                self.upsample_conv.append(torch.nn.Conv1d(hidden_channels * (2 ** (k + 1)), hidden_channels * (2 ** k),
+                                                          kernel_size=kernel_size, groups=num_groups, bias=False,
+                                                          padding="same", padding_mode="replicate"))
+            else:
+                self.upsample_conv.append(torch.nn.Conv1d(hidden_channels * (2 ** (k + 1)), hidden_channels * (2 ** k),
+                                                          kernel_size=1, bias=False, padding="same", padding_mode="replicate"))
             self.upsample_norms.append(torch.nn.InstanceNorm1d(hidden_channels * (2 ** k)))
 
         self.cat_conv = torch.nn.ModuleList()
         self.cat_norms = torch.nn.ModuleList()
         for k in range(self.pyramid_height - 1):
             self.cat_conv.append(torch.nn.Conv1d(hidden_channels * (2 ** (k + 1)), hidden_channels * (2 ** k),
-                                                 kernel_size=kernel_size, bias=False, padding="same", padding_mode="replicate"))
+                                                 kernel_size=1, bias=False, padding="same", padding_mode="replicate"))
             self.cat_norms.append(torch.nn.InstanceNorm1d(hidden_channels * (2 ** k)))
 
         self.nonlin = torch.nn.GELU()
