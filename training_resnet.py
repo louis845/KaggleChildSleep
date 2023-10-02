@@ -268,9 +268,6 @@ if __name__ == "__main__":
             print("Running {} extra steps of gradient descent.".format(num_extra_steps))
             for k in range(num_extra_steps):
                 training_step(record=False)
-                torch.save(model.state_dict(), os.path.join(model_dir, "model_{}_substep{}.pt".format(epoch, k)))
-                torch.save(optimizer.state_dict(),
-                           os.path.join(model_dir, "optimizer_{}_substep{}.pt".format(epoch, k)))
 
             print("Running the usual step of gradient descent.")
             training_step(record=True)
