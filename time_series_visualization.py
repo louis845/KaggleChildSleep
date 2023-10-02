@@ -1,11 +1,11 @@
 import sys
 import os
 import pandas as pd
-from PySide2.QtWidgets import QApplication, QVBoxLayout, QFileDialog, QWidget, QHBoxLayout, QPushButton, QListWidget, QTabWidget, QListWidgetItem, QSplitter
+from PySide2.QtWidgets import QApplication, QVBoxLayout, QFileDialog, QWidget, QHBoxLayout, QPushButton, QListWidget, QTabWidget, QListWidgetItem, QSplitter, QSlider, QLabel
+from PySide2.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-from PySide2.QtCore import Qt
 
 class MatplotlibWidget(QWidget):
     def __init__(self, df, title, events, parent=None):
@@ -20,16 +20,40 @@ class MatplotlibWidget(QWidget):
         self.layout.addWidget(self.toolbar)
         self.layout.addWidget(self.canvas)
 
+        # Slider and Label
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setMinimum(10)
+        self.slider.setMaximum(100)
+        self.slider_label = QLabel("Window Size: 10")
+        self.slider_label.setAlignment(Qt.AlignCenter)
+        self.slider_label.setMaximumHeight(self.slider_label.sizeHint().height())
+        self.layout.addWidget(self.slider_label)
+        self.layout.addWidget(self.slider)
+        self.slider.valueChanged.connect(self.update_plot)
+
         self.close_button = QPushButton("Close")
         self.layout.addWidget(self.close_button)
 
-        self.plot_data(df, title, events)
+        self.df = df
+        self.title = title
+        self.events = events
+        self.update_plot(self.slider.value())
 
-    def plot_data(self, df, title, events):
+    def update_plot(self, window):
+        self.slider_label.setText(f"Window Size: {window}")
+        self.plot_data(self.df, self.title, self.events, window)
+
+    def plot_data(self, df, title, events, window):
         self.axis.clear()
         x = pd.to_datetime(df["timestamp"])  # Automatically parses the timestamp
-        self.axis.plot(x, df["anglez"] / 75.0, label="anglez")
-        self.axis.plot(x, df["enmo"], label="enmo")
+        y1 = df["anglez"] / 35.52 # std computed by check_series_properties.py
+        y2 = df["enmo"] / 0.1018 # std computed by check_series_properties.py
+        self.axis.plot(x, y1, label="anglez")
+        self.axis.plot(x, y2, label="enmo")
+
+        # Plot running variance
+        self.axis.plot(x, y1.rolling(window).var(), label="anglez variance")
+        self.axis.plot(x, y2.rolling(window).var(), label="enmo variance")
 
         for event_time, event_type in events:
             color = "blue" if event_type == 1 else "red"

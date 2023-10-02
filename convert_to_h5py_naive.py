@@ -26,8 +26,8 @@ if __name__ == "__main__":
             group = f.create_group(series_id)
 
             data_frame = pd.read_parquet(os.path.join("individual_train_series", file))
-            accel_data = np.stack([data_frame["anglez"].to_numpy(dtype=np.float32) / 75.0,
-                      data_frame["enmo"].to_numpy(dtype=np.float32)], axis=1)
+            accel_data = np.stack([data_frame["anglez"].to_numpy(dtype=np.float32) / 35.52,
+                      data_frame["enmo"].to_numpy(dtype=np.float32) / 0.1018], axis=0) # shape (2, T)
             group.create_dataset("accel", data=accel_data, dtype=np.float32, compression="gzip", compression_opts=0)
 
             # Load the events
