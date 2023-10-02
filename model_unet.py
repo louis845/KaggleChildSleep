@@ -213,7 +213,8 @@ class ResNetBackbone(torch.nn.Module):
 
 class Unet(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, kernel_size, blocks=[2, 3, 4, 6, 10, 15, 15],
-                 bottleneck_factor=4, squeeze_excitation=True, squeeze_excitation_bottleneck_factor=4):
+                 bottleneck_factor=4, squeeze_excitation=True, squeeze_excitation_bottleneck_factor=4,
+                 odd_random_shift_training=True):
         super(Unet, self).__init__()
         assert kernel_size % 2 == 1, "kernel size must be odd"
         self.backbone = ResNetBackbone(in_channels, hidden_channels, kernel_size, blocks, bottleneck_factor,
@@ -244,6 +245,8 @@ class Unet(torch.nn.Module):
 
         self.final_conv = torch.nn.Conv1d(hidden_channels, 1, kernel_size=kernel_size, bias=False, padding="same", padding_mode="replicate")
 
+        self.odd_random_shift_training = odd_random_shift_training
+
     def upsample(self, x, downsampling_method):
         if downsampling_method == 0:
             return torch.nn.functional.interpolate(x, size=(x.shape[-1] * 2,), mode="linear")
@@ -259,7 +262,7 @@ class Unet(torch.nn.Module):
         # generate list of downsampling methods
         downsampling_methods = [0]
         cur_length = T
-        if self.training:
+        if self.training and self.odd_random_shift_training:
             for k in range(self.pyramid_height - 1):
                 if cur_length % 2 == 0:
                     downsampling_methods.append(0)

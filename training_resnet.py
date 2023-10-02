@@ -146,6 +146,7 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_channels", type=int, default=32, help="Number of hidden channels. Default None.")
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
+    parser.add_argument("--disable_odd_random_shift", action="store_true", help="Whether to disable odd random shift. Default False.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
     manager_models.add_argparse_arguments(parser)
@@ -176,6 +177,7 @@ if __name__ == "__main__":
     hidden_channels = args.hidden_channels
     bottleneck_factor = args.bottleneck_factor
     squeeze_excitation = args.squeeze_excitation
+    disable_odd_random_shift = args.disable_odd_random_shift
     num_extra_steps = args.num_extra_steps
 
     print("Epochs: " + str(epochs))
@@ -185,8 +187,9 @@ if __name__ == "__main__":
     #model_resnet_old.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
-    model = model_unet.Unet(2, hidden_channels, kernel_size=11, blocks=hidden_blocks, bottleneck_factor=bottleneck_factor,
-                            squeeze_excitation=squeeze_excitation, squeeze_excitation_bottleneck_factor=4)
+    model = model_unet.Unet(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
+                            bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
+                            squeeze_excitation_bottleneck_factor=4, odd_random_shift_training=(not disable_odd_random_shift))
     model = model.to(config.device)
 
     # initialize optimizer
@@ -234,6 +237,7 @@ if __name__ == "__main__":
         "hidden_channels": hidden_channels,
         "bottleneck_factor": bottleneck_factor,
         "squeeze_excitation": squeeze_excitation,
+        "disable_odd_random_shift": disable_odd_random_shift,
         "num_extra_steps": num_extra_steps,
     }
 
