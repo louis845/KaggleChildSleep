@@ -58,6 +58,11 @@ def training_step(record: bool):
             with h5py.File(os.path.join(convert_to_h5py_naive.FOLDER, "series_data.h5"), "r") as f:
                 accel_data_batch = f[batch_entry]["accel"][()]
                 labels_batch = f[batch_entry]["sleeping_timesteps"][()]
+
+                left_erosion = np.random.randint(16)
+                right_erosion = np.random.randint(16)
+                accel_data_batch = accel_data_batch[:, left_erosion:-right_erosion]
+                labels_batch = labels_batch[left_erosion:-right_erosion]
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device).unsqueeze(0)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
 
@@ -131,13 +136,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a injury prediction model.")
     parser.add_argument("--epochs", type=int, default=100, help="Number of epochs to train for. Default 100.")
     parser.add_argument("--learning_rate", type=float, default=3e-4, help="Learning rate to use. Default 3e-4.")
-    parser.add_argument("--momentum", type=float, default=0.995, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
-    parser.add_argument("--second_momentum", type=float, default=0.9995, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
+    parser.add_argument("--momentum", type=float, default=0.99, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
+    parser.add_argument("--second_momentum", type=float, default=0.999, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
     parser.add_argument("--optimizer", type=str, default="adam", help="Which optimizer to use. Available options: adam, sgd. Default adam.")
     parser.add_argument("--epochs_per_save", type=int, default=2, help="Number of epochs between saves. Default 2.")
     parser.add_argument("--hidden_blocks", type=int, nargs="+", default=[1, 6, 8, 23, 8],
                         help="Number of hidden 2d blocks for ResNet backbone.")
-    parser.add_argument("--hidden_channels", type=int, default=None, help="Number of hidden channels. Default None.")
+    parser.add_argument("--hidden_channels", type=int, default=32, help="Number of hidden channels. Default None.")
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")

@@ -1,0 +1,1 @@
+python training_resnet.py --device 1 --model model_fold3 --train_data fold_3_train --val_data fold_3_val

@@ -1,0 +1,1 @@
+python training_resnet.py --device 0 --memory_limit 0.495 --model model_fold2 --train_data fold_2_train --val_data fold_2_val
