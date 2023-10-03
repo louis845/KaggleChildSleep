@@ -1,6 +1,7 @@
 import torch
 import time
 import os
+import config
 
 class CudaMemoryLogger:
     def __init__(self, folder, activated):
@@ -16,7 +17,7 @@ class CudaMemoryLogger:
             self.file.write("========================================\n")
             self.file.write("Time: " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()) + "\n")
             self.file.write(msg + "\n")
-            self.file.write(torch.cuda.memory_summary())
+            self.file.write(torch.cuda.memory_summary(config.device))
             self.file.flush()
 
     def close(self):

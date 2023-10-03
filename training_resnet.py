@@ -19,6 +19,7 @@ import manager_models
 import metrics
 import logging_memory_utils
 import convert_to_h5py_naive
+import convert_to_h5py_splitted
 import model_unet
 
 def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor):
@@ -47,6 +48,9 @@ def training_step(record: bool):
 
     # shuffle
     shuffle_indices = np.random.permutation(len(training_entries))
+    if use_cutmix_training:
+        num_mix = 11
+        extra_shuffle_indices = [np.random.permutation(len(training_entries)) for _ in range(num_mix - 1)]
 
     # training
     trained = 0
@@ -55,26 +59,82 @@ def training_step(record: bool):
             batch_entry = training_entries[shuffle_indices[k]] # series ids
 
             # load the batch
-            with h5py.File(os.path.join(convert_to_h5py_naive.FOLDER, "series_data.h5"), "r") as f:
-                accel_data_batch = f[batch_entry]["accel"][()]
-                labels_batch = f[batch_entry]["sleeping_timesteps"][()]
+            if use_cutmix_training:
+                accel_data_batch_list = []
+                labels_batch_list = []
+                current_length = 0
 
-                left_erosion = np.random.randint(16)
-                right_erosion = np.random.randint(16)
-                length = accel_data_batch.shape[-1]
-                accel_data_batch = accel_data_batch[:, left_erosion:length - right_erosion]
-                labels_batch = labels_batch[left_erosion:length - right_erosion]
-            accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device).unsqueeze(0)
-            labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
+                is_event = False
+                while current_length < length:
+                    type_file = "event.csv" if is_event else "non_event.csv"
+
+                    appended = False
+                    while not appended:
+                        choice = np.random.randint(0, num_mix)
+                        try:
+                            if choice == 0:
+                                intervals = pd.read_csv(os.path.join(convert_to_h5py_splitted.FOLDER,
+                                                          batch_entry,
+                                                          type_file), header=None)
+                            else:
+                                intervals = pd.read_csv(os.path.join(convert_to_h5py_splitted.FOLDER,
+                                                          training_entries[extra_shuffle_indices[choice - 1][k]],
+                                                          type_file), header=None)
+                        except pd.errors.EmptyDataError:
+                            continue
+                        num_intervals = len(intervals)
+                        intervals_np = intervals.to_numpy(dtype=np.int32)
+
+                        intervals = intervals_np
+                        interval = intervals[np.random.randint(0, num_intervals)]
+
+                        low = interval[0]
+                        high = interval[1]
+                        if is_event:
+                            low += np.random.randint(-125, 126)
+                            high += np.random.randint(-125, 126)
+                        else:
+                            low += np.random.randint(0, 25)
+                            high -= np.random.randint(0, 25)
+
+                        accel_data_batch_list.append(all_data[batch_entry]["accel"][:, low:high])
+                        labels_batch_list.append(all_data[batch_entry]["sleeping_timesteps"][low:high])
+                        appended = True
+
+                    is_event = not is_event
+                    current_length += accel_data_batch_list[-1].shape[-1]
+
+                accel_data_batch = np.concatenate(accel_data_batch_list, axis=-1)
+                labels_batch = np.concatenate(labels_batch_list, axis=-1)
+            else:
+                accel_data_batch = all_data[batch_entry]["accel"]
+                labels_batch = all_data[batch_entry]["sleeping_timesteps"]
+                """accel_data_batch = np.random.rand(2, 1000000)
+                labels_batch = np.random.randint(0, 2, size=(1000000,)).astype(np.float32)"""
+
+            # randomly pick a segment to match length
+            left_erosion = np.random.randint(0, accel_data_batch.shape[-1] - length + 1)
+            accel_data_batch = accel_data_batch[:, left_erosion:(left_erosion + length)]
+            labels_batch = labels_batch[left_erosion:(left_erosion + length)]
+
+            accel_data_batch_torch = torch.zeros(size=(2, length), dtype=torch.float32, device=config.device)
+            labels_batch_torch = torch.zeros(size=(length,), dtype=torch.float32, device=config.device)
+            accel_data_batch_torch.copy_(torch.from_numpy(accel_data_batch), non_blocking=True)
+            labels_batch_torch.copy_(torch.from_numpy(labels_batch), non_blocking=True)
+            accel_data_batch_torch = accel_data_batch_torch.unsqueeze(0)
+            labels_batch_torch = labels_batch_torch.unsqueeze(0).unsqueeze(0)
 
             # train model now
-            loss, preds = single_training_step(model, optimizer, accel_data_batch, labels_batch)
+            loss, preds = single_training_step(model, optimizer,
+                                               accel_data_batch_torch,
+                                               labels_batch_torch)
+            time.sleep(0.32)
 
             # record
             if record:
                 with torch.no_grad():
                     train_metrics["loss"].add(loss, 1)
-                    train_metrics["metric"].add(preds, labels_batch.to(torch.long))
+                    train_metrics["metric"].add(preds, labels_batch_torch.to(torch.long))
 
             trained += 1
             pbar.update(1)
@@ -104,9 +164,8 @@ def validation_step():
             batch_entry = validation_entries[k]  # series ids
 
             # load the batch
-            with h5py.File(os.path.join(convert_to_h5py_naive.FOLDER, "series_data.h5"), "r") as f:
-                accel_data_batch = f[batch_entry]["accel"][()]
-                labels_batch = f[batch_entry]["sleeping_timesteps"][()]
+            accel_data_batch = all_data[batch_entry]["accel"]
+            labels_batch = all_data[batch_entry]["sleeping_timesteps"]
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device).unsqueeze(0)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
 
@@ -134,6 +193,8 @@ def print_history(metrics_history):
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn")
 
+    all_data = convert_to_h5py_naive.load_all_data_into_dict()
+
     parser = argparse.ArgumentParser(description="Train a injury prediction model.")
     parser.add_argument("--epochs", type=int, default=100, help="Number of epochs to train for. Default 100.")
     parser.add_argument("--learning_rate", type=float, default=3e-4, help="Learning rate to use. Default 3e-4.")
@@ -147,6 +208,8 @@ if __name__ == "__main__":
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
     parser.add_argument("--disable_odd_random_shift", action="store_true", help="Whether to disable odd random shift. Default False.")
+    parser.add_argument("--use_cutmix_training", action="store_true", help="Whether to use cutmix training. Default False.")
+    parser.add_argument("--length", default=700000, help="The fixed length of the training. Default 700000.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
     manager_models.add_argparse_arguments(parser)
@@ -178,6 +241,8 @@ if __name__ == "__main__":
     bottleneck_factor = args.bottleneck_factor
     squeeze_excitation = args.squeeze_excitation
     disable_odd_random_shift = args.disable_odd_random_shift
+    use_cutmix_training = args.use_cutmix_training
+    length = args.length
     num_extra_steps = args.num_extra_steps
 
     print("Epochs: " + str(epochs))
@@ -238,6 +303,8 @@ if __name__ == "__main__":
         "bottleneck_factor": bottleneck_factor,
         "squeeze_excitation": squeeze_excitation,
         "disable_odd_random_shift": disable_odd_random_shift,
+        "use_cutmix_training": use_cutmix_training,
+        "length": length,
         "num_extra_steps": num_extra_steps,
     }
 
@@ -256,9 +323,14 @@ if __name__ == "__main__":
     val_metrics["metric"] = metrics.BinaryMetrics("val_metric")
 
     # Compile
-    single_training_step_compile = torch.compile(single_training_step)
+    #single_training_step_compile = torch.compile(single_training_step)
 
     # Initialize the async sampler if necessary
+    print("Using cutmix training: {}".format(use_cutmix_training))
+    print("Length: {}".format(length))
+    if not use_cutmix_training:
+        for series_id in all_data:
+            assert all_data[series_id]["accel"].shape[-1] >= length
 
     # Start training loop
     print("Training for {} epochs......".format(epochs))
@@ -299,6 +371,7 @@ if __name__ == "__main__":
             if epoch % epochs_per_save == 0:
                 torch.save(model.state_dict(), os.path.join(model_dir, "model_{}.pt".format(epoch)))
                 torch.save(optimizer.state_dict(), os.path.join(model_dir, "optimizer_{}.pt".format(epoch)))
+            gc.collect()
 
         print("Training complete! Saving and finalizing...")
     except KeyboardInterrupt:

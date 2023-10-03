@@ -89,10 +89,14 @@ class MainWidget(QWidget):
         self.load_file_names()
 
     def load_file_names(self):
+        file_items = []
         for file in os.listdir("./individual_train_series"):
             if file.endswith(".parquet"):
-                item = QListWidgetItem(file.replace(".parquet", ""))
-                self.file_list.addItem(item)
+                file_items.append(file.replace(".parquet", ""))
+        file_items.sort()
+        for file in file_items:
+            item = QListWidgetItem(file)
+            self.file_list.addItem(item)
 
     def open_file(self, item):
         filename = "./individual_train_series/" + item.text() + ".parquet"
@@ -109,7 +113,8 @@ def load_extra_events(series_id: str):
     events = pd.read_csv("data/train_events.csv")
     assert set(list(events["event"].unique())) == {"onset", "wakeup"}
     events = events.loc[events["series_id"] == series_id].dropna()
-    assert len(events) > 0, series_id
+    if len(events) == 0:
+        return []
 
     events_list = []
     for k in range(len(events)):
