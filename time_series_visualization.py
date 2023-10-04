@@ -1,11 +1,35 @@
 import sys
 import os
 import pandas as pd
-from PySide2.QtWidgets import QApplication, QVBoxLayout, QFileDialog, QWidget, QHBoxLayout, QPushButton, QListWidget, QTabWidget, QListWidgetItem, QSplitter, QSlider, QLabel
+from PySide2.QtWidgets import QApplication, QVBoxLayout, QFileDialog, QWidget, QHBoxLayout, QPushButton, QListWidget, QTabWidget, QListWidgetItem, QSplitter, QSlider, QLabel, QCheckBox
 from PySide2.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+
+class SliderWithDisplayWidget(QWidget):
+    def __init__(self, slider_name, slider_min, slider_max):
+        super(SliderWithDisplayWidget, self).__init__()
+
+        self.layout = QVBoxLayout(self)
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setMinimum(slider_min)
+        self.slider.setMaximum(slider_max)
+        self.slider.setValue(slider_min)
+        self.slider_label = QLabel(slider_name + ": " + str(slider_min))
+        self.slider_label.setAlignment(Qt.AlignCenter)
+        self.slider_label.setMaximumHeight(self.slider_label.sizeHint().height())
+        self.layout.addWidget(self.slider_label)
+        self.layout.addWidget(self.slider)
+
+        self.slider.valueChanged.connect(self.update_label)
+        self.slider_name = slider_name
+
+    def get_value(self):
+        return self.slider.value()
+
+    def update_label(self, value):
+        self.slider_label.setText(self.slider_name + ": " + str(value))
 
 class MatplotlibWidget(QWidget):
     def __init__(self, df, title, events, parent=None):
@@ -21,15 +45,26 @@ class MatplotlibWidget(QWidget):
         self.layout.addWidget(self.canvas)
 
         # Slider and Label
-        self.slider = QSlider(Qt.Horizontal)
-        self.slider.setMinimum(10)
-        self.slider.setMaximum(100)
-        self.slider_label = QLabel("Window Size: 10")
-        self.slider_label.setAlignment(Qt.AlignCenter)
-        self.slider_label.setMaximumHeight(self.slider_label.sizeHint().height())
-        self.layout.addWidget(self.slider_label)
-        self.layout.addWidget(self.slider)
-        self.slider.valueChanged.connect(self.update_plot)
+        self.variance_slider = SliderWithDisplayWidget("Variance window", 100, 2000)
+        self.variance_median_slider = SliderWithDisplayWidget("Variance median window", 100, 2000)
+        self.layout.addWidget(self.variance_slider)
+        self.layout.addWidget(self.variance_median_slider)
+
+        self.show_data_checkbox = QCheckBox("Show Data")
+        self.layout.addWidget(self.show_data_checkbox)
+        self.show_data_checkbox.setChecked(True)
+
+        self.show_variance_checkbox = QCheckBox("Show Variance")
+        self.layout.addWidget(self.show_variance_checkbox)
+        self.show_variance_checkbox.setChecked(True)
+
+        self.show_variance_median_checkbox = QCheckBox("Show Variance Median")
+        self.layout.addWidget(self.show_variance_median_checkbox)
+        self.show_variance_median_checkbox.setChecked(False)
+
+        self.update_button = QPushButton("Update")
+        self.layout.addWidget(self.update_button)
+        self.update_button.clicked.connect(lambda: self.plot_data(self.df, self.title, self.events))
 
         self.close_button = QPushButton("Close")
         self.layout.addWidget(self.close_button)
@@ -37,23 +72,36 @@ class MatplotlibWidget(QWidget):
         self.df = df
         self.title = title
         self.events = events
-        self.update_plot(self.slider.value())
+        self.plot_data(self.df, self.title, self.events)
 
-    def update_plot(self, window):
-        self.slider_label.setText(f"Window Size: {window}")
-        self.plot_data(self.df, self.title, self.events, window)
+    def plot_data(self, df, title, events):
+        window = self.variance_slider.get_value()
+        window2 = self.variance_median_slider.get_value()
+        show_data = self.show_data_checkbox.isChecked()
+        show_variance = self.show_variance_checkbox.isChecked()
+        show_variance_median = self.show_variance_median_checkbox.isChecked()
 
-    def plot_data(self, df, title, events, window):
         self.axis.clear()
         x = pd.to_datetime(df["timestamp"])  # Automatically parses the timestamp
         y1 = df["anglez"] / 35.52 # std computed by check_series_properties.py
         y2 = df["enmo"] / 0.1018 # std computed by check_series_properties.py
-        self.axis.plot(x, y1, label="anglez")
-        self.axis.plot(x, y2, label="enmo")
+        if show_data:
+            self.axis.plot(x, y1, label="anglez")
+            self.axis.plot(x, y2, label="enmo")
 
         # Plot running variance
-        self.axis.plot(x, y1.rolling(window).var(), label="anglez variance")
-        self.axis.plot(x, y2.rolling(window).var(), label="enmo variance")
+        y1_var = y1.rolling(window).var()
+        y2_var = y2.rolling(window).var()
+        if show_variance:
+            self.axis.plot(x, y1_var, label="anglez variance")
+            self.axis.plot(x, y2_var, label="enmo variance")
+
+        # Plot running variance median
+        y1_var_median = y1_var.rolling(window2).median()
+        y2_var_median = y2_var.rolling(window2).median()
+        if show_variance_median:
+            self.axis.plot(x, y1_var_median, label="anglez variance median")
+            self.axis.plot(x, y2_var_median, label="enmo variance median")
 
         for event_time, event_type in events:
             color = "blue" if event_type == 1 else "red"

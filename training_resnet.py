@@ -57,14 +57,19 @@ def training_step(record: bool):
     with tqdm.tqdm(total=len(shuffle_indices)) as pbar:
         for k in range(len(shuffle_indices)):
             batch_entry = training_entries[shuffle_indices[k]] # series ids
-
             # load the batch
             if use_cutmix_training:
                 accel_data_batch_list = []
                 labels_batch_list = []
                 current_length = 0
 
-                is_event = False
+                # cutmix with 50% probability
+                """if (np.random.rand() < 0.5):
+                    accel_data_batch_list.append(all_data[batch_entry]["accel"])
+                    labels_batch_list.append(all_data[batch_entry]["sleeping_timesteps"])
+                    current_length += accel_data_batch_list[-1].shape[-1]"""
+
+                is_event = np.random.rand() < 0.5
                 while current_length < length:
                     type_file = "event.csv" if is_event else "non_event.csv"
 
@@ -90,12 +95,13 @@ def training_step(record: bool):
 
                         low = interval[0]
                         high = interval[1]
+                        max_diff = min(int(high - low) // 4, 720)
                         if is_event:
-                            low += np.random.randint(-125, 126)
-                            high += np.random.randint(-125, 126)
+                            low += np.random.randint(-max_diff, max_diff + 1)
+                            high += np.random.randint(-max_diff, max_diff + 1)
                         else:
-                            low += np.random.randint(0, 25)
-                            high -= np.random.randint(0, 25)
+                            low += np.random.randint(0, max_diff)
+                            high -= np.random.randint(0, max_diff)
 
                         accel_data_batch_list.append(all_data[batch_entry]["accel"][:, low:high])
                         labels_batch_list.append(all_data[batch_entry]["sleeping_timesteps"][low:high])
@@ -147,8 +153,11 @@ def training_step(record: bool):
         for key in current_metrics:
             train_history[key].append(current_metrics[key])
 
-def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
+def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tensor, labels_batch: torch.Tensor,
+                           pad_left, pad_right):
+    accel_data_batch = torch.nn.functional.pad(accel_data_batch, (pad_left, pad_right), mode="replicate")
     pred_logits = model_(accel_data_batch)  # shape (batch_size, 1, T), where batch_size = 1
+    pred_logits = pred_logits[..., pad_left:(pred_logits.shape[-1] - pad_right)]
     loss = focal_loss(pred_logits, labels_batch)
     preds = pred_logits > 0.0
 
@@ -169,8 +178,15 @@ def validation_step():
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device).unsqueeze(0)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
 
+            # pad such that lengths is a multiple of 16
+            pad_length = 16 - (accel_data_batch.shape[-1] % 16)
+            if pad_length == 16:
+                pad_length = 0
+            pad_left = pad_length // 2
+            pad_right = pad_length - pad_left
+
             # train model now
-            loss, preds = single_validation_step(model, accel_data_batch, labels_batch)
+            loss, preds = single_validation_step(model, accel_data_batch, labels_batch, pad_left, pad_right)
 
             # record
             with torch.no_grad():
@@ -197,7 +213,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train a injury prediction model.")
     parser.add_argument("--epochs", type=int, default=100, help="Number of epochs to train for. Default 100.")
-    parser.add_argument("--learning_rate", type=float, default=3e-4, help="Learning rate to use. Default 3e-4.")
+    parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate to use. Default 1e-3.")
     parser.add_argument("--momentum", type=float, default=0.99, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
     parser.add_argument("--second_momentum", type=float, default=0.999, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
     parser.add_argument("--optimizer", type=str, default="adam", help="Which optimizer to use. Available options: adam, sgd. Default adam.")
@@ -209,6 +225,7 @@ if __name__ == "__main__":
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
     parser.add_argument("--disable_odd_random_shift", action="store_true", help="Whether to disable odd random shift. Default False.")
     parser.add_argument("--use_cutmix_training", action="store_true", help="Whether to use cutmix training. Default False.")
+    parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
     parser.add_argument("--length", default=700000, help="The fixed length of the training. Default 700000.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
@@ -242,6 +259,7 @@ if __name__ == "__main__":
     squeeze_excitation = args.squeeze_excitation
     disable_odd_random_shift = args.disable_odd_random_shift
     use_cutmix_training = args.use_cutmix_training
+    dropout = args.dropout
     length = args.length
     num_extra_steps = args.num_extra_steps
 
@@ -249,12 +267,15 @@ if __name__ == "__main__":
     print("Learning rate: " + str(learning_rate))
     print("Momentum: " + str(momentum))
     print("Second momentum: " + str(second_momentum))
+    print("Optimizer: " + optimizer_type)
+    print("Dropout: " + str(dropout))
     #model_resnet_old.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
     model = model_unet.Unet(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
                             bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
-                            squeeze_excitation_bottleneck_factor=4, odd_random_shift_training=(not disable_odd_random_shift))
+                            squeeze_excitation_bottleneck_factor=4, odd_random_shift_training=(not disable_odd_random_shift),
+                            dropout=dropout)
     model = model.to(config.device)
 
     # initialize optimizer
@@ -304,6 +325,7 @@ if __name__ == "__main__":
         "squeeze_excitation": squeeze_excitation,
         "disable_odd_random_shift": disable_odd_random_shift,
         "use_cutmix_training": use_cutmix_training,
+        "dropout": dropout,
         "length": length,
         "num_extra_steps": num_extra_steps,
     }

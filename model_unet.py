@@ -6,7 +6,8 @@ class ResConv1DBlock(torch.nn.Module):
                  downsample, bottleneck_factor=1,
                  squeeze_excitation=False,
                  squeeze_excitation_bottleneck_factor=4,
-                 kernel_size=11):
+                 kernel_size=11,
+                 dropout=0.0):
         """
         :param in_channels: number of input channels
         :param out_channels: number of output channels
@@ -22,7 +23,9 @@ class ResConv1DBlock(torch.nn.Module):
         if bottleneck_factor > 1:
             assert out_channels % bottleneck_factor == 0, "out_channels must be divisible by bottleneck_factor"
             assert out_channels % (bottleneck_factor * 4) == 0, "out_channels must be divisible by bottleneck_factor * 4"
+        assert 0.0 <= dropout <= 1.0, "dropout must be between 0.0 and 1.0"
         bottleneck_channels = out_channels // bottleneck_factor
+        use_dropout = dropout > 0.0
 
         if downsample:
             self.avgpool = torch.nn.AvgPool1d(kernel_size=2, stride=2, padding=0)
@@ -32,6 +35,8 @@ class ResConv1DBlock(torch.nn.Module):
                                          padding="same", padding_mode="replicate")
             self.batchnorm1 = torch.nn.InstanceNorm1d(bottleneck_channels, affine=True)
             self.nonlin1 = torch.nn.GELU()
+            if use_dropout:
+                self.dropout1 = torch.nn.Dropout1d(dropout)
 
             num_groups = bottleneck_channels // 4
             if downsample:
@@ -42,16 +47,22 @@ class ResConv1DBlock(torch.nn.Module):
                                              padding="same", padding_mode="replicate", groups=num_groups)
             self.batchnorm2 = torch.nn.InstanceNorm1d(bottleneck_channels, affine=True)
             self.nonlin2 = torch.nn.GELU()
+            if use_dropout:
+                self.dropout2 = torch.nn.Dropout1d(dropout)
 
             self.conv3 = torch.nn.Conv1d(bottleneck_channels, out_channels, kernel_size=1, bias=False,
                                          padding="same", padding_mode="replicate")
             self.batchnorm3 = torch.nn.InstanceNorm1d(out_channels, affine=True)
             self.nonlin3 = torch.nn.GELU()
+            if use_dropout:
+                self.dropout3 = torch.nn.Dropout1d(dropout)
         else:
             self.conv1 = torch.nn.Conv1d(in_channels, out_channels, kernel_size=kernel_size, bias=False,
                                          padding="same", padding_mode="replicate")
             self.batchnorm1 = torch.nn.InstanceNorm1d(out_channels, affine=True)
             self.nonlin1 = torch.nn.GELU()
+            if use_dropout:
+                self.dropout1 = torch.nn.Dropout1d(dropout)
 
             if downsample:
                 self.conv2 = torch.nn.Conv1d(out_channels, out_channels, kernel_size=kernel_size * 2,
@@ -61,6 +72,8 @@ class ResConv1DBlock(torch.nn.Module):
                                              bias=False, padding="same", padding_mode="replicate")
             self.batchnorm2 = torch.nn.InstanceNorm1d(out_channels, affine=True)
             self.nonlin2 = torch.nn.GELU()
+            if use_dropout:
+                self.dropout2 = torch.nn.Dropout1d(dropout)
         if squeeze_excitation:
             assert out_channels % squeeze_excitation_bottleneck_factor == 0, "out_channels must be divisible by squeeze_excitation_bottleneck_factor"
             self.se_pool = torch.nn.AdaptiveAvgPool1d(1)
@@ -76,6 +89,7 @@ class ResConv1DBlock(torch.nn.Module):
         self.out_channels = out_channels
         self.downsample = downsample
         self.squeeze_excitation = squeeze_excitation
+        self.use_dropout = use_dropout
 
     def forward(self, x, downsampling_method: int):
         # downsampling_method must be 0, 1, 2, where 0 means that we expect the input to be even (or no downsampling),
@@ -100,6 +114,8 @@ class ResConv1DBlock(torch.nn.Module):
         x = self.conv1(x)
         x = self.batchnorm1(x)
         x = self.nonlin1(x)
+        if self.use_dropout:
+            x = self.dropout1(x)
         assert x.shape == (N, self.out_channels // self.bottleneck_factor, T)
 
         if self.downsample:
@@ -119,6 +135,8 @@ class ResConv1DBlock(torch.nn.Module):
 
         if self.bottleneck_factor > 1:
             x = self.nonlin2(x)
+            if self.use_dropout:
+                x = self.dropout2(x)
 
             x = self.conv3(x)
             x = self.batchnorm3(x)
@@ -143,28 +161,36 @@ class ResConv1DBlock(torch.nn.Module):
                 assert x_init.shape == (N, self.out_channels, (T + 1) // 2)
         if self.bottleneck_factor > 1:
             result = self.nonlin3(x_init + x)
+            if self.use_dropout:
+                result = self.dropout3(result)
         else:
             result = self.nonlin2(x_init + x)
+            if self.use_dropout:
+                result = self.dropout2(result)
         return result
 
 
 class ResConv1D(torch.nn.Module):
     def __init__(self, in_channels: int, out_channels: int, num_blocks: int, downsample=False,
-                 bottleneck_factor: int=1, squeeze_excitation=False, squeeze_excitation_bottleneck_factor: int=4):
+                 bottleneck_factor: int=1, squeeze_excitation=False, squeeze_excitation_bottleneck_factor: int=4,
+                 kernel_size=11, dropout=0.0):
         super(ResConv1D, self).__init__()
         assert in_channels <= out_channels
         if out_channels <= 32:
             bottleneck_factor = 1
+            dropout = 0.0
 
         self.conv_res = torch.nn.ModuleList()
         self.conv_res.append(ResConv1DBlock(in_channels, out_channels, downsample=downsample,
                                             bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
-                                            squeeze_excitation_bottleneck_factor=squeeze_excitation_bottleneck_factor))
+                                            squeeze_excitation_bottleneck_factor=squeeze_excitation_bottleneck_factor,
+                                            kernel_size=kernel_size, dropout=dropout))
         for k in range(1, num_blocks):
             self.conv_res.append(ResConv1DBlock(out_channels, out_channels, downsample=False,
                                                 bottleneck_factor=bottleneck_factor,
                                                 squeeze_excitation=squeeze_excitation,
-                                                squeeze_excitation_bottleneck_factor=squeeze_excitation_bottleneck_factor))
+                                                squeeze_excitation_bottleneck_factor=squeeze_excitation_bottleneck_factor,
+                                                kernel_size=kernel_size, dropout=dropout))
 
         self.num_blocks = num_blocks
 
@@ -177,7 +203,8 @@ class ResConv1D(torch.nn.Module):
 
 class ResNetBackbone(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, kernel_size, blocks=[2, 3, 4, 6, 10, 15, 15],
-                 bottleneck_factor=4, squeeze_excitation=True, squeeze_excitation_bottleneck_factor=4):
+                 bottleneck_factor=4, squeeze_excitation=True, squeeze_excitation_bottleneck_factor=4,
+                 dropout=0.0):
         super(ResNetBackbone, self).__init__()
         assert kernel_size % 2 == 1, "kernel size must be odd"
         self.pyramid_height = len(blocks)
@@ -190,12 +217,14 @@ class ResNetBackbone(torch.nn.Module):
 
         self.conv_down.append(ResConv1D(hidden_channels, hidden_channels, blocks[0], downsample=False,
                                    bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
-                                   squeeze_excitation_bottleneck_factor=squeeze_excitation_bottleneck_factor))
+                                   squeeze_excitation_bottleneck_factor=squeeze_excitation_bottleneck_factor,
+                                   kernel_size=kernel_size, dropout=dropout))
         for i in range(self.pyramid_height - 1):
             self.conv_down.append(ResConv1D(hidden_channels * (2 ** i), hidden_channels * (2 ** (i + 1)),
                                             blocks[i + 1], downsample=True, bottleneck_factor=bottleneck_factor,
                                             squeeze_excitation=squeeze_excitation,
-                                            squeeze_excitation_bottleneck_factor=squeeze_excitation_bottleneck_factor))
+                                            squeeze_excitation_bottleneck_factor=squeeze_excitation_bottleneck_factor,
+                                            kernel_size=kernel_size, dropout=dropout))
 
     def forward(self, x, downsampling_method: list[int]):
         assert len(downsampling_method) == self.pyramid_height, "downsampling method must be specified for each level"
@@ -214,11 +243,11 @@ class ResNetBackbone(torch.nn.Module):
 class Unet(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, kernel_size, blocks=[2, 3, 4, 6, 10, 15, 15],
                  bottleneck_factor=4, squeeze_excitation=True, squeeze_excitation_bottleneck_factor=4,
-                 odd_random_shift_training=True):
+                 odd_random_shift_training=True, dropout=0.0):
         super(Unet, self).__init__()
         assert kernel_size % 2 == 1, "kernel size must be odd"
         self.backbone = ResNetBackbone(in_channels, hidden_channels, kernel_size, blocks, bottleneck_factor,
-                                       squeeze_excitation, squeeze_excitation_bottleneck_factor)
+                                       squeeze_excitation, squeeze_excitation_bottleneck_factor, dropout=dropout)
         self.pyramid_height = len(blocks)
 
         self.upsample_conv = torch.nn.ModuleList()
@@ -242,10 +271,13 @@ class Unet(torch.nn.Module):
             self.cat_norms.append(torch.nn.InstanceNorm1d(hidden_channels * (2 ** k)))
 
         self.nonlin = torch.nn.GELU()
+        if dropout > 0.0:
+            self.dropout = torch.nn.Dropout1d(dropout)
 
         self.final_conv = torch.nn.Conv1d(hidden_channels, 1, kernel_size=kernel_size, bias=False, padding="same", padding_mode="replicate")
 
         self.odd_random_shift_training = odd_random_shift_training
+        self.use_dropout = dropout > 0.0
 
     def upsample(self, x, downsampling_method):
         if downsampling_method == 0:
@@ -293,6 +325,8 @@ class Unet(torch.nn.Module):
             # convolve and normalize
             x = self.upsample_norms[-(i + 1)](self.upsample_conv[-(i + 1)](x))
             x = self.nonlin(x)
+            if (i < 2) and self.use_dropout:
+                x = self.dropout(x)
             # concatenate
             x = torch.cat([
                 x,
@@ -301,6 +335,8 @@ class Unet(torch.nn.Module):
             # convolve and normalize
             x = self.cat_norms[-(i + 1)](self.cat_conv[-(i + 1)](x))
             x = self.nonlin(x)
+            if (i < 2) and self.use_dropout:
+                x = self.dropout(x)
 
         # final conv
         x = self.final_conv(x)
