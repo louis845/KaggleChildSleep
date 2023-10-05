@@ -21,17 +21,24 @@ import logging_memory_utils
 import convert_to_h5py_naive
 import convert_to_h5py_splitted
 import model_unet
+import kaggle_ap_detection
+import prediction_event_generator
 
 def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor):
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
     bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
-    return torch.sum(((torch.sigmoid(preds) - ground_truth) ** 2) * bce) / 461900.0 # mean length as shown in check_series_properties.py
+    with torch.no_grad():
+        weight = ground_truth * (positive_weight - 1) + 1
+    assert weight.shape == bce.shape, "weight.shape = {}, bce.shape = {}".format(weight.shape, bce.shape)
+    return torch.sum(
+        ((torch.sigmoid(preds) - ground_truth) ** 2) * bce * weight
+    ) / 461900.0 # mean length as shown in check_series_properties.py
 
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
                             accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
     optimizer_.zero_grad()
-    pred_logits = model_(accel_data_batch) # shape (batch_size, 1, T), where batch_size = 1
+    pred_logits = model_(accel_data_batch) # shape (batch_size, 2, T), where batch_size = 1
     loss = focal_loss(pred_logits, labels_batch)
     loss.backward()
     optimizer_.step()
@@ -43,62 +50,69 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
 
 def sample_cutmix(batch_entry, num_mix, extra_shuffle_indices, k):
     accel_data_batch_list = []
-    labels_batch_list = []
+    events_list = []
     current_length = 0
-
-    # cutmix with 50% probability
-    """if (np.random.rand() < 0.5):
-        accel_data_batch_list.append(all_data[batch_entry]["accel"])
-        labels_batch_list.append(all_data[batch_entry]["sleeping_timesteps"])
-        current_length += accel_data_batch_list[-1].shape[-1]"""
 
     is_event = np.random.rand() < 0.5
     while current_length < length:
-        type_file = "event.csv" if is_event else "non_event.csv"
+        type_event = "event" if is_event else "non_event"
 
         appended = False
         while not appended:
             choice = np.random.randint(0, num_mix)
-            try:
-                if choice == 0:
-                    intervals = pd.read_csv(os.path.join(convert_to_h5py_splitted.FOLDER,
-                                                         batch_entry,
-                                                         type_file), header=None)
-                else:
-                    intervals = pd.read_csv(os.path.join(convert_to_h5py_splitted.FOLDER,
-                                                         training_entries[extra_shuffle_indices[choice - 1][k]],
-                                                         type_file), header=None)
-            except pd.errors.EmptyDataError:
-                continue
+            if choice == 0:
+                intervals = all_data_events[batch_entry][type_event]
+            else:
+                intervals = all_data_events[extra_shuffle_indices[choice - 1][k]][type_event]
             num_intervals = len(intervals)
-            intervals_np = intervals.to_numpy(dtype=np.int32)
+            if len(intervals) == 0:
+                continue
 
-            intervals = intervals_np
             interval = intervals[np.random.randint(0, num_intervals)]
 
             low = interval[0]
             high = interval[1]
             max_diff = min(int(high - low) // 4, 720)
-            if is_event:
-                low += np.random.randint(-max_diff, max_diff + 1)
-                high += np.random.randint(-max_diff, max_diff + 1)
-            else:
-                low += np.random.randint(0, max_diff)
-                high -= np.random.randint(0, max_diff)
+            low += np.random.randint(0, max_diff)
+            high -= np.random.randint(0, max_diff)
 
             accel_data_batch_list.append(all_data[batch_entry]["accel"][:, low:high])
-            labels_batch_list.append(all_data[batch_entry]["sleeping_timesteps"][low:high])
+            events_list.append(is_event)
             appended = True
 
         is_event = not is_event
         current_length += accel_data_batch_list[-1].shape[-1]
 
     accel_data_batch = np.concatenate(accel_data_batch_list, axis=-1)
-    labels_batch = np.concatenate(labels_batch_list, axis=-1)
+    labels_batch = np.zeros(shape=(2, accel_data_batch.shape[-1]), dtype=np.int32) # first dimension is onset, wakeup
+    current_length = accel_data_batch.shape[-1]
 
+    cum_length = 0
+    for k in range(len(events_list)):
+        if events_list[k]:
+            onset = cum_length
+            wakeup = onset + accel_data_batch_list[k].shape[-1]
+
+            for tolerance in tolerances:
+                onset_low = max(onset - tolerance + 1, 0)
+                onset_high = min(onset + tolerance, current_length)
+
+                wakeup_low = max(wakeup - tolerance + 1, 0)
+                wakeup_high = min(wakeup + tolerance, current_length)
+
+                if onset_low < onset_high:
+                    labels_batch[0, onset_low:onset_high] = labels_batch[0, onset_low:onset_high] + 1
+
+                if wakeup_low < wakeup_high:
+                    labels_batch[1, wakeup_low:wakeup_high] = labels_batch[1, wakeup_low:wakeup_high] + 1
+
+        cum_length += accel_data_batch_list[k].shape[-1]
+    labels_batch = labels_batch.astype(np.float32) / len(tolerances)
+
+    # randomly pick a segment to match length
     left_erosion = np.random.randint(0, accel_data_batch.shape[-1] - length + 1)
     accel_data_batch = accel_data_batch[:, left_erosion:(left_erosion + length)]
-    labels_batch = labels_batch[left_erosion:(left_erosion + length)]
+    labels_batch = labels_batch[:, left_erosion:(left_erosion + length)]
 
     return accel_data_batch, labels_batch
 
@@ -109,55 +123,38 @@ def training_step(record: bool):
 
     # shuffle
     shuffle_indices = np.random.permutation(len(training_entries))
-    if use_cutmix_training:
-        num_mix = 11
-        extra_shuffle_indices = [np.random.permutation(len(training_entries)) for _ in range(num_mix - 1)]
+    num_mix = 11
+    extra_shuffle_indices = [np.random.permutation(len(training_entries)) for _ in range(num_mix - 1)]
 
     # training
     trained = 0
     with tqdm.tqdm(total=len(shuffle_indices)) as pbar:
         for k in range(len(shuffle_indices)):
             batch_entry = training_entries[shuffle_indices[k]] # series ids
-            # load the batch
-            if use_cutmix_training:
-                accel_data_batch, labels_batch = sample_cutmix(batch_entry, num_mix, extra_shuffle_indices, k)
-                if use_mixup_training:
-                    accel_data_batch2, labels_batch2 = sample_cutmix(batch_entry, num_mix, extra_shuffle_indices, k)
-                    labels_batch = labels_batch.astype(np.float32)
-                    labels_batch2 = labels_batch2.astype(np.float32)
+            accel_data_batch, labels_batch = sample_cutmix(batch_entry, num_mix, extra_shuffle_indices, k)
+            accel_data_batch2, labels_batch2 = sample_cutmix(batch_entry, num_mix, extra_shuffle_indices, k)
 
-                    lam = np.random.beta(0.2, 0.2)
-                    accel_data_batch = lam * accel_data_batch + (1 - lam) * accel_data_batch2
-                    labels_batch = lam * labels_batch + (1 - lam) * labels_batch2
-            else:
-                accel_data_batch = all_data[batch_entry]["accel"]
-                labels_batch = all_data[batch_entry]["sleeping_timesteps"]
-                """accel_data_batch = np.random.rand(2, 1000000)
-                labels_batch = np.random.randint(0, 2, size=(1000000,)).astype(np.float32)"""
+            lam = np.random.beta(0.2, 0.2)
+            accel_data_batch = lam * accel_data_batch + (1 - lam) * accel_data_batch2
+            labels_batch = lam * labels_batch + (1 - lam) * labels_batch2
 
-            # randomly pick a segment to match length
-            left_erosion = np.random.randint(0, accel_data_batch.shape[-1] - length + 1)
-            accel_data_batch = accel_data_batch[:, left_erosion:(left_erosion + length)]
-            labels_batch = labels_batch[left_erosion:(left_erosion + length)]
+            accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
+            labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
 
-            accel_data_batch_torch = torch.zeros(size=(2, length), dtype=torch.float32, device=config.device)
-            labels_batch_torch = torch.zeros(size=(length,), dtype=torch.float32, device=config.device)
-            accel_data_batch_torch.copy_(torch.from_numpy(accel_data_batch), non_blocking=True)
-            labels_batch_torch.copy_(torch.from_numpy(labels_batch), non_blocking=True)
-            accel_data_batch_torch = accel_data_batch_torch.unsqueeze(0)
-            labels_batch_torch = labels_batch_torch.unsqueeze(0).unsqueeze(0)
+            accel_data_batch = accel_data_batch.unsqueeze(0)
+            labels_batch = labels_batch.unsqueeze(0)
 
             # train model now
             loss, preds = single_training_step(model, optimizer,
-                                               accel_data_batch_torch,
-                                               labels_batch_torch)
+                                               accel_data_batch,
+                                               labels_batch)
             time.sleep(0.15)
 
             # record
             if record:
                 with torch.no_grad():
                     train_metrics["loss"].add(loss, 1)
-                    train_metrics["metric"].add(preds, (labels_batch_torch > 0.5).to(torch.long))
+                    train_metrics["metric"].add(preds, (labels_batch > 0.5).to(torch.long))
 
             trained += 1
             pbar.update(1)
@@ -177,8 +174,9 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
     pred_logits = pred_logits[..., pad_left:(pred_logits.shape[-1] - pad_right)]
     loss = focal_loss(pred_logits, labels_batch)
     preds = pred_logits > 0.0
+    pred_probas = torch.sigmoid(pred_logits)
 
-    return loss.item(), preds.to(torch.long)
+    return loss.item(), preds.to(torch.long), pred_probas
 
 def validation_step():
     for key in val_metrics:
@@ -191,9 +189,29 @@ def validation_step():
 
             # load the batch
             accel_data_batch = all_data[batch_entry]["accel"]
-            labels_batch = all_data[batch_entry]["sleeping_timesteps"]
+            labels_batch = np.zeros(shape=(2, accel_data_batch.shape[-1]), dtype=np.int32)  # first dimension is onset, wakeup
+
+            # load the events
+            for event in all_data[batch_entry]["event"]:
+                onset = event[0]
+                wakeup = event[1]
+
+                for tolerance in tolerances:
+                    onset_low = max(onset - tolerance + 1, 0)
+                    onset_high = min(onset + tolerance, accel_data_batch.shape[-1])
+
+                    wakeup_low = max(wakeup - tolerance + 1, 0)
+                    wakeup_high = min(wakeup + tolerance, accel_data_batch.shape[-1])
+
+                    if onset_low < onset_high:
+                        labels_batch[0, onset_low:onset_high] = labels_batch[0, onset_low:onset_high] + 1
+
+                    if wakeup_low < wakeup_high:
+                        labels_batch[1, wakeup_low:wakeup_high] = labels_batch[1, wakeup_low:wakeup_high] + 1
+            labels_batch = labels_batch.astype(np.float32) / len(tolerances)
+
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device).unsqueeze(0)
-            labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
+            labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device).unsqueeze(0)
 
             # pad such that lengths is a multiple of 16
             pad_length = 16 - (accel_data_batch.shape[-1] % 16)
@@ -203,13 +221,13 @@ def validation_step():
             pad_right = pad_length - pad_left
 
             # train model now
-            loss, preds = single_validation_step(model, accel_data_batch, labels_batch, pad_left, pad_right)
+            loss, preds, pred_probas = single_validation_step(model, accel_data_batch, labels_batch, pad_left, pad_right)
 
             # record
             with torch.no_grad():
                 val_metrics["loss"].add(loss, 1)
-                val_metrics["metric"].add(preds, labels_batch.to(torch.long))
-
+                val_metrics["metric"].add(preds, (labels_batch > 0.5).to(torch.long))
+                val_events_gen.record(batch_entry, pred_probas, tolerances)
             pbar.update(1)
 
     current_metrics = {}
@@ -219,6 +237,18 @@ def validation_step():
     for key in current_metrics:
         val_history[key].append(current_metrics[key])
 
+    ctime = time.time()
+    val_events_preds = val_events_gen.convert_to_df()
+    ap_score = kaggle_ap_detection.score(solution=val_events_ground_truth,
+                              submission=val_events_preds,
+                              tolerances={"onset": tolerances, "wakeup": tolerances},
+                              series_id_column_name="series_id",
+                              time_column_name="step",
+                              event_column_name="event",
+                              score_column_name="score")
+    val_history["val_ap"].append(ap_score)
+    print("AP computation time elapsed: {}".format(time.time() - ctime))
+
 def print_history(metrics_history):
     for key in metrics_history:
         print("{}      {}".format(key, metrics_history[key][-1]))
@@ -227,6 +257,8 @@ if __name__ == "__main__":
     multiprocessing.set_start_method("spawn")
 
     all_data = convert_to_h5py_naive.load_all_data_into_dict()
+    all_data_events = convert_to_h5py_splitted.load_all_data_into_dict()
+    tolerances = [12, 36, 60, 90, 120, 150, 180, 240, 300, 360]
 
     parser = argparse.ArgumentParser(description="Train a injury prediction model.")
     parser.add_argument("--epochs", type=int, default=100, help="Number of epochs to train for. Default 100.")
@@ -241,11 +273,10 @@ if __name__ == "__main__":
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
     parser.add_argument("--disable_odd_random_shift", action="store_true", help="Whether to disable odd random shift. Default False.")
-    parser.add_argument("--use_cutmix_training", action="store_true", help="Whether to use cutmix training. Default False.")
-    parser.add_argument("--use_mixup_training", action="store_true", help="Whether to use mixup training. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
     parser.add_argument("--length", default=700000, help="The fixed length of the training. Default 700000.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
+    parser.add_argument("--positive_weight", type=float, default=1.0, help="Positive weight")
     manager_folds.add_argparse_arguments(parser)
     manager_models.add_argparse_arguments(parser)
     config.add_argparse_arguments(parser)
@@ -257,6 +288,9 @@ if __name__ == "__main__":
     assert type(validation_entries) == list
     print("Training dataset: {}".format(train_dset_name))
     print("Validation dataset: {}".format(val_dset_name))
+    val_events_ground_truth = pd.read_csv(os.path.join("data", "train_events.csv")).dropna()
+    val_events_ground_truth = val_events_ground_truth.loc[val_events_ground_truth["series_id"].isin(validation_entries)]
+    assert set(val_events_ground_truth["series_id"].unique()).issubset(set(validation_entries))
 
     # initialize gpu
     config.parse_args(args)
@@ -276,11 +310,10 @@ if __name__ == "__main__":
     bottleneck_factor = args.bottleneck_factor
     squeeze_excitation = args.squeeze_excitation
     disable_odd_random_shift = args.disable_odd_random_shift
-    use_cutmix_training = args.use_cutmix_training
-    use_mixup_training = args.use_mixup_training
     dropout = args.dropout
     length = args.length
     num_extra_steps = args.num_extra_steps
+    positive_weight = args.positive_weight
 
     print("Epochs: " + str(epochs))
     print("Learning rate: " + str(learning_rate))
@@ -294,7 +327,7 @@ if __name__ == "__main__":
     model = model_unet.Unet(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
                             bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                             squeeze_excitation_bottleneck_factor=4, odd_random_shift_training=(not disable_odd_random_shift),
-                            dropout=dropout)
+                            dropout=dropout, out_channels=2)
     model = model.to(config.device)
 
     # initialize optimizer
@@ -302,6 +335,7 @@ if __name__ == "__main__":
     print("Momentum: " + str(momentum))
     print("Second momentum: " + str(second_momentum))
     print("Optimizer: " + optimizer_type)
+    print("Positive weight: " + str(positive_weight))
     if optimizer_type.lower() == "adam":
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, betas=(momentum, second_momentum))
     elif optimizer_type.lower() == "sgd":
@@ -331,7 +365,7 @@ if __name__ == "__main__":
                 g["momentum"] = momentum
 
     model_config = {
-        "model": "Naive deep learning segmentation approach",
+        "model": "Event deep learning segmentation approach",
         "epochs": epochs,
         "learning_rate": learning_rate,
         "momentum": momentum,
@@ -343,11 +377,10 @@ if __name__ == "__main__":
         "bottleneck_factor": bottleneck_factor,
         "squeeze_excitation": squeeze_excitation,
         "disable_odd_random_shift": disable_odd_random_shift,
-        "use_cutmix_training": use_cutmix_training,
-        "use_mixup_training": use_mixup_training,
         "dropout": dropout,
         "length": length,
         "num_extra_steps": num_extra_steps,
+        "positive_weight": positive_weight
     }
 
     # Save the model config
@@ -363,19 +396,10 @@ if __name__ == "__main__":
     train_metrics["metric"] = metrics.BinaryMetrics("train_metric")
     val_metrics["loss"] = metrics.NumericalMetric("val_loss")
     val_metrics["metric"] = metrics.BinaryMetrics("val_metric")
+    val_events_gen = prediction_event_generator.EventsRecorder()
 
     # Compile
     #single_training_step_compile = torch.compile(single_training_step)
-
-    # Initialize the async sampler if necessary
-    print("Using cutmix training: {}".format(use_cutmix_training))
-    print("Using mixup training: {}".format(use_mixup_training))
-    print("Length: {}".format(length))
-    if not use_cutmix_training:
-        for series_id in all_data:
-            assert all_data[series_id]["accel"].shape[-1] >= length
-    if use_mixup_training:
-        assert use_cutmix_training, "Mixup training requires cutmix training"
 
     # Start training loop
     print("Training for {} epochs......".format(epochs))

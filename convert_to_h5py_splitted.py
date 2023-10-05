@@ -8,6 +8,35 @@ import numpy as np
 
 FOLDER = "data_splitted"
 
+def load_all_data_into_dict():
+    all_data = {}
+    for series_id in os.listdir(FOLDER):
+        events_file = os.path.join(FOLDER, series_id, "event.csv")
+        non_events_file = os.path.join(FOLDER, series_id, "non_event.csv")
+
+        all_data[series_id] = {}
+
+        # load events
+        all_data[series_id]["event"] = []
+        try:
+            intervals = pd.read_csv(events_file, header=None).to_numpy(dtype=np.int32)
+            for k in range(intervals.shape[0]):
+                start, end = intervals[k, :]
+                all_data[series_id]["event"].append((start, end))
+        except pd.errors.EmptyDataError:
+            pass
+
+        # load non-events
+        all_data[series_id]["non_event"] = []
+        try:
+            intervals = pd.read_csv(non_events_file, header=None).to_numpy(dtype=np.int32)
+            for k in range(intervals.shape[0]):
+                start, end = intervals[k, :]
+                all_data[series_id]["non_event"].append((start, end))
+        except pd.errors.EmptyDataError:
+            pass
+    return all_data
+
 if __name__ == "__main__":
     # Ensure the input directory exists
     assert os.path.exists("individual_train_series"), "You should run extract_individual_series.py before this"

@@ -243,7 +243,8 @@ class ResNetBackbone(torch.nn.Module):
 class Unet(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, kernel_size, blocks=[2, 3, 4, 6, 10, 15, 15],
                  bottleneck_factor=4, squeeze_excitation=True, squeeze_excitation_bottleneck_factor=4,
-                 odd_random_shift_training=True, dropout=0.0):
+                 odd_random_shift_training=True, dropout=0.0,
+                 out_channels=1):
         super(Unet, self).__init__()
         assert kernel_size % 2 == 1, "kernel size must be odd"
         self.backbone = ResNetBackbone(in_channels, hidden_channels, kernel_size, blocks, bottleneck_factor,
@@ -274,7 +275,7 @@ class Unet(torch.nn.Module):
         if dropout > 0.0:
             self.dropout = torch.nn.Dropout1d(dropout)
 
-        self.final_conv = torch.nn.Conv1d(hidden_channels, 1, kernel_size=kernel_size, bias=False, padding="same", padding_mode="replicate")
+        self.final_conv = torch.nn.Conv1d(hidden_channels, out_channels, kernel_size=kernel_size, bias=False, padding="same", padding_mode="replicate")
 
         self.odd_random_shift_training = odd_random_shift_training
         self.use_dropout = dropout > 0.0
