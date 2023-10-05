@@ -17,8 +17,8 @@ def generate_event_predictions(pred_probas, tolerances: list[int]):
     onset_order = np.argsort(onset_probas)
     wakeup_order = np.argsort(wakeup_probas)
 
-    # get the top 1% of predictions
-    pred_upper_bound = int(total_time * 0.01)
+    # get the top 1000 predictions
+    pred_upper_bound = 1000
     onset_top = onset_order[-pred_upper_bound:]
     wakeup_top = wakeup_order[-pred_upper_bound:]
 

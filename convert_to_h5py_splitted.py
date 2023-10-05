@@ -11,6 +11,8 @@ FOLDER = "data_splitted"
 def load_all_data_into_dict():
     all_data = {}
     for series_id in os.listdir(FOLDER):
+        if series_id == "summary.txt":
+            continue
         events_file = os.path.join(FOLDER, series_id, "event.csv")
         non_events_file = os.path.join(FOLDER, series_id, "non_event.csv")
 

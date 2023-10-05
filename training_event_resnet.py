@@ -63,7 +63,9 @@ def sample_cutmix(batch_entry, num_mix, extra_shuffle_indices, k):
             if choice == 0:
                 intervals = all_data_events[batch_entry][type_event]
             else:
-                intervals = all_data_events[extra_shuffle_indices[choice - 1][k]][type_event]
+                intervals = all_data_events[
+                    training_entries[extra_shuffle_indices[choice - 1][k]]
+                ][type_event]
             num_intervals = len(intervals)
             if len(intervals) == 0:
                 continue
@@ -170,13 +172,13 @@ def training_step(record: bool):
 def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tensor, labels_batch: torch.Tensor,
                            pad_left, pad_right):
     accel_data_batch = torch.nn.functional.pad(accel_data_batch, (pad_left, pad_right), mode="replicate")
-    pred_logits = model_(accel_data_batch)  # shape (batch_size, 1, T), where batch_size = 1
+    pred_logits = model_(accel_data_batch)  # shape (batch_size, 2, T), where batch_size = 1
     pred_logits = pred_logits[..., pad_left:(pred_logits.shape[-1] - pad_right)]
     loss = focal_loss(pred_logits, labels_batch)
     preds = pred_logits > 0.0
     pred_probas = torch.sigmoid(pred_logits)
 
-    return loss.item(), preds.to(torch.long), pred_probas
+    return loss.item(), preds.to(torch.long), pred_probas.squeeze(0)
 
 def validation_step():
     for key in val_metrics:
@@ -192,7 +194,7 @@ def validation_step():
             labels_batch = np.zeros(shape=(2, accel_data_batch.shape[-1]), dtype=np.int32)  # first dimension is onset, wakeup
 
             # load the events
-            for event in all_data[batch_entry]["event"]:
+            for event in all_data_events[batch_entry]["event"]:
                 onset = event[0]
                 wakeup = event[1]
 
@@ -248,6 +250,7 @@ def validation_step():
                               score_column_name="score")
     val_history["val_ap"].append(ap_score)
     print("AP computation time elapsed: {}".format(time.time() - ctime))
+    val_events_gen.clear_events()
 
 def print_history(metrics_history):
     for key in metrics_history:
