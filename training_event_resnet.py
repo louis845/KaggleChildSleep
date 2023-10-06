@@ -109,7 +109,7 @@ def sample_cutmix(batch_entry, num_mix, extra_shuffle_indices, k):
                     labels_batch[1, wakeup_low:wakeup_high] = labels_batch[1, wakeup_low:wakeup_high] + 1
 
         cum_length += accel_data_batch_list[k].shape[-1]
-    labels_batch = labels_batch.astype(np.float32) / len(tolerances)
+    labels_batch = (labels_batch > 0).astype(np.float32)
 
     # randomly pick a segment to match length
     left_erosion = np.random.randint(0, accel_data_batch.shape[-1] - length + 1)
@@ -210,7 +210,7 @@ def validation_step():
 
                     if wakeup_low < wakeup_high:
                         labels_batch[1, wakeup_low:wakeup_high] = labels_batch[1, wakeup_low:wakeup_high] + 1
-            labels_batch = labels_batch.astype(np.float32) / len(tolerances)
+            labels_batch = (labels_batch > 0).astype(np.float32)
 
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device).unsqueeze(0)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device).unsqueeze(0)
@@ -229,7 +229,8 @@ def validation_step():
             with torch.no_grad():
                 val_metrics["loss"].add(loss, 1)
                 val_metrics["metric"].add(preds, (labels_batch > 0.5).to(torch.long))
-                val_events_gen.record(batch_entry, pred_probas, tolerances)
+                if epoch % epochs_per_ap == 0:
+                    val_events_gen.record(batch_entry, pred_probas, tolerances)
             pbar.update(1)
 
     current_metrics = {}
@@ -239,18 +240,21 @@ def validation_step():
     for key in current_metrics:
         val_history[key].append(current_metrics[key])
 
-    ctime = time.time()
-    val_events_preds = val_events_gen.convert_to_df()
-    ap_score = kaggle_ap_detection.score(solution=val_events_ground_truth,
-                              submission=val_events_preds,
-                              tolerances={"onset": tolerances, "wakeup": tolerances},
-                              series_id_column_name="series_id",
-                              time_column_name="step",
-                              event_column_name="event",
-                              score_column_name="score")
-    val_history["val_ap"].append(ap_score)
-    print("AP computation time elapsed: {}".format(time.time() - ctime))
-    val_events_gen.clear_events()
+    if epoch % epochs_per_ap == 0:
+        ctime = time.time()
+        val_events_preds = val_events_gen.convert_to_df()
+        ap_score = kaggle_ap_detection.score(solution=val_events_ground_truth,
+                                  submission=val_events_preds,
+                                  tolerances={"onset": tolerances, "wakeup": tolerances},
+                                  series_id_column_name="series_id",
+                                  time_column_name="step",
+                                  event_column_name="event",
+                                  score_column_name="score")
+        val_history["val_ap"].append(ap_score)
+        print("AP computation time elapsed: {}".format(time.time() - ctime))
+        val_events_gen.clear_events()
+    else:
+        val_history["val_ap"].append(0.0)
 
 def print_history(metrics_history):
     for key in metrics_history:
@@ -270,6 +274,7 @@ if __name__ == "__main__":
     parser.add_argument("--second_momentum", type=float, default=0.999, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
     parser.add_argument("--optimizer", type=str, default="adam", help="Which optimizer to use. Available options: adam, sgd. Default adam.")
     parser.add_argument("--epochs_per_save", type=int, default=2, help="Number of epochs between saves. Default 2.")
+    parser.add_argument("--epochs_per_ap", type=int, default=3, help="Number of epochs between AP computation. Default 2.")
     parser.add_argument("--hidden_blocks", type=int, nargs="+", default=[1, 6, 8, 23, 8],
                         help="Number of hidden 2d blocks for ResNet backbone.")
     parser.add_argument("--hidden_channels", type=int, default=32, help="Number of hidden channels. Default None.")
@@ -308,6 +313,7 @@ if __name__ == "__main__":
     second_momentum = args.second_momentum
     optimizer_type = args.optimizer
     epochs_per_save = args.epochs_per_save
+    epochs_per_ap = args.epochs_per_ap
     hidden_blocks = args.hidden_blocks
     hidden_channels = args.hidden_channels
     bottleneck_factor = args.bottleneck_factor
@@ -375,6 +381,7 @@ if __name__ == "__main__":
         "second_momentum": second_momentum,
         "optimizer": optimizer_type,
         "epochs_per_save": epochs_per_save,
+        "epochs_per_ap": epochs_per_ap,
         "hidden_blocks": hidden_blocks,
         "hidden_channels": hidden_channels,
         "bottleneck_factor": bottleneck_factor,
