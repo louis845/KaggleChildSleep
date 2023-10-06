@@ -11,7 +11,85 @@ import numpy as np
 FOLDER = "data_good_events"
 
 class GoodEvents:
-    def __init__(self, data_dict):
+    def __init__(self, data_dict, entries_sublist: list[str], is_train=True, load_ending_entries=False):
+        self.is_train = is_train
+        if is_train:
+            self.relevant_data = []
+            for series_id in entries_sublist:
+                if series_id not in data_dict:
+                    raise ValueError("Series {} not found in data_dict".format(series_id))
+                for low, high in data_dict[series_id]["event"]:
+                    self.relevant_data.append((low, high + 1, "event", series_id))
+                for low, high in data_dict[series_id]["non_event"]:
+                    if low == 0:
+                        self.relevant_data.append((0, high, "non_event", series_id))
+                    else:
+                        self.relevant_data.append((low + 1, high, "non_event", series_id))
+            self.current_shuffle = None
+            self.current_index = 0
+        else:
+            self.relevant_data = {}
+            for series_id in entries_sublist:
+                if series_id not in data_dict:
+                    raise ValueError("Series {} not found in data_dict".format(series_id))
+                self.relevant_data[series_id] = []
+                for low, high in data_dict[series_id]["event"]:
+                    self.relevant_data[series_id].append((low, high + 1))
+                for low, high in data_dict[series_id]["non_event"]:
+                    if low == 0:
+                        self.relevant_data[series_id].append((0, high))
+                    else:
+                        self.relevant_data[series_id].append((low + 1, high))
+
+    def shuffle(self):
+        assert self.is_train, "You can only shuffle the training set"
+        self.current_shuffle = np.random.permutation(len(self.relevant_data))
+        self.current_index = 0
+
+    def get_next(self, target_length: int, all_series_data: dict) -> tuple[np.ndarray, np.ndarray, int]:
+        assert self.is_train, "You can only get_next on the training set"
+
+        accel_data_batch_list = []
+        labels_batch_list = []
+        current_length = 0
+
+        original_current_index = self.current_index
+        while current_length < target_length:
+            if self.current_index >= len(self.relevant_data):
+                # randomly pick
+                low, high, event_type, series_id = self.relevant_data[np.random.randint(0, len(self.relevant_data))]
+            else:
+                low, high, event_type, series_id = self.relevant_data[self.current_index]
+                self.current_index += 1
+            max_diff = min(int(high - low) // 4, 1440)
+            low += np.random.randint(0, max_diff)
+            high -= np.random.randint(0, max_diff)
+
+            accel_data_batch_list.append(all_series_data[series_id]["accel"][:, low:high])
+            labels_batch_list.append(all_series_data[series_id]["sleeping_timesteps"][low:high])
+
+            current_length += accel_data_batch_list[-1].shape[-1]
+
+        accel_data_batch = np.concatenate(accel_data_batch_list, axis=-1)
+        labels_batch = np.concatenate(labels_batch_list, axis=-1)
+
+        left_erosion = np.random.randint(0, accel_data_batch.shape[-1] - target_length + 1)
+        accel_data_batch = accel_data_batch[:, left_erosion:(left_erosion + target_length)]
+        labels_batch = labels_batch[left_erosion:(left_erosion + target_length)]
+
+        return accel_data_batch, labels_batch, self.current_index - original_current_index
+
+    def series_remaining(self) -> int:
+        assert self.is_train, "You can only get_next on the training set"
+        return len(self.relevant_data) - self.current_index
+
+    def get_series_mask(self, series_id: str, all_series_data: dict) -> np.ndarray:
+        assert not self.is_train, "You can only get_series_mask on the validation set"
+        gt = all_series_data[series_id]["sleeping_timesteps"]
+        mask = np.zeros(gt.shape, dtype=np.float32)
+        for low, high in self.relevant_data[series_id]:
+            mask[low:high] = 1.0
+        return mask
 
 
 def load_all_data_into_dict():
