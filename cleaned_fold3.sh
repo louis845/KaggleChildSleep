@@ -1,1 +1,1 @@
-python training_clean_data.py --device 1 --model model_fold3_clean --train_data fold_3_train --val_data fold_3_val --num_extra_steps 9 --hidden_channels 8 --hidden_blocks 4 6 8 12 8 --squeeze_excitation --use_mixup_training
+python training_clean_data.py --device 1 --model model_fold3_clean --train_data fold_3_train --val_data fold_3_val --num_extra_steps 9 --hidden_channels 8 --hidden_blocks 4 6 8 12 8 --squeeze_excitation --use_mixup_training --dropout 0.5 --optimizer sgd

@@ -11,16 +11,31 @@ import numpy as np
 FOLDER = "data_good_events"
 
 class GoodEvents:
-    def __init__(self, data_dict, entries_sublist: list[str], is_train=True, load_ending_entries=False):
+    def __init__(self, data_dict, entries_sublist: list[str], is_train=True,
+                 load_tail_entries=False, load_head_entries=False, min_headtail_length=1440):
         self.is_train = is_train
         if is_train:
             self.relevant_data = []
             for series_id in entries_sublist:
                 if series_id not in data_dict:
                     raise ValueError("Series {} not found in data_dict".format(series_id))
-                for low, high in data_dict[series_id]["event"]:
+                for low, high, pos in data_dict[series_id]["event"]:
+                    if (not load_head_entries) and (pos == "head"):
+                        continue
+                    if (not load_tail_entries) and (pos == "tail"):
+                        continue
+                    if (high - low < min_headtail_length) and (pos != "middle"):
+                        continue
+
                     self.relevant_data.append((low, high + 1, "event", series_id))
-                for low, high in data_dict[series_id]["non_event"]:
+                for low, high, pos in data_dict[series_id]["non_event"]:
+                    if (not load_head_entries) and (pos == "head"):
+                        continue
+                    if (not load_tail_entries) and (pos == "tail"):
+                        continue
+                    if (high - low < min_headtail_length) and (pos != "middle"):
+                        continue
+
                     if low == 0:
                         self.relevant_data.append((0, high, "non_event", series_id))
                     else:
@@ -33,9 +48,23 @@ class GoodEvents:
                 if series_id not in data_dict:
                     raise ValueError("Series {} not found in data_dict".format(series_id))
                 self.relevant_data[series_id] = []
-                for low, high in data_dict[series_id]["event"]:
+                for low, high, pos in data_dict[series_id]["event"]:
+                    if (not load_head_entries) and (pos == "head"):
+                        continue
+                    if (not load_tail_entries) and (pos == "tail"):
+                        continue
+                    if (high - low < min_headtail_length) and (pos != "middle"):
+                        continue
+
                     self.relevant_data[series_id].append((low, high + 1))
-                for low, high in data_dict[series_id]["non_event"]:
+                for low, high, pos in data_dict[series_id]["non_event"]:
+                    if (not load_head_entries) and (pos == "head"):
+                        continue
+                    if (not load_tail_entries) and (pos == "tail"):
+                        continue
+                    if (high - low < min_headtail_length) and (pos != "middle"):
+                        continue
+
                     if low == 0:
                         self.relevant_data[series_id].append((0, high))
                     else:
@@ -105,20 +134,20 @@ def load_all_data_into_dict():
         # load events
         all_data[series_id]["event"] = []
         try:
-            intervals = pd.read_csv(events_file, header=None).to_numpy(dtype=np.int32)
+            intervals = pd.read_csv(events_file, header=None).to_numpy(dtype="object")
             for k in range(intervals.shape[0]):
-                start, end = intervals[k, :]
-                all_data[series_id]["event"].append((start, end))
+                start, end, position = intervals[k, :]
+                all_data[series_id]["event"].append((int(start), int(end), position))
         except pd.errors.EmptyDataError:
             pass
 
         # load non-events
         all_data[series_id]["non_event"] = []
         try:
-            intervals = pd.read_csv(non_events_file, header=None).to_numpy(dtype=np.int32)
+            intervals = pd.read_csv(non_events_file, header=None).to_numpy(dtype="object")
             for k in range(intervals.shape[0]):
-                start, end = intervals[k, :]
-                all_data[series_id]["non_event"].append((start, end))
+                start, end, position = intervals[k, :]
+                all_data[series_id]["non_event"].append((int(start), int(end), position))
         except pd.errors.EmptyDataError:
             pass
     return all_data
@@ -186,7 +215,7 @@ if __name__ == "__main__":
                                 min_non_event_series_id = series_id
                             if cur_event_length > np.max(non_event_lengths_history):
                                 max_non_event_series_id = series_id
-                        non_events_lowhigh.append((low, high))
+                        non_events_lowhigh.append((low, high, "tail"))
                         non_event_lengths_history.append(high - low)
                     else:
                         if min_event_series_id is None:
@@ -197,7 +226,7 @@ if __name__ == "__main__":
                                 min_event_series_id = series_id
                             if cur_event_length > np.max(event_lengths_history):
                                 max_event_series_id = series_id
-                        events_lowhigh.append((low, high))
+                        events_lowhigh.append((low, high, "tail"))
                         event_lengths_history.append(high - low)
                     lengths_history.append(high - low)
             else:
@@ -218,7 +247,10 @@ if __name__ == "__main__":
                                     min_non_event_series_id = series_id
                                 if cur_event_length > np.max(non_event_lengths_history):
                                     max_non_event_series_id = series_id
-                            non_events_lowhigh.append((low, high))
+                            if k == 0:
+                                non_events_lowhigh.append((low, high, "head"))
+                            else:
+                                non_events_lowhigh.append((low, high, "middle"))
                             non_event_lengths_history.append(cur_event_length)
                         else:
                             if min_event_series_id is None:
@@ -229,7 +261,7 @@ if __name__ == "__main__":
                                     min_event_series_id = series_id
                                 if cur_event_length > np.max(event_lengths_history):
                                     max_event_series_id = series_id
-                            events_lowhigh.append((low, high))
+                            events_lowhigh.append((low, high, "middle"))
                             event_lengths_history.append(cur_event_length)
                         lengths_history.append(cur_event_length)
                 if cur_has_event:
@@ -237,11 +269,11 @@ if __name__ == "__main__":
                 prev_has_event = cur_has_event
 
         # Save the non-events
-        non_events_lowhigh = np.array(non_events_lowhigh, dtype=np.int32)
+        non_events_lowhigh = np.array(non_events_lowhigh, dtype="object")
         pd.DataFrame(non_events_lowhigh).to_csv(series_non_event_file, index=False, header=False)
 
         # Save the events
-        events_lowhigh = np.array(events_lowhigh, dtype=np.int32)
+        events_lowhigh = np.array(events_lowhigh, dtype="object")
         pd.DataFrame(events_lowhigh).to_csv(series_event_file, index=False, header=False)
 
 

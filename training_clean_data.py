@@ -74,7 +74,7 @@ def training_step(record: bool):
             loss, preds = single_training_step(model, optimizer,
                                                accel_data_batch_torch,
                                                labels_batch_torch)
-            time.sleep(0.15)
+            time.sleep(0.3)
 
             # record
             if record:
@@ -306,7 +306,9 @@ if __name__ == "__main__":
                                                             training_entries)
     val_sampler = convert_to_good_events.GoodEvents(all_good_events,
                                                     validation_entries,
-                                                    is_train=False)
+                                                    is_train=False,
+                                                    load_head_entries=True,
+                                                    load_tail_entries=True)
 
 
     # Start training loop
