@@ -31,12 +31,32 @@ def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tens
     else:
         return torch.sum(((torch.sigmoid(preds) - ground_truth) ** 2) * bce * mask) / 461900.0
 
+def iou_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
+    ce_weight, epsilon = 0.1, 1.0
+    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
+    bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
+    probas = torch.sigmoid(preds)
+
+    if mask is None:
+        ce_loss = ce_weight * torch.mean(((probas - ground_truth) ** 2) * bce)
+        intersection = torch.sum(probas * ground_truth)
+        dice = (2.0 * intersection + epsilon) / (torch.sum(probas) + torch.sum(ground_truth) + epsilon)
+    else:
+        ce_loss = ce_weight * torch.mean(((probas - ground_truth) ** 2) * bce * mask)
+        intersection = torch.sum(probas * ground_truth * mask)
+        dice = (2.0 * intersection + epsilon) / (torch.sum(probas * mask) + torch.sum(ground_truth * mask) + epsilon)
+    dice_loss = 1.0 - dice
+    return ce_loss + dice_loss
+
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
                             accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
     optimizer_.zero_grad()
     pred_logits = model_(accel_data_batch) # shape (batch_size, 1, T), where batch_size = 1
-    loss = focal_loss(pred_logits, labels_batch)
+    if use_iou_loss:
+        loss = iou_loss(pred_logits, labels_batch)
+    else:
+        loss = focal_loss(pred_logits, labels_batch)
     loss.backward()
     optimizer_.step()
 
@@ -74,7 +94,7 @@ def training_step(record: bool):
             loss, preds = single_training_step(model, optimizer,
                                                accel_data_batch_torch,
                                                labels_batch_torch)
-            time.sleep(0.3)
+            time.sleep(0.2)
 
             # record
             if record:
@@ -98,8 +118,12 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
     accel_data_batch = torch.nn.functional.pad(accel_data_batch, (pad_left, pad_right), mode="replicate")
     pred_logits = model_(accel_data_batch)  # shape (batch_size, 1, T), where batch_size = 1
     pred_logits = pred_logits[..., pad_left:(pred_logits.shape[-1] - pad_right)]
-    loss = focal_loss(pred_logits, labels_batch)
-    masked_loss = focal_loss(pred_logits, labels_batch, mask)
+    if use_iou_loss:
+        loss = iou_loss(pred_logits, labels_batch)
+        masked_loss = iou_loss(pred_logits, labels_batch, mask)
+    else:
+        loss = focal_loss(pred_logits, labels_batch)
+        masked_loss = focal_loss(pred_logits, labels_batch, mask)
     preds = pred_logits > 0.0
 
     return loss.item(), preds.to(torch.long), masked_loss.item()
@@ -159,7 +183,7 @@ if __name__ == "__main__":
     all_good_events = convert_to_good_events.load_all_data_into_dict()
 
     parser = argparse.ArgumentParser(description="Train a injury prediction model.")
-    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs to train for. Default 100.")
+    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for. Default 50.")
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate to use. Default 1e-3.")
     parser.add_argument("--momentum", type=float, default=0.99, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
     parser.add_argument("--second_momentum", type=float, default=0.999, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
@@ -171,7 +195,9 @@ if __name__ == "__main__":
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
     parser.add_argument("--disable_odd_random_shift", action="store_true", help="Whether to disable odd random shift. Default False.")
+    parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--use_mixup_training", action="store_true", help="Whether to use mixup training. Default False.")
+    parser.add_argument("--use_iou_loss", action="store_true", help="Whether to use IoU loss. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
     parser.add_argument("--length", default=800000, help="The fixed length of the training. Default 800000.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
@@ -205,10 +231,14 @@ if __name__ == "__main__":
     bottleneck_factor = args.bottleneck_factor
     squeeze_excitation = args.squeeze_excitation
     disable_odd_random_shift = args.disable_odd_random_shift
+    use_batch_norm = args.use_batch_norm
     use_mixup_training = args.use_mixup_training
+    use_iou_loss = args.use_iou_loss
     dropout = args.dropout
     length = args.length
     num_extra_steps = args.num_extra_steps
+
+    assert not (use_iou_loss and use_mixup_training), "Cannot use both IoU loss and mixup training."
 
     print("Epochs: " + str(epochs))
     print("Learning rate: " + str(learning_rate))
@@ -216,13 +246,14 @@ if __name__ == "__main__":
     print("Second momentum: " + str(second_momentum))
     print("Optimizer: " + optimizer_type)
     print("Dropout: " + str(dropout))
-    #model_resnet_old.BATCH_NORM_MOMENTUM = 1 - momentum
+    print("Batch norm: " + str(use_batch_norm))
+    model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
     model = model_unet.Unet(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
                             bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                             squeeze_excitation_bottleneck_factor=4, odd_random_shift_training=(not disable_odd_random_shift),
-                            dropout=dropout)
+                            dropout=dropout, use_batch_norm=use_batch_norm)
     model = model.to(config.device)
 
     # initialize optimizer
@@ -271,7 +302,9 @@ if __name__ == "__main__":
         "bottleneck_factor": bottleneck_factor,
         "squeeze_excitation": squeeze_excitation,
         "disable_odd_random_shift": disable_odd_random_shift,
+        "use_batch_norm": use_batch_norm,
         "use_mixup_training": use_mixup_training,
+        "use_iou_loss": use_iou_loss,
         "dropout": dropout,
         "length": length,
         "num_extra_steps": num_extra_steps,
