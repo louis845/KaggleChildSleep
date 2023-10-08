@@ -32,7 +32,7 @@ def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tens
         return torch.sum(((torch.sigmoid(preds) - ground_truth) ** 2) * bce * mask) / 461900.0
 
 def iou_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
-    ce_weight, epsilon = 0.1, 1.0
+    ce_weight, epsilon = 0.02, 1.0
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
     bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
     probas = torch.sigmoid(preds)
@@ -42,7 +42,11 @@ def iou_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor
         intersection = torch.sum(probas * ground_truth)
         dice = (2.0 * intersection + epsilon) / (torch.sum(probas) + torch.sum(ground_truth) + epsilon)
     else:
-        ce_loss = ce_weight * torch.mean(((probas - ground_truth) ** 2) * bce * mask)
+        num_mask = torch.sum(mask)
+        if num_mask.item() > 0:
+            ce_loss = ce_weight * torch.sum(((probas - ground_truth) ** 2) * bce * mask) / num_mask
+        else:
+            ce_loss = 0.0
         intersection = torch.sum(probas * ground_truth * mask)
         dice = (2.0 * intersection + epsilon) / (torch.sum(probas * mask) + torch.sum(ground_truth * mask) + epsilon)
     dice_loss = 1.0 - dice
@@ -113,7 +117,7 @@ def training_step(record: bool):
             train_history[key].append(current_metrics[key])
 
 def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tensor,
-                           labels_batch: torch.Tensor, mask: torch.Tensor,
+                           labels_batch: torch.Tensor, mask: torch.Tensor, more_mask: torch.Tensor,
                            pad_left, pad_right):
     accel_data_batch = torch.nn.functional.pad(accel_data_batch, (pad_left, pad_right), mode="replicate")
     pred_logits = model_(accel_data_batch)  # shape (batch_size, 1, T), where batch_size = 1
@@ -121,12 +125,14 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
     if use_iou_loss:
         loss = iou_loss(pred_logits, labels_batch)
         masked_loss = iou_loss(pred_logits, labels_batch, mask)
+        more_masked_loss = iou_loss(pred_logits, labels_batch, more_mask)
     else:
         loss = focal_loss(pred_logits, labels_batch)
         masked_loss = focal_loss(pred_logits, labels_batch, mask)
+        more_masked_loss = focal_loss(pred_logits, labels_batch, more_mask)
     preds = pred_logits > 0.0
 
-    return loss.item(), preds.to(torch.long), masked_loss.item()
+    return loss.item(), preds.to(torch.long), masked_loss.item(), more_masked_loss.item()
 
 def validation_step():
     for key in val_metrics:
@@ -144,6 +150,8 @@ def validation_step():
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
             mask = val_sampler.get_series_mask(batch_entry, all_data)
             mask = torch.tensor(mask, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
+            more_mask = val_sampler_more.get_series_mask(batch_entry, all_data)
+            more_mask = torch.tensor(more_mask, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
 
             # pad such that lengths is a multiple of 16
             pad_length = 16 - (accel_data_batch.shape[-1] % 16)
@@ -152,9 +160,10 @@ def validation_step():
             pad_left = pad_length // 2
             pad_right = pad_length - pad_left
 
-            # train model now
-            loss, preds, masked_loss = single_validation_step(model, accel_data_batch, labels_batch, mask,
-                                                 pad_left, pad_right)
+            # val model now
+            loss, preds, masked_loss, more_masked_loss = single_validation_step(model, accel_data_batch, labels_batch,
+                                                                                mask, more_mask,
+                                                                                pad_left, pad_right)
 
             # record
             with torch.no_grad():
@@ -162,6 +171,8 @@ def validation_step():
                 val_metrics["metric"].add(preds, labels_batch.to(torch.long))
                 val_metrics["loss_masked"].add(masked_loss, 1)
                 val_metrics["metric_masked"].add(preds, labels_batch.to(torch.long), mask.to(torch.long))
+                val_metrics["loss_more_masked"].add(more_masked_loss, 1)
+                val_metrics["metric_more_masked"].add(preds, labels_batch.to(torch.long), more_mask.to(torch.long))
 
             pbar.update(1)
 
@@ -185,7 +196,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a injury prediction model.")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for. Default 50.")
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate to use. Default 1e-3.")
-    parser.add_argument("--momentum", type=float, default=0.99, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
+    parser.add_argument("--momentum", type=float, default=0.9, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
     parser.add_argument("--second_momentum", type=float, default=0.999, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
     parser.add_argument("--optimizer", type=str, default="adam", help="Which optimizer to use. Available options: adam, sgd. Default adam.")
     parser.add_argument("--epochs_per_save", type=int, default=2, help="Number of epochs between saves. Default 2.")
@@ -199,7 +210,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_mixup_training", action="store_true", help="Whether to use mixup training. Default False.")
     parser.add_argument("--use_iou_loss", action="store_true", help="Whether to use IoU loss. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
-    parser.add_argument("--length", default=800000, help="The fixed length of the training. Default 800000.")
+    parser.add_argument("--length", default=2000000, help="The fixed length of the training. Default 2000000.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
     manager_models.add_argparse_arguments(parser)
@@ -247,6 +258,7 @@ if __name__ == "__main__":
     print("Optimizer: " + optimizer_type)
     print("Dropout: " + str(dropout))
     print("Batch norm: " + str(use_batch_norm))
+    print("Squeeze excitation: " + str(squeeze_excitation))
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
@@ -325,6 +337,8 @@ if __name__ == "__main__":
     val_metrics["metric"] = metrics.BinaryMetrics("val_metric")
     val_metrics["loss_masked"] = metrics.NumericalMetric("val_loss_masked")
     val_metrics["metric_masked"] = metrics.BinaryMetrics("val_metric_masked")
+    val_metrics["loss_more_masked"] = metrics.NumericalMetric("val_loss_more_masked")
+    val_metrics["metric_more_masked"] = metrics.BinaryMetrics("val_metric_more_masked")
 
     # Compile
     #single_training_step_compile = torch.compile(single_training_step)
@@ -342,6 +356,11 @@ if __name__ == "__main__":
                                                     is_train=False,
                                                     load_head_entries=True,
                                                     load_tail_entries=True)
+    val_sampler_more = convert_to_good_events.GoodEvents(all_good_events,
+                                                    validation_entries,
+                                                    is_train=False,
+                                                    load_head_entries=False,
+                                                    load_tail_entries=False)
 
 
     # Start training loop
@@ -359,6 +378,13 @@ if __name__ == "__main__":
 
             print("Running the usual step of gradient descent.")
             training_step(record=True)
+            if np.isnan(train_history["train_loss"][-1]):
+                print("Is nan. Reverting...")
+                model.load_state_dict(torch.load(os.path.join(model_dir, "latest_model.pt")))
+                optimizer.load_state_dict(torch.load(os.path.join(model_dir, "latest_optimizer.pt")))
+            else:
+                torch.save(model.state_dict(), os.path.join(model_dir, "latest_model.pt"))
+                torch.save(optimizer.state_dict(), os.path.join(model_dir, "latest_optimizer.pt"))
 
             if warmup_steps > 0:
                 warmup_steps -= 1

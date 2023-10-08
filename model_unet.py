@@ -198,7 +198,14 @@ class ResConv1D(torch.nn.Module):
         assert in_channels <= out_channels
         if out_channels <= 32:
             bottleneck_factor = 1
-            dropout = 0.0
+            if out_channels <= 8:
+                dropout = min(0.1, dropout)
+            elif out_channels <= 16:
+                dropout = min(0.25, dropout)
+            else:
+                dropout = min(0.5, dropout)
+        elif out_channels <= 64:
+            dropout = min(0.65, dropout)
 
         self.conv_res = torch.nn.ModuleList()
         self.conv_res.append(ResConv1DBlock(in_channels, out_channels, downsample=downsample,
@@ -237,6 +244,8 @@ class ResNetBackbone(torch.nn.Module):
         else:
             self.initial_batch_norm = torch.nn.InstanceNorm1d(hidden_channels)
         self.initial_nonlin = torch.nn.GELU()
+        if dropout > 0.0:
+            self.initial_dropout = torch.nn.Dropout1d(min(dropout, 0.1))
 
         self.conv_down.append(ResConv1D(hidden_channels, hidden_channels, blocks[0], downsample=False,
                                    bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
@@ -249,11 +258,15 @@ class ResNetBackbone(torch.nn.Module):
                                             squeeze_excitation_bottleneck_factor=squeeze_excitation_bottleneck_factor,
                                             kernel_size=kernel_size, dropout=dropout, use_batch_norm=use_batch_norm))
 
+        self.use_dropout = dropout > 0.0
+
     def forward(self, x, downsampling_method: list[int]):
         assert len(downsampling_method) == self.pyramid_height, "downsampling method must be specified for each level"
         x = self.initial_conv(x)
         x = self.initial_batch_norm(x)
         x = self.initial_nonlin(x)
+        if self.use_dropout:
+            x = self.initial_dropout(x)
 
         # contracting path
         ret = []

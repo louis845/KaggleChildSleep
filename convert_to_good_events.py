@@ -20,6 +20,7 @@ class GoodEvents:
                 if series_id not in data_dict:
                     raise ValueError("Series {} not found in data_dict".format(series_id))
                 for low, high, pos in data_dict[series_id]["event"]:
+                    assert pos in ["head", "middle", "tail"]
                     if (not load_head_entries) and (pos == "head"):
                         continue
                     if (not load_tail_entries) and (pos == "tail"):
@@ -29,6 +30,7 @@ class GoodEvents:
 
                     self.relevant_data.append((low, high + 1, "event", series_id))
                 for low, high, pos in data_dict[series_id]["non_event"]:
+                    assert pos in ["head", "middle", "tail"]
                     if (not load_head_entries) and (pos == "head"):
                         continue
                     if (not load_tail_entries) and (pos == "tail"):
@@ -49,6 +51,7 @@ class GoodEvents:
                     raise ValueError("Series {} not found in data_dict".format(series_id))
                 self.relevant_data[series_id] = []
                 for low, high, pos in data_dict[series_id]["event"]:
+                    assert pos in ["head", "middle", "tail"]
                     if (not load_head_entries) and (pos == "head"):
                         continue
                     if (not load_tail_entries) and (pos == "tail"):
@@ -58,6 +61,7 @@ class GoodEvents:
 
                     self.relevant_data[series_id].append((low, high + 1))
                 for low, high, pos in data_dict[series_id]["non_event"]:
+                    assert pos in ["head", "middle", "tail"]
                     if (not load_head_entries) and (pos == "head"):
                         continue
                     if (not load_tail_entries) and (pos == "tail"):
@@ -137,7 +141,7 @@ def load_all_data_into_dict():
             intervals = pd.read_csv(events_file, header=None).to_numpy(dtype="object")
             for k in range(intervals.shape[0]):
                 start, end, position = intervals[k, :]
-                all_data[series_id]["event"].append((int(start), int(end), position))
+                all_data[series_id]["event"].append((int(start), int(end), str(position)))
         except pd.errors.EmptyDataError:
             pass
 
@@ -147,7 +151,7 @@ def load_all_data_into_dict():
             intervals = pd.read_csv(non_events_file, header=None).to_numpy(dtype="object")
             for k in range(intervals.shape[0]):
                 start, end, position = intervals[k, :]
-                all_data[series_id]["non_event"].append((int(start), int(end), position))
+                all_data[series_id]["non_event"].append((int(start), int(end), str(position)))
         except pd.errors.EmptyDataError:
             pass
     return all_data
