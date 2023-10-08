@@ -1,7 +1,8 @@
 import sys
 import os
 import pandas as pd
-from PySide2.QtWidgets import QApplication, QVBoxLayout, QFileDialog, QWidget, QHBoxLayout, QPushButton, QListWidget, QTabWidget, QListWidgetItem, QSplitter, QSlider, QLabel, QCheckBox
+import numpy as np
+from PySide2.QtWidgets import QApplication, QVBoxLayout, QFileDialog, QWidget, QHBoxLayout, QPushButton, QListWidget, QTabWidget, QListWidgetItem, QSplitter, QSlider, QLabel, QCheckBox, QComboBox
 from PySide2.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -32,7 +33,7 @@ class SliderWithDisplayWidget(QWidget):
         self.slider_label.setText(self.slider_name + ": " + str(value))
 
 class MatplotlibWidget(QWidget):
-    def __init__(self, df, title, events, parent=None):
+    def __init__(self, df, title, events, pred_probas, parent=None):
         super(MatplotlibWidget, self).__init__(parent)
 
         self.figure = Figure()
@@ -72,6 +73,7 @@ class MatplotlibWidget(QWidget):
         self.df = df
         self.title = title
         self.events = events
+        self.pred_probas = pred_probas
         self.plot_data(self.df, self.title, self.events)
 
     def plot_data(self, df, title, events):
@@ -103,6 +105,9 @@ class MatplotlibWidget(QWidget):
             self.axis.plot(x, y1_var_median, label="anglez variance median")
             self.axis.plot(x, y2_var_median, label="enmo variance median")
 
+        if self.pred_probas is not None:
+            self.axis.plot(x, self.pred_probas, label="Probas")
+
         for event_time, event_type in events:
             color = "blue" if event_type == 1 else "red"
             self.axis.axvline(pd.to_datetime(event_time), color=color, alpha=0.5, linestyle="--")
@@ -122,10 +127,10 @@ class MainWidget(QWidget):
         self.splitter = QSplitter(Qt.Horizontal)
 
         self.file_list = QListWidget()
-        self.tab_widget = QTabWidget()
+        self.main_layout = QVBoxLayout()
 
         self.splitter.addWidget(self.file_list)
-        self.splitter.addWidget(self.tab_widget)
+        self.splitter.addWidget(self.main_layout)
 
         # Set initial sizes of splitter
         self.splitter.setSizes([0.2 * self.width(), 0.8 * self.width()])
@@ -135,6 +140,16 @@ class MainWidget(QWidget):
         self.file_list.itemDoubleClicked.connect(self.open_file)
 
         self.load_file_names()
+
+        # Tab widget and dropdown
+        self.dropdown_list = QComboBox()
+        self.main_layout.addWidget(self.dropdown_list)
+        self.dropdown_list.addItem("None")
+        if os.path.isdir("pseudo_labels"):
+            for folder in os.listdir("pseudo_labels"):
+                self.dropdown_list.addItem(folder)
+        self.tab_widget = QTabWidget()
+        self.main_layout.addWidget(self.tab_widget)
 
     def load_file_names(self):
         file_items = []
@@ -150,7 +165,15 @@ class MainWidget(QWidget):
         filename = "./individual_train_series/" + item.text() + ".parquet"
         df = pd.read_parquet(filename)
         events = load_extra_events(item.text())
-        plot_widget = MatplotlibWidget(df, item.text(), events)
+
+        # load pred probas if selected
+        pred_probas = None
+        if self.dropdown_list.currentText() != "None":
+            pred_probas = self.dropdown_list.currentText()
+            if os.path.isfile(os.path.join("pseudo_labels", pred_probas, item.text() + ".npy")):
+                pred_probas = np.load(os.path.join("pseudo_labels", pred_probas, item.text() + ".npy"))
+
+        plot_widget = MatplotlibWidget(df, item.text(), events, pred_probas)
         plot_widget.close_button.clicked.connect(lambda: self.close_tab(self.tab_widget.currentIndex()))
         self.tab_widget.addTab(plot_widget, item.text())
 
