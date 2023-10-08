@@ -109,7 +109,7 @@ def training_step(record: bool):
             loss, preds = single_training_step(model, optimizer,
                                                accel_data_batch_torch,
                                                labels_batch_torch)
-            time.sleep(0.2)
+            time.sleep(0.3)
 
             # record
             if record:
