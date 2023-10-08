@@ -293,8 +293,8 @@ if __name__ == "__main__":
             non_event_low = int_events[k][1]
             non_event_high = int_events[k + 1][0]
 
-            all_events_lowhigh.append((event_low, event_high))
-            all_nonevents_lowhigh.append((non_event_low, non_event_high))
+            all_events_lowhigh.append((event_low, event_high, "middle"))
+            all_nonevents_lowhigh.append((non_event_low, non_event_high, "middle"))
 
 
 
