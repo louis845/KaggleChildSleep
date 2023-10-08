@@ -226,6 +226,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_mixup_training", action="store_true", help="Whether to use mixup training. Default False.")
     parser.add_argument("--use_iou_loss", action="store_true", help="Whether to use IoU loss. Default False.")
     parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use CE loss. Default False.")
+    parser.add_argument("--record_best_model", action="store_true", help="Whether to record the best model. Default False.")
     parser.add_argument("--do_not_exclude", action="store_true", help="Whether to not exclude any events where the watch isn't being worn. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
     parser.add_argument("--length", default=2000000, help="The fixed length of the training. Default 2000000.")
@@ -264,6 +265,7 @@ if __name__ == "__main__":
     use_mixup_training = args.use_mixup_training
     use_iou_loss = args.use_iou_loss
     use_ce_loss = args.use_ce_loss
+    record_best_model = args.record_best_model
     do_not_exclude = args.do_not_exclude
     dropout = args.dropout
     length = args.length
@@ -338,6 +340,7 @@ if __name__ == "__main__":
         "use_mixup_training": use_mixup_training,
         "use_iou_loss": use_iou_loss,
         "use_ce_loss": use_ce_loss,
+        "record_best_model": record_best_model,
         "do_not_exclude": do_not_exclude,
         "dropout": dropout,
         "length": length,
@@ -390,6 +393,9 @@ if __name__ == "__main__":
     print("Training for {} epochs......".format(epochs))
     memory_logger = logging_memory_utils.obtain_memory_logger(model_dir)
 
+    best_epoch = -1
+    best_val_masked_precision = -1
+
     try:
         for epoch in range(epochs):
             memory_logger.log("Epoch {}".format(epoch))
@@ -432,6 +438,21 @@ if __name__ == "__main__":
             if epoch % epochs_per_save == 0:
                 torch.save(model.state_dict(), os.path.join(model_dir, "model_{}.pt".format(epoch)))
                 torch.save(optimizer.state_dict(), os.path.join(model_dir, "optimizer_{}.pt".format(epoch)))
+
+            if record_best_model:
+                if (val_history["val_metric_more_masked_precision"][-1] > best_val_masked_precision) and\
+                        (val_history["val_metric_more_masked_recall"][-1] > 0.99):
+                    best_val_masked_precision = val_history["val_metric_more_masked_precision"][-1]
+                    best_epoch = epoch
+                    torch.save(model.state_dict(), os.path.join(model_dir, "best_model.pt"))
+                    torch.save(optimizer.state_dict(), os.path.join(model_dir, "best_optimizer.pt"))
+                    # update best information text file
+                    with open(os.path.join(model_dir, "best_info.txt"), "w") as f:
+                        f.write("Best epoch: {}\n".format(best_epoch))
+                        f.write("Best val masked precision: {}\n".format(best_val_masked_precision))
+                        f.write("Best val masked recall: {}\n".format(val_history["val_metric_more_masked_recall"][-1]))
+                        f.write("Best val masked accuracy: {}\n".format(val_history["val_metric_more_masked_accuracy"][-1]))
+
             gc.collect()
 
         print("Training complete! Saving and finalizing...")
