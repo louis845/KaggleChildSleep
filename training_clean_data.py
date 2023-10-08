@@ -446,6 +446,7 @@ if __name__ == "__main__":
                     if (val_history["val_metric_more_masked_recall"][-1] > best_val_masked_recall) or \
                             (best_val_masked_recall > 0.99 and val_history["val_metric_more_masked_recall"][-1] > 0.99):
                         best_val_masked_precision = val_history["val_metric_more_masked_precision"][-1]
+                        best_val_masked_recall = val_history["val_metric_more_masked_recall"][-1]
                         best_epoch = epoch
                         torch.save(model.state_dict(), os.path.join(model_dir, "best_model.pt"))
                         torch.save(optimizer.state_dict(), os.path.join(model_dir, "best_optimizer.pt"))
@@ -453,7 +454,7 @@ if __name__ == "__main__":
                         with open(os.path.join(model_dir, "best_info.txt"), "w") as f:
                             f.write("Best epoch: {}\n".format(best_epoch))
                             f.write("Best val masked precision: {}\n".format(best_val_masked_precision))
-                            f.write("Best val masked recall: {}\n".format(val_history["val_metric_more_masked_recall"][-1]))
+                            f.write("Best val masked recall: {}\n".format(best_val_masked_recall)
                             f.write("Best val masked accuracy: {}\n".format(val_history["val_metric_more_masked_accuracy"][-1]))
 
             gc.collect()
