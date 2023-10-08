@@ -325,6 +325,8 @@ if __name__ == "__main__":
 
     model_config = {
         "model": "Naive deep learning segmentation approach",
+        "training_dataset": train_dset_name,
+        "validation_dataset": val_dset_name,
         "epochs": epochs,
         "learning_rate": learning_rate,
         "momentum": momentum,
