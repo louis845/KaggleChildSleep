@@ -127,10 +127,12 @@ class MainWidget(QWidget):
         self.splitter = QSplitter(Qt.Horizontal)
 
         self.file_list = QListWidget()
+        self.main_widget = QWidget()
         self.main_layout = QVBoxLayout()
+        self.main_widget.setLayout(self.main_layout)
 
         self.splitter.addWidget(self.file_list)
-        self.splitter.addWidget(self.main_layout)
+        self.splitter.addWidget(self.main_widget)
 
         # Set initial sizes of splitter
         self.splitter.setSizes([0.2 * self.width(), 0.8 * self.width()])
@@ -146,7 +148,9 @@ class MainWidget(QWidget):
         self.main_layout.addWidget(self.dropdown_list)
         self.dropdown_list.addItem("None")
         if os.path.isdir("pseudo_labels"):
-            for folder in os.listdir("pseudo_labels"):
+            folders = os.listdir("pseudo_labels")
+            folders.sort()
+            for folder in folders:
                 self.dropdown_list.addItem(folder)
         self.tab_widget = QTabWidget()
         self.main_layout.addWidget(self.tab_widget)
@@ -169,9 +173,9 @@ class MainWidget(QWidget):
         # load pred probas if selected
         pred_probas = None
         if self.dropdown_list.currentText() != "None":
-            pred_probas = self.dropdown_list.currentText()
-            if os.path.isfile(os.path.join("pseudo_labels", pred_probas, item.text() + ".npy")):
-                pred_probas = np.load(os.path.join("pseudo_labels", pred_probas, item.text() + ".npy"))
+            pred_probas_folder = self.dropdown_list.currentText()
+            if os.path.isfile(os.path.join("pseudo_labels", pred_probas_folder, item.text() + ".npy")):
+                pred_probas = np.load(os.path.join("pseudo_labels", pred_probas_folder, item.text() + ".npy"))
 
         plot_widget = MatplotlibWidget(df, item.text(), events, pred_probas)
         plot_widget.close_button.clicked.connect(lambda: self.close_tab(self.tab_widget.currentIndex()))
