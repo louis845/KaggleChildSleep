@@ -299,6 +299,10 @@ if __name__ == "__main__":
 
             all_events_lowhigh.append((event_low, event_high, "middle"))
             all_nonevents_lowhigh.append((non_event_low, non_event_high, "middle"))
+        if len(int_events) > 0:
+            event_low = int_events[-1][0]
+            event_high = int_events[-1][1]
+            all_events_lowhigh.append((event_low, event_high, "middle"))
 
 
 
