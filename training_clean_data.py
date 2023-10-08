@@ -454,7 +454,7 @@ if __name__ == "__main__":
                         with open(os.path.join(model_dir, "best_info.txt"), "w") as f:
                             f.write("Best epoch: {}\n".format(best_epoch))
                             f.write("Best val masked precision: {}\n".format(best_val_masked_precision))
-                            f.write("Best val masked recall: {}\n".format(best_val_masked_recall)
+                            f.write("Best val masked recall: {}\n".format(best_val_masked_recall))
                             f.write("Best val masked accuracy: {}\n".format(val_history["val_metric_more_masked_accuracy"][-1]))
 
             gc.collect()
