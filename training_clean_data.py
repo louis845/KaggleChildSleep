@@ -207,6 +207,7 @@ if __name__ == "__main__":
 
     all_data = convert_to_h5py_naive.load_all_data_into_dict()
     all_good_events = convert_to_good_events.load_all_data_into_dict()
+    all_good_events_no_exclusion = convert_to_good_events.load_all_data_into_dict(all_events=True)
 
     parser = argparse.ArgumentParser(description="Train a injury prediction model.")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for. Default 50.")
@@ -225,6 +226,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_mixup_training", action="store_true", help="Whether to use mixup training. Default False.")
     parser.add_argument("--use_iou_loss", action="store_true", help="Whether to use IoU loss. Default False.")
     parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use CE loss. Default False.")
+    parser.add_argument("--do_not_exclude", action="store_true", help="Whether to not exclude any events where the watch isn't being worn. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
     parser.add_argument("--length", default=2000000, help="The fixed length of the training. Default 2000000.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
@@ -262,6 +264,7 @@ if __name__ == "__main__":
     use_mixup_training = args.use_mixup_training
     use_iou_loss = args.use_iou_loss
     use_ce_loss = args.use_ce_loss
+    do_not_exclude = args.do_not_exclude
     dropout = args.dropout
     length = args.length
     num_extra_steps = args.num_extra_steps
@@ -335,6 +338,7 @@ if __name__ == "__main__":
         "use_mixup_training": use_mixup_training,
         "use_iou_loss": use_iou_loss,
         "use_ce_loss": use_ce_loss,
+        "do_not_exclude": do_not_exclude,
         "dropout": dropout,
         "length": length,
         "num_extra_steps": num_extra_steps,
@@ -364,10 +368,11 @@ if __name__ == "__main__":
     # Initialize the sampler
     print("Using mixup training: {}".format(use_mixup_training))
     print("Length: {}".format(length))
-    training_sampler = convert_to_good_events.GoodEvents(all_good_events,
+    training_good_events = all_good_events_no_exclusion if do_not_exclude else all_good_events
+    training_sampler = convert_to_good_events.GoodEvents(training_good_events,
                                                          training_entries)
     if use_mixup_training:
-        training_sampler2 = convert_to_good_events.GoodEvents(all_good_events,
+        training_sampler2 = convert_to_good_events.GoodEvents(training_good_events,
                                                             training_entries)
     val_sampler = convert_to_good_events.GoodEvents(all_good_events,
                                                     validation_entries,

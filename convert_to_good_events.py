@@ -125,13 +125,17 @@ class GoodEvents:
         return mask
 
 
-def load_all_data_into_dict():
+def load_all_data_into_dict(all_events=False):
     all_data = {}
     for series_id in os.listdir(FOLDER):
         if series_id == "summary.txt":
             continue
-        events_file = os.path.join(FOLDER, series_id, "event.csv")
-        non_events_file = os.path.join(FOLDER, series_id, "non_event.csv")
+        if all_events:
+            events_file = os.path.join(FOLDER, series_id, "all_event.csv")
+            non_events_file = os.path.join(FOLDER, series_id, "all_nonevent.csv")
+        else:
+            events_file = os.path.join(FOLDER, series_id, "event.csv")
+            non_events_file = os.path.join(FOLDER, series_id, "non_event.csv")
 
         all_data[series_id] = {}
 
