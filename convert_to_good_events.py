@@ -188,6 +188,8 @@ if __name__ == "__main__":
         series_output_folder = os.path.join(FOLDER, series_id)
         series_non_event_file = os.path.join(series_output_folder, "non_event.csv")
         series_event_file = os.path.join(series_output_folder, "event.csv")
+        series_all_event_file = os.path.join(series_output_folder, "all_event.csv")
+        series_all_nonevent_file = os.path.join(series_output_folder, "all_nonevent.csv")
         if not os.path.isdir(series_output_folder):
             os.mkdir(series_output_folder)
 
@@ -198,6 +200,8 @@ if __name__ == "__main__":
         # Load the events
         non_events_lowhigh = []
         events_lowhigh = []
+        all_events_lowhigh = []
+        all_nonevents_lowhigh = []
 
         series_events = events.loc[events["series_id"] == series_id]
         prev_has_event = True
@@ -272,6 +276,28 @@ if __name__ == "__main__":
                     prev_event_step = int(event["step"])
                 prev_has_event = cur_has_event
 
+        int_events = []
+        for k in range(0, len(series_events), 2):
+            single_event_onset = series_events.iloc[k]
+            single_event_wakeup = series_events.iloc[k + 1]
+            has_event = not (pd.isna(single_event_onset["step"]) or pd.isna(single_event_wakeup["step"]))
+            if has_event:
+                start = int(single_event_onset["step"])
+                end = int(single_event_wakeup["step"])
+                int_events.append((start, end))
+
+        for k in range(len(int_events) - 1):
+            event_low = int_events[k][0]
+            event_high = int_events[k][1]
+
+            non_event_low = int_events[k][1]
+            non_event_high = int_events[k + 1][0]
+
+            all_events_lowhigh.append((event_low, event_high))
+            all_nonevents_lowhigh.append((non_event_low, non_event_high))
+
+
+
         # Save the non-events
         non_events_lowhigh = np.array(non_events_lowhigh, dtype="object")
         pd.DataFrame(non_events_lowhigh).to_csv(series_non_event_file, index=False, header=False)
@@ -279,6 +305,13 @@ if __name__ == "__main__":
         # Save the events
         events_lowhigh = np.array(events_lowhigh, dtype="object")
         pd.DataFrame(events_lowhigh).to_csv(series_event_file, index=False, header=False)
+
+        # Save the all events and all non-events
+        all_events_lowhigh = np.array(all_events_lowhigh, dtype="object")
+        pd.DataFrame(all_events_lowhigh).to_csv(series_all_event_file, index=False, header=False)
+
+        all_nonevents_lowhigh = np.array(all_nonevents_lowhigh, dtype="object")
+        pd.DataFrame(all_nonevents_lowhigh).to_csv(series_all_nonevent_file, index=False, header=False)
 
 
     print("Max length: {}".format(np.max(lengths_history)))
