@@ -66,28 +66,29 @@ if __name__ == "__main__":
     if os.path.isdir(output_folder):
         shutil.rmtree(output_folder)
     os.mkdir(output_folder)
-    with tqdm.tqdm(total=len(data_to_infer)) as pbar:
-        for k in range(len(data_to_infer)):
-            series_id = data_to_infer[k]  # series ids
+    with torch.no_grad():
+        with tqdm.tqdm(total=len(data_to_infer)) as pbar:
+            for k in range(len(data_to_infer)):
+                series_id = data_to_infer[k]  # series ids
 
-            # load the batch
-            accel_data_batch = all_data[series_id]["accel"]
-            accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device).unsqueeze(0)
+                # load the batch
+                accel_data_batch = all_data[series_id]["accel"]
+                accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device).unsqueeze(0)
 
-            # pad such that lengths is a multiple of 16
-            pad_length = 16 - (accel_data_batch.shape[-1] % 16)
-            if pad_length == 16:
-                pad_length = 0
-            pad_left = pad_length // 2
-            pad_right = pad_length - pad_left
+                # pad such that lengths is a multiple of 16
+                pad_length = 16 - (accel_data_batch.shape[-1] % 16)
+                if pad_length == 16:
+                    pad_length = 0
+                pad_left = pad_length // 2
+                pad_right = pad_length - pad_left
 
-            # get probas now
-            accel_data_batch = torch.nn.functional.pad(accel_data_batch, (pad_left, pad_right), mode="replicate")
-            pred_logits = model(accel_data_batch)  # shape (batch_size, 1, T), where batch_size = 1
-            pred_logits = pred_logits[..., pad_left:(pred_logits.shape[-1] - pad_right)]
-            pred_probas = torch.sigmoid(pred_logits).squeeze(0).squeeze(0).cpu().numpy()
+                # get probas now
+                accel_data_batch = torch.nn.functional.pad(accel_data_batch, (pad_left, pad_right), mode="replicate")
+                pred_logits = model(accel_data_batch)  # shape (batch_size, 1, T), where batch_size = 1
+                pred_logits = pred_logits[..., pad_left:(pred_logits.shape[-1] - pad_right)]
+                pred_probas = torch.sigmoid(pred_logits).squeeze(0).squeeze(0).cpu().numpy()
 
-            # save to folder
-            np.save(os.path.join(output_folder, "{}.npy".format(series_id)), pred_probas)
+                # save to folder
+                np.save(os.path.join(output_folder, "{}.npy".format(series_id)), pred_probas)
 
-            pbar.update(1)
+                pbar.update(1)

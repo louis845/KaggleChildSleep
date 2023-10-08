@@ -52,6 +52,15 @@ def iou_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor
     dice_loss = 1.0 - dice
     return ce_loss + dice_loss
 
+def ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
+    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
+                                                                                                 ground_truth.shape)
+    bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
+    if mask is None:
+        return torch.sum(bce) / 461900.0  # mean length as shown in check_series_properties.py
+    else:
+        return torch.sum(bce * mask) / 461900.0
+
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
                             accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
@@ -59,6 +68,8 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
     pred_logits = model_(accel_data_batch) # shape (batch_size, 1, T), where batch_size = 1
     if use_iou_loss:
         loss = iou_loss(pred_logits, labels_batch)
+    elif use_ce_loss:
+        loss = ce_loss(pred_logits, labels_batch)
     else:
         loss = focal_loss(pred_logits, labels_batch)
     loss.backward()
@@ -126,6 +137,10 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
         loss = iou_loss(pred_logits, labels_batch)
         masked_loss = iou_loss(pred_logits, labels_batch, mask)
         more_masked_loss = iou_loss(pred_logits, labels_batch, more_mask)
+    elif use_ce_loss:
+        loss = ce_loss(pred_logits, labels_batch)
+        masked_loss = ce_loss(pred_logits, labels_batch, mask)
+        more_masked_loss = ce_loss(pred_logits, labels_batch, more_mask)
     else:
         loss = focal_loss(pred_logits, labels_batch)
         masked_loss = focal_loss(pred_logits, labels_batch, mask)
@@ -209,6 +224,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--use_mixup_training", action="store_true", help="Whether to use mixup training. Default False.")
     parser.add_argument("--use_iou_loss", action="store_true", help="Whether to use IoU loss. Default False.")
+    parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use CE loss. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
     parser.add_argument("--length", default=2000000, help="The fixed length of the training. Default 2000000.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
@@ -245,6 +261,7 @@ if __name__ == "__main__":
     use_batch_norm = args.use_batch_norm
     use_mixup_training = args.use_mixup_training
     use_iou_loss = args.use_iou_loss
+    use_ce_loss = args.use_ce_loss
     dropout = args.dropout
     length = args.length
     num_extra_steps = args.num_extra_steps
@@ -317,6 +334,7 @@ if __name__ == "__main__":
         "use_batch_norm": use_batch_norm,
         "use_mixup_training": use_mixup_training,
         "use_iou_loss": use_iou_loss,
+        "use_ce_loss": use_ce_loss,
         "dropout": dropout,
         "length": length,
         "num_extra_steps": num_extra_steps,
