@@ -1,1 +1,1 @@
-python training_resnet.py --device 1 --model model_fold3_cutmix_dropout_mixup2 --train_data fold_3_train --val_data fold_3_val --num_extra_steps 7 --hidden_channels 8 --hidden_blocks 4 6 8 12 8 --squeeze_excitation --use_cutmix_training --use_mixup_training --dropout 0.2 --load_model model_fold3_cutmix_dropout_mixup
+python training_clean_data.py --device 1 --model model_pseudo_fold3 --train_data fold_3_train --val_data fold_3_val --num_extra_steps 9 --hidden_channels 8 --hidden_blocks 4 6 8 8 --squeeze_excitation --use_batch_norm --dropout 0.75 --optimizer sgd

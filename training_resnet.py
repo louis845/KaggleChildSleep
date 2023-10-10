@@ -19,20 +19,25 @@ import manager_models
 import metrics
 import logging_memory_utils
 import convert_to_h5py_naive
-import convert_to_h5py_splitted
+import convert_to_good_events
+import cleaned_combine_pseudo_labels
 import model_unet
 
-def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor):
-    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
+def ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
+    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
+                                                                                                 ground_truth.shape)
     bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
-    return torch.sum(((torch.sigmoid(preds) - ground_truth) ** 2) * bce) / 461900.0 # mean length as shown in check_series_properties.py
+    if mask is None:
+        return torch.sum(bce) / 461900.0  # mean length as shown in check_series_properties.py
+    else:
+        return torch.sum(bce * mask) / 461900.0
 
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
                             accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
     optimizer_.zero_grad()
     pred_logits = model_(accel_data_batch) # shape (batch_size, 1, T), where batch_size = 1
-    loss = focal_loss(pred_logits, labels_batch)
+    loss = ce_loss(pred_logits, labels_batch)
     loss.backward()
     optimizer_.step()
 
@@ -41,109 +46,28 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
 
     return loss.item(), preds.to(torch.long)
 
-def sample_cutmix(batch_entry, num_mix, extra_shuffle_indices, k):
-    accel_data_batch_list = []
-    labels_batch_list = []
-    current_length = 0
-
-    # cutmix with 50% probability
-    """if (np.random.rand() < 0.5):
-        accel_data_batch_list.append(all_data[batch_entry]["accel"])
-        labels_batch_list.append(all_data[batch_entry]["sleeping_timesteps"])
-        current_length += accel_data_batch_list[-1].shape[-1]"""
-
-    is_event = np.random.rand() < 0.5
-    while current_length < length:
-        type_file = "event.csv" if is_event else "non_event.csv"
-
-        appended = False
-        while not appended:
-            choice = np.random.randint(0, num_mix)
-            try:
-                if choice == 0:
-                    intervals = pd.read_csv(os.path.join(convert_to_h5py_splitted.FOLDER,
-                                                         batch_entry,
-                                                         type_file), header=None)
-                else:
-                    intervals = pd.read_csv(os.path.join(convert_to_h5py_splitted.FOLDER,
-                                                         training_entries[extra_shuffle_indices[choice - 1][k]],
-                                                         type_file), header=None)
-            except pd.errors.EmptyDataError:
-                continue
-            num_intervals = len(intervals)
-            intervals_np = intervals.to_numpy(dtype=np.int32)
-
-            intervals = intervals_np
-            interval = intervals[np.random.randint(0, num_intervals)]
-
-            low = interval[0]
-            high = interval[1]
-            max_diff = min(int(high - low) // 4, 720)
-            if is_event:
-                low += np.random.randint(-max_diff, max_diff + 1)
-                high += np.random.randint(-max_diff, max_diff + 1)
-            else:
-                low += np.random.randint(0, max_diff)
-                high -= np.random.randint(0, max_diff)
-
-            accel_data_batch_list.append(all_data[batch_entry]["accel"][:, low:high])
-            labels_batch_list.append(all_data[batch_entry]["sleeping_timesteps"][low:high])
-            appended = True
-
-        is_event = not is_event
-        current_length += accel_data_batch_list[-1].shape[-1]
-
-    accel_data_batch = np.concatenate(accel_data_batch_list, axis=-1)
-    labels_batch = np.concatenate(labels_batch_list, axis=-1)
-
-    left_erosion = np.random.randint(0, accel_data_batch.shape[-1] - length + 1)
-    accel_data_batch = accel_data_batch[:, left_erosion:(left_erosion + length)]
-    labels_batch = labels_batch[left_erosion:(left_erosion + length)]
-
-    return accel_data_batch, labels_batch
-
 def training_step(record: bool):
     if record:
         for key in train_metrics:
             train_metrics[key].reset()
 
     # shuffle
-    shuffle_indices = np.random.permutation(len(training_entries))
-    if use_cutmix_training:
-        num_mix = 11
-        extra_shuffle_indices = [np.random.permutation(len(training_entries)) for _ in range(num_mix - 1)]
+    training_sampler.shuffle()
+    if use_mixup_training:
+        training_sampler2.shuffle()
 
     # training
-    trained = 0
-    with tqdm.tqdm(total=len(shuffle_indices)) as pbar:
-        for k in range(len(shuffle_indices)):
-            batch_entry = training_entries[shuffle_indices[k]] # series ids
-            # load the batch
-            if use_cutmix_training:
-                accel_data_batch, labels_batch = sample_cutmix(batch_entry, num_mix, extra_shuffle_indices, k)
-                if use_mixup_training:
-                    accel_data_batch2, labels_batch2 = sample_cutmix(batch_entry, num_mix, extra_shuffle_indices, k)
-                    labels_batch = labels_batch.astype(np.float32)
-                    labels_batch2 = labels_batch2.astype(np.float32)
+    with tqdm.tqdm(total=training_sampler.series_remaining()) as pbar:
+        while training_sampler.series_remaining() > 0:
+            accel_data_batch, labels_batch, increment = training_sampler.get_next(length, all_data)
+            if use_mixup_training:
+                accel_data_batch2, labels_batch2, _ = training_sampler2.get_next(length, all_data)
+                lam = np.random.beta(0.2, 0.2)
+                accel_data_batch = lam * accel_data_batch + (1.0 - lam) * accel_data_batch2
+                labels_batch = lam * labels_batch.astype(dtype=np.float32) + (1.0 - lam) * labels_batch2.astype(dtype=np.float32)
 
-                    lam = np.random.beta(0.2, 0.2)
-                    accel_data_batch = lam * accel_data_batch + (1 - lam) * accel_data_batch2
-                    labels_batch = lam * labels_batch + (1 - lam) * labels_batch2
-            else:
-                accel_data_batch = all_data[batch_entry]["accel"]
-                labels_batch = all_data[batch_entry]["sleeping_timesteps"]
-                """accel_data_batch = np.random.rand(2, 1000000)
-                labels_batch = np.random.randint(0, 2, size=(1000000,)).astype(np.float32)"""
-
-            # randomly pick a segment to match length
-            left_erosion = np.random.randint(0, accel_data_batch.shape[-1] - length + 1)
-            accel_data_batch = accel_data_batch[:, left_erosion:(left_erosion + length)]
-            labels_batch = labels_batch[left_erosion:(left_erosion + length)]
-
-            accel_data_batch_torch = torch.zeros(size=(2, length), dtype=torch.float32, device=config.device)
-            labels_batch_torch = torch.zeros(size=(length,), dtype=torch.float32, device=config.device)
-            accel_data_batch_torch.copy_(torch.from_numpy(accel_data_batch), non_blocking=True)
-            labels_batch_torch.copy_(torch.from_numpy(labels_batch), non_blocking=True)
+            accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
+            labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
             accel_data_batch_torch = accel_data_batch_torch.unsqueeze(0)
             labels_batch_torch = labels_batch_torch.unsqueeze(0).unsqueeze(0)
 
@@ -151,7 +75,7 @@ def training_step(record: bool):
             loss, preds = single_training_step(model, optimizer,
                                                accel_data_batch_torch,
                                                labels_batch_torch)
-            time.sleep(0.15)
+            time.sleep(0.3)
 
             # record
             if record:
@@ -159,8 +83,7 @@ def training_step(record: bool):
                     train_metrics["loss"].add(loss, 1)
                     train_metrics["metric"].add(preds, (labels_batch_torch > 0.5).to(torch.long))
 
-            trained += 1
-            pbar.update(1)
+            pbar.update(increment)
 
     if record:
         current_metrics = {}
@@ -170,15 +93,19 @@ def training_step(record: bool):
         for key in current_metrics:
             train_history[key].append(current_metrics[key])
 
-def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tensor, labels_batch: torch.Tensor,
+def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tensor,
+                           labels_batch: torch.Tensor, naive_labels_batch: torch.Tensor,
+                           mask: torch.Tensor, more_mask: torch.Tensor,
                            pad_left, pad_right):
     accel_data_batch = torch.nn.functional.pad(accel_data_batch, (pad_left, pad_right), mode="replicate")
     pred_logits = model_(accel_data_batch)  # shape (batch_size, 1, T), where batch_size = 1
     pred_logits = pred_logits[..., pad_left:(pred_logits.shape[-1] - pad_right)]
-    loss = focal_loss(pred_logits, labels_batch)
+    loss = ce_loss(pred_logits, labels_batch)
+    masked_loss = ce_loss(pred_logits, naive_labels_batch, mask)
+    more_masked_loss = ce_loss(pred_logits, naive_labels_batch, more_mask)
     preds = pred_logits > 0.0
 
-    return loss.item(), preds.to(torch.long)
+    return loss.item(), preds.to(torch.long), masked_loss.item(), more_masked_loss.item()
 
 def validation_step():
     for key in val_metrics:
@@ -192,8 +119,16 @@ def validation_step():
             # load the batch
             accel_data_batch = all_data[batch_entry]["accel"]
             labels_batch = all_data[batch_entry]["sleeping_timesteps"]
+            naive_labels_batch = all_naive_data[batch_entry]["sleeping_timesteps"]
+
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device).unsqueeze(0)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
+            naive_labels_batch = torch.tensor(naive_labels_batch, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
+
+            mask = val_sampler.get_series_mask(batch_entry, all_data)
+            mask = torch.tensor(mask, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
+            more_mask = val_sampler_more.get_series_mask(batch_entry, all_data)
+            more_mask = torch.tensor(more_mask, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
 
             # pad such that lengths is a multiple of 16
             pad_length = 16 - (accel_data_batch.shape[-1] % 16)
@@ -202,13 +137,20 @@ def validation_step():
             pad_left = pad_length // 2
             pad_right = pad_length - pad_left
 
-            # train model now
-            loss, preds = single_validation_step(model, accel_data_batch, labels_batch, pad_left, pad_right)
+            # val model now
+            loss, preds, masked_loss, more_masked_loss = single_validation_step(model, accel_data_batch,
+                                                                                labels_batch, naive_labels_batch,
+                                                                                mask, more_mask,
+                                                                                pad_left, pad_right)
 
             # record
             with torch.no_grad():
                 val_metrics["loss"].add(loss, 1)
                 val_metrics["metric"].add(preds, labels_batch.to(torch.long))
+                val_metrics["loss_masked"].add(masked_loss, 1)
+                val_metrics["metric_masked"].add(preds, naive_labels_batch.to(torch.long), mask.to(torch.long))
+                val_metrics["loss_more_masked"].add(more_masked_loss, 1)
+                val_metrics["metric_more_masked"].add(preds, naive_labels_batch.to(torch.long), more_mask.to(torch.long))
 
             pbar.update(1)
 
@@ -226,12 +168,15 @@ def print_history(metrics_history):
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn")
 
-    all_data = convert_to_h5py_naive.load_all_data_into_dict()
+    all_data = cleaned_combine_pseudo_labels.load_all_data_into_dict()
+    all_pseudo_events = cleaned_combine_pseudo_labels.load_all_events_into_dict()
+    all_naive_data = convert_to_h5py_naive.load_all_data_into_dict()
+    all_good_events = convert_to_good_events.load_all_data_into_dict()
 
-    parser = argparse.ArgumentParser(description="Train a injury prediction model.")
-    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs to train for. Default 100.")
+    parser = argparse.ArgumentParser(description="Train a sleeping prediction model with pseudolabels.")
+    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for. Default 50.")
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate to use. Default 1e-3.")
-    parser.add_argument("--momentum", type=float, default=0.99, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
+    parser.add_argument("--momentum", type=float, default=0.9, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
     parser.add_argument("--second_momentum", type=float, default=0.999, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
     parser.add_argument("--optimizer", type=str, default="adam", help="Which optimizer to use. Available options: adam, sgd. Default adam.")
     parser.add_argument("--epochs_per_save", type=int, default=2, help="Number of epochs between saves. Default 2.")
@@ -241,10 +186,11 @@ if __name__ == "__main__":
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
     parser.add_argument("--disable_odd_random_shift", action="store_true", help="Whether to disable odd random shift. Default False.")
-    parser.add_argument("--use_cutmix_training", action="store_true", help="Whether to use cutmix training. Default False.")
+    parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--use_mixup_training", action="store_true", help="Whether to use mixup training. Default False.")
+    parser.add_argument("--record_best_model", action="store_true", help="Whether to record the best model. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
-    parser.add_argument("--length", default=700000, help="The fixed length of the training. Default 700000.")
+    parser.add_argument("--length", default=2000000, help="The fixed length of the training. Default 2000000.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
     manager_models.add_argparse_arguments(parser)
@@ -276,8 +222,9 @@ if __name__ == "__main__":
     bottleneck_factor = args.bottleneck_factor
     squeeze_excitation = args.squeeze_excitation
     disable_odd_random_shift = args.disable_odd_random_shift
-    use_cutmix_training = args.use_cutmix_training
+    use_batch_norm = args.use_batch_norm
     use_mixup_training = args.use_mixup_training
+    record_best_model = args.record_best_model
     dropout = args.dropout
     length = args.length
     num_extra_steps = args.num_extra_steps
@@ -288,13 +235,15 @@ if __name__ == "__main__":
     print("Second momentum: " + str(second_momentum))
     print("Optimizer: " + optimizer_type)
     print("Dropout: " + str(dropout))
-    #model_resnet_old.BATCH_NORM_MOMENTUM = 1 - momentum
+    print("Batch norm: " + str(use_batch_norm))
+    print("Squeeze excitation: " + str(squeeze_excitation))
+    model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
     model = model_unet.Unet(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
                             bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                             squeeze_excitation_bottleneck_factor=4, odd_random_shift_training=(not disable_odd_random_shift),
-                            dropout=dropout)
+                            dropout=dropout, use_batch_norm=use_batch_norm)
     model = model.to(config.device)
 
     # initialize optimizer
@@ -332,6 +281,8 @@ if __name__ == "__main__":
 
     model_config = {
         "model": "Naive deep learning segmentation approach",
+        "training_dataset": train_dset_name,
+        "validation_dataset": val_dset_name,
         "epochs": epochs,
         "learning_rate": learning_rate,
         "momentum": momentum,
@@ -343,8 +294,9 @@ if __name__ == "__main__":
         "bottleneck_factor": bottleneck_factor,
         "squeeze_excitation": squeeze_excitation,
         "disable_odd_random_shift": disable_odd_random_shift,
-        "use_cutmix_training": use_cutmix_training,
+        "use_batch_norm": use_batch_norm,
         "use_mixup_training": use_mixup_training,
+        "record_best_model": record_best_model,
         "dropout": dropout,
         "length": length,
         "num_extra_steps": num_extra_steps,
@@ -363,23 +315,41 @@ if __name__ == "__main__":
     train_metrics["metric"] = metrics.BinaryMetrics("train_metric")
     val_metrics["loss"] = metrics.NumericalMetric("val_loss")
     val_metrics["metric"] = metrics.BinaryMetrics("val_metric")
+    val_metrics["loss_masked"] = metrics.NumericalMetric("val_loss_masked")
+    val_metrics["metric_masked"] = metrics.BinaryMetrics("val_metric_masked")
+    val_metrics["loss_more_masked"] = metrics.NumericalMetric("val_loss_more_masked")
+    val_metrics["metric_more_masked"] = metrics.BinaryMetrics("val_metric_more_masked")
 
     # Compile
     #single_training_step_compile = torch.compile(single_training_step)
 
-    # Initialize the async sampler if necessary
-    print("Using cutmix training: {}".format(use_cutmix_training))
+    # Initialize the sampler
     print("Using mixup training: {}".format(use_mixup_training))
     print("Length: {}".format(length))
-    if not use_cutmix_training:
-        for series_id in all_data:
-            assert all_data[series_id]["accel"].shape[-1] >= length
+    training_sampler = cleaned_combine_pseudo_labels.PseudoEvents(all_pseudo_events,
+                                                         training_entries)
     if use_mixup_training:
-        assert use_cutmix_training, "Mixup training requires cutmix training"
+        training_sampler2 = cleaned_combine_pseudo_labels.PseudoEvents(all_pseudo_events,
+                                                         training_entries)
+    val_sampler = convert_to_good_events.GoodEvents(all_good_events,
+                                                    validation_entries,
+                                                    is_train=False,
+                                                    load_head_entries=True,
+                                                    load_tail_entries=True)
+    val_sampler_more = convert_to_good_events.GoodEvents(all_good_events,
+                                                         validation_entries,
+                                                         is_train=False,
+                                                         load_head_entries=False,
+                                                         load_tail_entries=False)
+
 
     # Start training loop
     print("Training for {} epochs......".format(epochs))
     memory_logger = logging_memory_utils.obtain_memory_logger(model_dir)
+
+    best_epoch = -1
+    best_val_masked_precision = -1
+    best_val_masked_recall = -1
 
     try:
         for epoch in range(epochs):
@@ -392,6 +362,13 @@ if __name__ == "__main__":
 
             print("Running the usual step of gradient descent.")
             training_step(record=True)
+            if np.isnan(train_history["train_loss"][-1]):
+                print("Is nan. Reverting...")
+                model.load_state_dict(torch.load(os.path.join(model_dir, "latest_model.pt")))
+                optimizer.load_state_dict(torch.load(os.path.join(model_dir, "latest_optimizer.pt")))
+            else:
+                torch.save(model.state_dict(), os.path.join(model_dir, "latest_model.pt"))
+                torch.save(optimizer.state_dict(), os.path.join(model_dir, "latest_optimizer.pt"))
 
             if warmup_steps > 0:
                 warmup_steps -= 1
@@ -416,6 +393,24 @@ if __name__ == "__main__":
             if epoch % epochs_per_save == 0:
                 torch.save(model.state_dict(), os.path.join(model_dir, "model_{}.pt".format(epoch)))
                 torch.save(optimizer.state_dict(), os.path.join(model_dir, "optimizer_{}.pt".format(epoch)))
+
+            if record_best_model:
+                if (val_history["val_metric_more_masked_precision"][-1] > best_val_masked_precision) and\
+                        (val_history["val_metric_more_masked_recall"][-1] > 0.98):
+                    if (val_history["val_metric_more_masked_recall"][-1] > best_val_masked_recall) or \
+                            (best_val_masked_recall > 0.99 and val_history["val_metric_more_masked_recall"][-1] > 0.99):
+                        best_val_masked_precision = val_history["val_metric_more_masked_precision"][-1]
+                        best_val_masked_recall = val_history["val_metric_more_masked_recall"][-1]
+                        best_epoch = epoch
+                        torch.save(model.state_dict(), os.path.join(model_dir, "best_model.pt"))
+                        torch.save(optimizer.state_dict(), os.path.join(model_dir, "best_optimizer.pt"))
+                        # update best information text file
+                        with open(os.path.join(model_dir, "best_info.txt"), "w") as f:
+                            f.write("Best epoch: {}\n".format(best_epoch))
+                            f.write("Best val masked precision: {}\n".format(best_val_masked_precision))
+                            f.write("Best val masked recall: {}\n".format(best_val_masked_recall))
+                            f.write("Best val masked accuracy: {}\n".format(val_history["val_metric_more_masked_accuracy"][-1]))
+
             gc.collect()
 
         print("Training complete! Saving and finalizing...")
@@ -436,6 +431,3 @@ if __name__ == "__main__":
         val_df.to_csv(os.path.join(model_dir, "val_metrics.csv"), index=True)
 
     memory_logger.close()
-
-    """if use_async_sampler:
-        image_organ_sampler_async.clean_and_destroy_sampler()"""

@@ -198,7 +198,9 @@ class ResConv1D(torch.nn.Module):
         assert in_channels <= out_channels
         if out_channels <= 32:
             bottleneck_factor = 1
-            if out_channels <= 8:
+            if out_channels <= 4:
+                dropout = min(0.05, dropout)
+            elif out_channels <= 8:
                 dropout = min(0.1, dropout)
             elif out_channels <= 16:
                 dropout = min(0.25, dropout)
@@ -244,6 +246,9 @@ class ResNetBackbone(torch.nn.Module):
         else:
             self.initial_batch_norm = torch.nn.InstanceNorm1d(hidden_channels)
         self.initial_nonlin = torch.nn.GELU()
+
+        if hidden_channels < 8:
+            dropout = 0.05
         if dropout > 0.0:
             self.initial_dropout = torch.nn.Dropout1d(min(dropout, 0.1))
 

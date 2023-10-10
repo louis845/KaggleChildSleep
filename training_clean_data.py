@@ -109,7 +109,7 @@ def training_step(record: bool):
             loss, preds = single_training_step(model, optimizer,
                                                accel_data_batch_torch,
                                                labels_batch_torch)
-            time.sleep(0.3)
+            time.sleep(0.4)
 
             # record
             if record:
@@ -209,7 +209,7 @@ if __name__ == "__main__":
     all_good_events = convert_to_good_events.load_all_data_into_dict()
     all_good_events_no_exclusion = convert_to_good_events.load_all_data_into_dict(all_events=True)
 
-    parser = argparse.ArgumentParser(description="Train a injury prediction model.")
+    parser = argparse.ArgumentParser(description="Train a sleeping prediction model with only clean data.")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for. Default 50.")
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate to use. Default 1e-3.")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
@@ -229,7 +229,7 @@ if __name__ == "__main__":
     parser.add_argument("--record_best_model", action="store_true", help="Whether to record the best model. Default False.")
     parser.add_argument("--do_not_exclude", action="store_true", help="Whether to not exclude any events where the watch isn't being worn. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
-    parser.add_argument("--length", default=2000000, help="The fixed length of the training. Default 2000000.")
+    parser.add_argument("--length", default=3500000, help="The fixed length of the training. Default 3500000.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
     manager_models.add_argparse_arguments(parser)
@@ -444,9 +444,9 @@ if __name__ == "__main__":
 
             if record_best_model:
                 if (val_history["val_metric_more_masked_precision"][-1] > best_val_masked_precision) and\
-                        (val_history["val_metric_more_masked_recall"][-1] > 0.98):
+                        (val_history["val_metric_more_masked_recall"][-1] > 0.95):
                     if (val_history["val_metric_more_masked_recall"][-1] > best_val_masked_recall) or \
-                            (best_val_masked_recall > 0.99 and val_history["val_metric_more_masked_recall"][-1] > 0.99):
+                            (best_val_masked_recall > 0.96 and val_history["val_metric_more_masked_recall"][-1] > 0.96):
                         best_val_masked_precision = val_history["val_metric_more_masked_precision"][-1]
                         best_val_masked_recall = val_history["val_metric_more_masked_recall"][-1]
                         best_epoch = epoch

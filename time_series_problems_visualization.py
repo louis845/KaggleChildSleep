@@ -205,6 +205,9 @@ def load_extra_events(series_id: str):
         events_list.append((event["timestamp"], type))
     return events_list
 
+def get_series_with_problems():
+    pass
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 

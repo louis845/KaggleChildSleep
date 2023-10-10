@@ -30,6 +30,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--data_to_infer", type=str, help="Which data to infer.", required=True)
     parser.add_argument("--load_model", type=str, help="Which model to load.", required=True)
+    parser.add_argument("--use_best_model", action="store_true", help="Whether to use best model. Default False.")
     config.add_argparse_arguments(parser)
 
     # parse args
@@ -45,6 +46,7 @@ if __name__ == "__main__":
     squeeze_excitation = args.squeeze_excitation
     disable_odd_random_shift = args.disable_odd_random_shift
     use_batch_norm = args.use_batch_norm
+    use_best_model = args.use_best_model
 
     # init model
     model = model_unet.Unet(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
@@ -56,7 +58,12 @@ if __name__ == "__main__":
     model.eval()
 
     # load model
-    model.load_state_dict(torch.load(os.path.join(previous_model_path, "model.pt")))
+    if use_best_model:
+        filepath = os.path.join(previous_model_path, "best_model.pt")
+        assert os.path.isfile(filepath), "Best model does not exist"
+        model.load_state_dict(torch.load(filepath))
+    else:
+        model.load_state_dict(torch.load(os.path.join(previous_model_path, "model.pt")))
 
     # load data
     all_data = convert_to_h5py_naive.load_all_data_into_dict()
