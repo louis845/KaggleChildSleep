@@ -54,3 +54,15 @@ if __name__ == "__main__":
                 end = int(single_event_wakeup["step"])
                 sleeping_timesteps[start:(end + 1)] = 1
         np.save(os.path.join(series_folder, "sleeping_timesteps.npy"), sleeping_timesteps)
+
+        # Save the time stamps
+        timestamps = pd.to_datetime(data_frame["timestamp"])
+        timestamps = timestamps.dt.tz_localize(None) # localize time
+        secs = timestamps.dt.second.to_numpy(dtype=np.float32)
+        mins = timestamps.dt.minute.to_numpy(dtype=np.float32)
+        hours = timestamps.dt.hour.to_numpy(dtype=np.float32)
+
+        np.save(os.path.join(series_folder, "secs.npy"), secs)
+        np.save(os.path.join(series_folder, "mins.npy"), mins)
+        np.save(os.path.join(series_folder, "hours.npy"), hours)
+

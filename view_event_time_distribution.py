@@ -51,3 +51,6 @@ if __name__ == "__main__":
 
     # show the plot
     plt.show()
+
+    print(events_wakeup["time_in_day"].max())
+    print(events_onset.loc[events_onset["time_in_day"] <= 20.4432]["time_in_day"].max())

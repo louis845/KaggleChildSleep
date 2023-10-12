@@ -7,33 +7,14 @@ from PySide2.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
+import tqdm
 
-class SliderWithDisplayWidget(QWidget):
-    def __init__(self, slider_name, slider_min, slider_max):
-        super(SliderWithDisplayWidget, self).__init__()
-
-        self.layout = QVBoxLayout(self)
-        self.slider = QSlider(Qt.Horizontal)
-        self.slider.setMinimum(slider_min)
-        self.slider.setMaximum(slider_max)
-        self.slider.setValue(slider_min)
-        self.slider_label = QLabel(slider_name + ": " + str(slider_min))
-        self.slider_label.setAlignment(Qt.AlignCenter)
-        self.slider_label.setMaximumHeight(self.slider_label.sizeHint().height())
-        self.layout.addWidget(self.slider_label)
-        self.layout.addWidget(self.slider)
-
-        self.slider.valueChanged.connect(self.update_label)
-        self.slider_name = slider_name
-
-    def get_value(self):
-        return self.slider.value()
-
-    def update_label(self, value):
-        self.slider_label.setText(self.slider_name + ": " + str(value))
+import convert_to_good_events
+import cleaned_combine_pseudo_labels
 
 class MatplotlibWidget(QWidget):
-    def __init__(self, df, title, events, pred_probas, parent=None):
+    def __init__(self, parent=None):
         super(MatplotlibWidget, self).__init__(parent)
 
         self.figure = Figure()
@@ -45,68 +26,15 @@ class MatplotlibWidget(QWidget):
         self.layout.addWidget(self.toolbar)
         self.layout.addWidget(self.canvas)
 
-        # Slider and Label
-        self.variance_slider = SliderWithDisplayWidget("Variance window", 100, 2000)
-        self.variance_median_slider = SliderWithDisplayWidget("Variance median window", 100, 2000)
-        self.layout.addWidget(self.variance_slider)
-        self.layout.addWidget(self.variance_median_slider)
 
-        self.show_data_checkbox = QCheckBox("Show Data")
-        self.layout.addWidget(self.show_data_checkbox)
-        self.show_data_checkbox.setChecked(True)
-
-        self.show_variance_checkbox = QCheckBox("Show Variance")
-        self.layout.addWidget(self.show_variance_checkbox)
-        self.show_variance_checkbox.setChecked(True)
-
-        self.show_variance_median_checkbox = QCheckBox("Show Variance Median")
-        self.layout.addWidget(self.show_variance_median_checkbox)
-        self.show_variance_median_checkbox.setChecked(False)
-
-        self.update_button = QPushButton("Update")
-        self.layout.addWidget(self.update_button)
-        self.update_button.clicked.connect(lambda: self.plot_data(self.df, self.title, self.events))
-
-        self.close_button = QPushButton("Close")
-        self.layout.addWidget(self.close_button)
-
-        self.df = df
-        self.title = title
-        self.events = events
-        self.pred_probas = pred_probas
-        self.plot_data(self.df, self.title, self.events)
-
-    def plot_data(self, df, title, events):
-        window = self.variance_slider.get_value()
-        window2 = self.variance_median_slider.get_value()
-        show_data = self.show_data_checkbox.isChecked()
-        show_variance = self.show_variance_checkbox.isChecked()
-        show_variance_median = self.show_variance_median_checkbox.isChecked()
-
+    def plot_data(self, title, anglez, enmo, timestamp, probas, events):
         self.axis.clear()
-        x = pd.to_datetime(df["timestamp"])  # Automatically parses the timestamp
-        y1 = df["anglez"] / 35.52 # std computed by check_series_properties.py
-        y2 = df["enmo"] / 0.1018 # std computed by check_series_properties.py
-        if show_data:
-            self.axis.plot(x, y1, label="anglez")
-            self.axis.plot(x, y2, label="enmo")
-
-        # Plot running variance
-        y1_var = y1.rolling(window).var()
-        y2_var = y2.rolling(window).var()
-        if show_variance:
-            self.axis.plot(x, y1_var, label="anglez variance")
-            self.axis.plot(x, y2_var, label="enmo variance")
-
-        # Plot running variance median
-        y1_var_median = y1_var.rolling(window2).median()
-        y2_var_median = y2_var.rolling(window2).median()
-        if show_variance_median:
-            self.axis.plot(x, y1_var_median, label="anglez variance median")
-            self.axis.plot(x, y2_var_median, label="enmo variance median")
-
-        if self.pred_probas is not None:
-            self.axis.plot(x, self.pred_probas, label="Probas")
+        x = pd.to_datetime(timestamp)  # Automatically parses the timestamp
+        y1 = anglez / 35.52 # std computed by check_series_properties.py
+        y2 = enmo / 0.1018 # std computed by check_series_properties.py
+        self.axis.plot(x, y1, label="anglez")
+        self.axis.plot(x, y2, label="enmo")
+        self.axis.plot(x, probas, label="probas")
 
         for event_time, event_type in events:
             color = "blue" if event_type == 1 else "red"
@@ -117,84 +45,71 @@ class MatplotlibWidget(QWidget):
         self.canvas.draw()
 
 class MainWidget(QWidget):
-    def __init__(self, parent=None):
-        super(MainWidget, self).__init__(parent)
+    def __init__(self, problem_intervals):
+        super(MainWidget, self).__init__(None)
+        self.problem_intervals = problem_intervals
+        self.preloaded_problem_intervals = []
+        self.preload_data()
 
-        self.setWindowTitle("Visualization")
+        self.setWindowTitle("Visualization of errors")
         self.resize(1280, 720)
 
-        self.layout = QHBoxLayout(self)
-        self.splitter = QSplitter(Qt.Horizontal)
+        self.layout = QVBoxLayout(self)
 
-        self.file_list = QListWidget()
-        self.main_widget = QWidget()
-        self.main_layout = QVBoxLayout()
-        self.main_widget.setLayout(self.main_layout)
+        self.display_widget = MatplotlibWidget()
 
-        self.splitter.addWidget(self.file_list)
-        self.splitter.addWidget(self.main_widget)
+        self.labels_widget = QWidget()
+        self.labels_layout = QHBoxLayout(self.labels_widget)
+        self.left_button = QPushButton("<")
+        self.right_button = QPushButton(">")
+        self.series_label = QLabel("0")
+        self.labels_layout.addWidget(self.left_button)
+        self.labels_layout.addWidget(self.series_label)
+        self.labels_layout.addWidget(self.right_button)
 
-        # Set initial sizes of splitter
-        self.splitter.setSizes([0.2 * self.width(), 0.8 * self.width()])
+        self.selection_slider = QSlider(Qt.Horizontal)
+        self.selection_slider.setMinimum(0)
+        self.selection_slider.setMaximum(len(problem_intervals) - 1)
 
-        self.layout.addWidget(self.splitter)
+        self.layout.addWidget(self.display_widget)
+        self.layout.addWidget(self.labels_widget)
+        self.layout.addWidget(self.selection_slider)
 
-        self.file_list.itemDoubleClicked.connect(self.open_file)
+        self.selection_slider.valueChanged.connect(self.update_display)
+        self.left_button.clicked.connect(self.left_button_clicked)
+        self.right_button.clicked.connect(self.right_button_clicked)
 
-        self.load_file_names()
+    def preload_data(self):
+        for series_id, start, end, labels in tqdm.tqdm(self.problem_intervals):
+            anglez, enmo, timestamp, events = load_file(series_id, start, end)
+            self.preloaded_problem_intervals.append((series_id, start, end, anglez, enmo, timestamp, labels, events))
 
-        # Tab widget and dropdown
-        self.dropdown_list = QComboBox()
-        self.main_layout.addWidget(self.dropdown_list)
-        self.dropdown_list.addItem("None")
-        if os.path.isdir("pseudo_labels"):
-            folders = os.listdir("pseudo_labels")
-            folders.sort()
-            for folder in folders:
-                self.dropdown_list.addItem(folder)
-        if os.path.isdir("ensembled_pseudo_labels"):
-            self.dropdown_list.addItem("ENSEMBLE_labels")
-            self.dropdown_list.addItem("ENSEMBLE_probas")
-        self.tab_widget = QTabWidget()
-        self.main_layout.addWidget(self.tab_widget)
+    def left_button_clicked(self):
+        self.selection_slider.setValue(max(self.selection_slider.value() - 1, 0))
+        self.update_display()
 
-    def load_file_names(self):
-        file_items = []
-        for file in os.listdir("./individual_train_series"):
-            if file.endswith(".parquet"):
-                file_items.append(file.replace(".parquet", ""))
-        file_items.sort()
-        for file in file_items:
-            item = QListWidgetItem(file)
-            self.file_list.addItem(item)
+    def right_button_clicked(self):
+        self.selection_slider.setValue(min(self.selection_slider.value() + 1, len(self.problem_intervals) - 1))
+        self.update_display()
 
-    def open_file(self, item):
-        filename = "./individual_train_series/" + item.text() + ".parquet"
-        df = pd.read_parquet(filename)
-        events = load_extra_events(item.text())
+    def update_display(self):
+        selected_index = self.selection_slider.value()
+        self.series_label.setText(str(selected_index))
+        series_id, start, end, anglez, enmo, timestamp, labels, events = self.preloaded_problem_intervals[selected_index]
+        self.display_widget.plot_data(series_id, anglez, enmo, timestamp, labels, events)
 
-        # load pred probas if selected
-        pred_probas = None
-        if self.dropdown_list.currentText() != "None":
-            pred_probas_folder = self.dropdown_list.currentText()
-            if pred_probas_folder == "ENSEMBLE_labels":
-                pred_probas = np.load(os.path.join("ensembled_pseudo_labels", "labels", item.text() + ".npy"))
-            elif pred_probas_folder == "ENSEMBLE_probas":
-                pred_probas = np.load(os.path.join("ensembled_pseudo_labels", "probas", item.text() + ".npy"))
-            elif os.path.isfile(os.path.join("pseudo_labels", pred_probas_folder, item.text() + ".npy")):
-                pred_probas = np.load(os.path.join("pseudo_labels", pred_probas_folder, item.text() + ".npy"))
+def load_file(item, start, end):
+    filename = "./individual_train_series/" + item + ".parquet"
+    df = pd.read_parquet(filename).iloc[start:end]
+    events = load_extra_events(item, start, end)
 
-        plot_widget = MatplotlibWidget(df, item.text(), events, pred_probas)
-        plot_widget.close_button.clicked.connect(lambda: self.close_tab(self.tab_widget.currentIndex()))
-        self.tab_widget.addTab(plot_widget, item.text())
+    return df["anglez"], df["enmo"], df["timestamp"], events
 
-    def close_tab(self, index):
-        self.tab_widget.removeTab(index)
-
-def load_extra_events(series_id: str):
+def load_extra_events(series_id: str, start, end):
     events = pd.read_csv("data/train_events.csv")
     assert set(list(events["event"].unique())) == {"onset", "wakeup"}
     events = events.loc[events["series_id"] == series_id].dropna()
+    events = events.loc[(events["step"] >= start) & (events["step"] <= end)]
     if len(events) == 0:
         return []
 
@@ -205,12 +120,78 @@ def load_extra_events(series_id: str):
         events_list.append((event["timestamp"], type))
     return events_list
 
-def get_series_with_problems():
-    pass
+def get_gt_series_metrics():
+    recalls = []
+    precisions = []
+    ious = []
+
+    problem_intervals = [] # tuple (series_id, start, end, predictions)
+    all_series_ids = [series_id for series_id in os.listdir(convert_to_good_events.FOLDER) if series_id != "summary.txt"]
+
+    for series_id in tqdm.tqdm(all_series_ids):
+        intervals = []
+
+        # load the gt intervals
+        good_events_file = os.path.join(convert_to_good_events.FOLDER, series_id, "event.csv")
+        try:
+            intervals_dat = pd.read_csv(good_events_file, header=None).to_numpy(dtype="object")
+            for k in range(intervals_dat.shape[0]):
+                start, end, position = intervals_dat[k, :]
+                intervals.append((start, end))
+        except pd.errors.EmptyDataError:
+            pass
+
+        # load the pseudo labels
+        pseudo_labels = np.load(os.path.join(cleaned_combine_pseudo_labels.LABELS_FOLDER, series_id + ".npy"))
+
+        # compare with pseudo labels
+        for start, end in intervals:
+            start = int(start)
+            end = int(end) + 1
+            intersection = np.sum(pseudo_labels[start:end])
+            recall = intersection / (end - start)
+
+            positions = np.argwhere(pseudo_labels[start:end] == 1).flatten()
+            pseudo_min = np.min(positions) + start
+            pseudo_max = np.max(positions) + start
+
+            while pseudo_min > 0 and pseudo_labels[pseudo_min] == 1:
+                pseudo_min -= 1
+            while pseudo_max < len(pseudo_labels) and pseudo_labels[pseudo_max] == 1:
+                pseudo_max += 1
+            pseudo_min += 1
+
+            precision = intersection / (pseudo_max - pseudo_min)
+            iou = intersection / (max(end, pseudo_max) - min(start, pseudo_min))
+
+            # save metrics
+            recalls.append(recall)
+            precisions.append(precision)
+            ious.append(iou)
+
+            # save problem intervals
+            if (recall < 0.95) or (precision < 0.95) or (iou < 0.95):
+                length = end - start
+                sstart = max(0, start - int(length * 1.1))
+                send = min(len(pseudo_labels), end + int(length * 1.1))
+                problem_intervals.append((series_id, sstart, send, pseudo_labels[sstart:send]))
+
+    return recalls, precisions, ious, problem_intervals
+
 
 if __name__ == "__main__":
+    recalls, precisions, ious, problem_intervals = get_gt_series_metrics()
+
+    print("Number of problem intervals: {} / {}".format(len(problem_intervals), len(recalls)))
+
     app = QApplication(sys.argv)
 
-    main_widget = MainWidget()
+    # plot boxplot of recalls, precisions and ious
+    fig, ax = plt.subplots()
+    ax.boxplot([recalls, precisions, ious])
+    ax.set_xticklabels(["Recall", "Precision", "IoU"])
+    plt.show()
+
+    main_widget = MainWidget(problem_intervals)
     main_widget.show()
     sys.exit(app.exec_())

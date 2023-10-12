@@ -22,56 +22,29 @@ import convert_to_h5py_naive
 import convert_to_h5py_splitted
 import convert_to_good_events
 import model_unet
+import model_attention_unet
 
-def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
-    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
-    bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
-    if mask is None:
-        return torch.sum(((torch.sigmoid(preds) - ground_truth) ** 2) * bce) / 461900.0 # mean length as shown in check_series_properties.py
-    else:
-        return torch.sum(((torch.sigmoid(preds) - ground_truth) ** 2) * bce * mask) / 461900.0
-
-def iou_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
-    ce_weight, epsilon = 0.02, 1.0
-    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
-    bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
-    probas = torch.sigmoid(preds)
-
-    if mask is None:
-        ce_loss = ce_weight * torch.mean(((probas - ground_truth) ** 2) * bce)
-        intersection = torch.sum(probas * ground_truth)
-        dice = (2.0 * intersection + epsilon) / (torch.sum(probas) + torch.sum(ground_truth) + epsilon)
-    else:
-        num_mask = torch.sum(mask)
-        if num_mask.item() > 0:
-            ce_loss = ce_weight * torch.sum(((probas - ground_truth) ** 2) * bce * mask) / num_mask
-        else:
-            ce_loss = 0.0
-        intersection = torch.sum(probas * ground_truth * mask)
-        dice = (2.0 * intersection + epsilon) / (torch.sum(probas * mask) + torch.sum(ground_truth * mask) + epsilon)
-    dice_loss = 1.0 - dice
-    return ce_loss + dice_loss
+# same as training_clean_data.py, but with 3 factor downsampling at the first layer
 
 def ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
                                                                                                  ground_truth.shape)
     bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
     if mask is None:
-        return torch.sum(bce) / 461900.0  # mean length as shown in check_series_properties.py
+        return torch.mean(bce)
     else:
-        return torch.sum(bce * mask) / 461900.0
+        return torch.mean(bce * mask)
 
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
                             accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
     optimizer_.zero_grad()
-    pred_logits = model_(accel_data_batch) # shape (batch_size, 1, T), where batch_size = 1
-    if use_iou_loss:
-        loss = iou_loss(pred_logits, labels_batch)
-    elif use_ce_loss:
-        loss = ce_loss(pred_logits, labels_batch)
+    if use_deep_supervision:
+        pred_logits_small, pred_logits_mid, pred_logits = model_(accel_data_batch, True) # shape (batch_size, 1, T), where batch_size = 1
+        loss = (ce_loss(pred_logits, labels_batch) + ce_loss(pred_logits_small, labels_batch) + ce_loss(pred_logits_mid, labels_batch)) / 3.0
     else:
-        loss = focal_loss(pred_logits, labels_batch)
+        pred_logits = model_(accel_data_batch)  # shape (batch_size, 1, T), where batch_size = 1
+        loss = ce_loss(pred_logits, labels_batch)
     loss.backward()
     optimizer_.step()
 
@@ -109,7 +82,7 @@ def training_step(record: bool):
             loss, preds = single_training_step(model, optimizer,
                                                accel_data_batch_torch,
                                                labels_batch_torch)
-            time.sleep(0.5)
+            time.sleep(0.6)
 
             # record
             if record:
@@ -130,31 +103,45 @@ def training_step(record: bool):
 def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tensor,
                            labels_batch: torch.Tensor, mask: torch.Tensor, more_mask: torch.Tensor,
                            pad_left, pad_right):
-    accel_data_batch = torch.nn.functional.pad(accel_data_batch, (pad_left, pad_right), mode="replicate")
-    pred_logits = model_(accel_data_batch)  # shape (batch_size, 1, T), where batch_size = 1
-    pred_logits = pred_logits[..., pad_left:(pred_logits.shape[-1] - pad_right)]
-    if use_iou_loss:
-        loss = iou_loss(pred_logits, labels_batch)
-        masked_loss = iou_loss(pred_logits, labels_batch, mask)
-        more_masked_loss = iou_loss(pred_logits, labels_batch, more_mask)
-    elif use_ce_loss:
+    with torch.no_grad():
+        accel_data_batch = torch.nn.functional.pad(accel_data_batch, (pad_left, pad_right), mode="replicate")
+        pred_logits = model_(accel_data_batch)  # shape (batch_size, 1, T), where batch_size = 1
+        pred_logits = pred_logits[..., pad_left:(pred_logits.shape[-1] - pad_right)]
         loss = ce_loss(pred_logits, labels_batch)
         masked_loss = ce_loss(pred_logits, labels_batch, mask)
         more_masked_loss = ce_loss(pred_logits, labels_batch, more_mask)
-    else:
-        loss = focal_loss(pred_logits, labels_batch)
-        masked_loss = focal_loss(pred_logits, labels_batch, mask)
-        more_masked_loss = focal_loss(pred_logits, labels_batch, more_mask)
-    preds = pred_logits > 0.0
+        preds = pred_logits > 0.0
 
-    return loss.item(), preds.to(torch.long), masked_loss.item(), more_masked_loss.item()
+        return loss.item(), preds.to(torch.long), masked_loss.item(), more_masked_loss.item()
+
+def single_validation_step_deep_supervision(model_: torch.nn.Module, accel_data_batch: torch.Tensor,
+                           labels_batch: torch.Tensor, mask: torch.Tensor, more_mask: torch.Tensor,
+                           pad_left, pad_right):
+    with torch.no_grad():
+        accel_data_batch = torch.nn.functional.pad(accel_data_batch, (pad_left, pad_right), mode="replicate")
+
+        pred_logits_small, pred_logits_mid, pred_logits = model_(accel_data_batch, True)  # shape (batch_size, 1, T), where batch_size = 1
+        pred_logits = pred_logits[..., pad_left:(pred_logits.shape[-1] - pad_right)]
+        pred_logits_small = pred_logits_small[..., pad_left:(pred_logits_small.shape[-1] - pad_right)]
+        pred_logits_mid = pred_logits_mid[..., pad_left:(pred_logits_mid.shape[-1] - pad_right)]
+
+        loss = (ce_loss(pred_logits, labels_batch) + ce_loss(pred_logits_small, labels_batch) + ce_loss(pred_logits_mid, labels_batch)) / 3.0
+        masked_loss = ce_loss(pred_logits, labels_batch, mask)
+        more_masked_loss = ce_loss(pred_logits, labels_batch, more_mask)
+
+        preds = pred_logits > 0.0
+        preds_small = pred_logits_small > 0.0
+        preds_mid = pred_logits_mid > 0.0
+
+        return loss.item(), preds.to(torch.long), preds_mid.to(torch.long),\
+            preds_small.to(torch.long), masked_loss.item(), more_masked_loss.item()
 
 def validation_step():
     for key in val_metrics:
         val_metrics[key].reset()
 
     # validation
-    with tqdm.tqdm(total=len(validation_entries)) as pbar:
+    with (tqdm.tqdm(total=len(validation_entries)) as pbar):
         for k in range(len(validation_entries)):
             batch_entry = validation_entries[k]  # series ids
 
@@ -168,22 +155,29 @@ def validation_step():
             more_mask = val_sampler_more.get_series_mask(batch_entry, all_data)
             more_mask = torch.tensor(more_mask, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
 
-            # pad such that lengths is a multiple of 16
-            pad_length = 16 - (accel_data_batch.shape[-1] % 16)
-            if pad_length == 16:
+            # pad such that lengths is a multiple of 48
+            pad_length = 48 - (accel_data_batch.shape[-1] % 48)
+            if pad_length == 48:
                 pad_length = 0
             pad_left = pad_length // 2
             pad_right = pad_length - pad_left
 
             # val model now
-            loss, preds, masked_loss, more_masked_loss = single_validation_step(model, accel_data_batch, labels_batch,
-                                                                                mask, more_mask,
-                                                                                pad_left, pad_right)
+            if use_deep_supervision:
+                loss, preds, preds_mid, preds_small, masked_loss, more_masked_loss =\
+                    single_validation_step_deep_supervision(model, accel_data_batch, labels_batch, mask, more_mask, pad_left, pad_right)
+            else:
+                loss, preds, masked_loss, more_masked_loss = single_validation_step(model, accel_data_batch, labels_batch,
+                                                                                    mask, more_mask,
+                                                                                    pad_left, pad_right)
 
             # record
             with torch.no_grad():
                 val_metrics["loss"].add(loss, 1)
                 val_metrics["metric"].add(preds, labels_batch.to(torch.long))
+                if use_deep_supervision:
+                    val_metrics["metric_mid"].add(preds_mid, labels_batch.to(torch.long))
+                    val_metrics["metric_small"].add(preds_small, labels_batch.to(torch.long))
                 val_metrics["loss_masked"].add(masked_loss, 1)
                 val_metrics["metric_masked"].add(preds, labels_batch.to(torch.long), mask.to(torch.long))
                 val_metrics["loss_more_masked"].add(more_masked_loss, 1)
@@ -211,7 +205,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train a sleeping prediction model with only clean data.")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for. Default 50.")
-    parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate to use. Default 1e-3.")
+    parser.add_argument("--learning_rate", type=float, default=5e-3, help="Learning rate to use. Default 5e-3.")
+    parser.add_argument("--use_decay_schedule", action="store_true", help="Whether to use a decay schedule. Default False.")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
     parser.add_argument("--second_momentum", type=float, default=0.999, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
     parser.add_argument("--optimizer", type=str, default="adam", help="Which optimizer to use. Available options: adam, sgd. Default adam.")
@@ -224,12 +219,11 @@ if __name__ == "__main__":
     parser.add_argument("--disable_odd_random_shift", action="store_true", help="Whether to disable odd random shift. Default False.")
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--use_mixup_training", action="store_true", help="Whether to use mixup training. Default False.")
-    parser.add_argument("--use_iou_loss", action="store_true", help="Whether to use IoU loss. Default False.")
-    parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use CE loss. Default False.")
+    parser.add_argument("--use_deep_supervision", action="store_true", help="Whether to use deep supervision. Default False.")
     parser.add_argument("--record_best_model", action="store_true", help="Whether to record the best model. Default False.")
     parser.add_argument("--do_not_exclude", action="store_true", help="Whether to not exclude any events where the watch isn't being worn. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
-    parser.add_argument("--length", default=7000000, help="The fixed length of the training. Default 7000000.")
+    parser.add_argument("--length", default=9600000, help="The fixed length of the training. Default 9600000.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
     manager_models.add_argparse_arguments(parser)
@@ -252,6 +246,7 @@ if __name__ == "__main__":
     # obtain model and training parameters
     epochs = args.epochs
     learning_rate = args.learning_rate
+    use_decay_schedule = args.use_decay_schedule
     momentum = args.momentum
     second_momentum = args.second_momentum
     optimizer_type = args.optimizer
@@ -263,15 +258,12 @@ if __name__ == "__main__":
     disable_odd_random_shift = args.disable_odd_random_shift
     use_batch_norm = args.use_batch_norm
     use_mixup_training = args.use_mixup_training
-    use_iou_loss = args.use_iou_loss
-    use_ce_loss = args.use_ce_loss
+    use_deep_supervision = args.use_deep_supervision
     record_best_model = args.record_best_model
     do_not_exclude = args.do_not_exclude
     dropout = args.dropout
     length = args.length
     num_extra_steps = args.num_extra_steps
-
-    assert not (use_iou_loss and use_mixup_training), "Cannot use both IoU loss and mixup training."
 
     print("Epochs: " + str(epochs))
     print("Learning rate: " + str(learning_rate))
@@ -284,10 +276,16 @@ if __name__ == "__main__":
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
-    model = model_unet.Unet(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
-                            bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
-                            squeeze_excitation_bottleneck_factor=4, odd_random_shift_training=(not disable_odd_random_shift),
-                            dropout=dropout, use_batch_norm=use_batch_norm)
+    if use_deep_supervision:
+        model = model_attention_unet.Unet3fDeepSupervision(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
+                                bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
+                                squeeze_excitation_bottleneck_factor=4,
+                                dropout=dropout, use_batch_norm=use_batch_norm)
+    else:
+        model = model_unet.Unet(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
+                                bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
+                                squeeze_excitation_bottleneck_factor=4, odd_random_shift_training=(not disable_odd_random_shift),
+                                dropout=dropout, use_batch_norm=use_batch_norm, initial_3f_downsampling=True)
     model = model.to(config.device)
 
     # initialize optimizer
@@ -329,6 +327,7 @@ if __name__ == "__main__":
         "validation_dataset": val_dset_name,
         "epochs": epochs,
         "learning_rate": learning_rate,
+        "use_decay_schedule": use_decay_schedule,
         "momentum": momentum,
         "second_momentum": second_momentum,
         "optimizer": optimizer_type,
@@ -340,8 +339,7 @@ if __name__ == "__main__":
         "disable_odd_random_shift": disable_odd_random_shift,
         "use_batch_norm": use_batch_norm,
         "use_mixup_training": use_mixup_training,
-        "use_iou_loss": use_iou_loss,
-        "use_ce_loss": use_ce_loss,
+        "use_deep_supervision": use_deep_supervision,
         "record_best_model": record_best_model,
         "do_not_exclude": do_not_exclude,
         "dropout": dropout,
@@ -362,6 +360,9 @@ if __name__ == "__main__":
     train_metrics["metric"] = metrics.BinaryMetrics("train_metric")
     val_metrics["loss"] = metrics.NumericalMetric("val_loss")
     val_metrics["metric"] = metrics.BinaryMetrics("val_metric")
+    if use_deep_supervision:
+        val_metrics["metric_mid"] = metrics.BinaryMetrics("val_metric_deep_mid")
+        val_metrics["metric_small"] = metrics.BinaryMetrics("val_metric_deep_small")
     val_metrics["loss_masked"] = metrics.NumericalMetric("val_loss_masked")
     val_metrics["metric_masked"] = metrics.BinaryMetrics("val_metric_masked")
     val_metrics["loss_more_masked"] = metrics.NumericalMetric("val_loss_more_masked")
@@ -418,12 +419,6 @@ if __name__ == "__main__":
                 torch.save(model.state_dict(), os.path.join(model_dir, "latest_model.pt"))
                 torch.save(optimizer.state_dict(), os.path.join(model_dir, "latest_optimizer.pt"))
 
-            if warmup_steps > 0:
-                warmup_steps -= 1
-                if warmup_steps == 0:
-                    for g in optimizer.param_groups:
-                        g["lr"] = learning_rate
-
             # switch model to eval mode, and reset all running stats for batchnorm layers
             model.eval()
             with torch.no_grad():
@@ -462,6 +457,20 @@ if __name__ == "__main__":
                             f.write("Best val precision: {}\n".format(val_history["val_metric_precision"][-1]))
 
             gc.collect()
+
+            # adjust learning rate
+            if warmup_steps > 0:
+                warmup_steps -= 1
+                if warmup_steps == 0:
+                    for g in optimizer.param_groups:
+                        g["lr"] = learning_rate
+            else:
+                if use_decay_schedule:
+                    if epoch > 25:
+                        new_rate = learning_rate * 0.98 * np.power(0.9, (epoch - 25)) + learning_rate * 0.02
+                        print("Setting learning rate to {:.5f}".format(new_rate))
+                        for g in optimizer.param_groups:
+                            g["lr"] = new_rate
 
         print("Training complete! Saving and finalizing...")
     except KeyboardInterrupt:
