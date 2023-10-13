@@ -15,9 +15,15 @@ def load_all_data_into_dict():
         series_folder = os.path.join(FOLDER, series_id)
         accel = np.load(os.path.join(series_folder, "accel.npy"))
         sleeping_timesteps = np.load(os.path.join(series_folder, "sleeping_timesteps.npy"))
+        secs = np.load(os.path.join(series_folder, "secs.npy"))
+        mins = np.load(os.path.join(series_folder, "mins.npy"))
+        hours = np.load(os.path.join(series_folder, "hours.npy"))
         all_data[series_id] = {}
         all_data[series_id]["accel"] = accel
         all_data[series_id]["sleeping_timesteps"] = sleeping_timesteps
+        all_data[series_id]["secs"] = secs
+        all_data[series_id]["mins"] = mins
+        all_data[series_id]["hours"] = hours
     return all_data
 
 if __name__ == "__main__":
@@ -56,8 +62,7 @@ if __name__ == "__main__":
         np.save(os.path.join(series_folder, "sleeping_timesteps.npy"), sleeping_timesteps)
 
         # Save the time stamps
-        timestamps = pd.to_datetime(data_frame["timestamp"])
-        timestamps = timestamps.dt.tz_localize(None) # localize time
+        timestamps = pd.to_datetime(data_frame["timestamp"]).apply(lambda dt: dt.tz_localize(None)) # localize time also
         secs = timestamps.dt.second.to_numpy(dtype=np.float32)
         mins = timestamps.dt.minute.to_numpy(dtype=np.float32)
         hours = timestamps.dt.hour.to_numpy(dtype=np.float32)

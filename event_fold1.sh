@@ -1,1 +1,1 @@
-python training_event_resnet.py --device 0 --memory_limit 0.495 --model model_fold1_event --train_data fold_1_train --val_data fold_1_val --num_extra_steps 9 --positive_weight 20.0 --hidden_channels 8 --hidden_blocks 4 6 8 12 8 --squeeze_excitation
+python training_event_resnet.py --device 0 --memory_limit 0.495 --model model_fold1_event --train_data fold_1_train --val_data fold_1_val --num_extra_steps 4 --hidden_channels 2 --hidden_blocks 4 4 4 4 4 4 --squeeze_excitation --use_batch_norm --dropout 0.75

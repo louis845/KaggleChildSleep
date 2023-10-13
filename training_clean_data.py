@@ -23,35 +23,6 @@ import convert_to_h5py_splitted
 import convert_to_good_events
 import model_unet
 
-def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
-    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
-    bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
-    if mask is None:
-        return torch.sum(((torch.sigmoid(preds) - ground_truth) ** 2) * bce) / 461900.0 # mean length as shown in check_series_properties.py
-    else:
-        return torch.sum(((torch.sigmoid(preds) - ground_truth) ** 2) * bce * mask) / 461900.0
-
-def iou_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
-    ce_weight, epsilon = 0.02, 1.0
-    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
-    bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
-    probas = torch.sigmoid(preds)
-
-    if mask is None:
-        ce_loss = ce_weight * torch.mean(((probas - ground_truth) ** 2) * bce)
-        intersection = torch.sum(probas * ground_truth)
-        dice = (2.0 * intersection + epsilon) / (torch.sum(probas) + torch.sum(ground_truth) + epsilon)
-    else:
-        num_mask = torch.sum(mask)
-        if num_mask.item() > 0:
-            ce_loss = ce_weight * torch.sum(((probas - ground_truth) ** 2) * bce * mask) / num_mask
-        else:
-            ce_loss = 0.0
-        intersection = torch.sum(probas * ground_truth * mask)
-        dice = (2.0 * intersection + epsilon) / (torch.sum(probas * mask) + torch.sum(ground_truth * mask) + epsilon)
-    dice_loss = 1.0 - dice
-    return ce_loss + dice_loss
-
 def ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
                                                                                                  ground_truth.shape)

@@ -27,6 +27,7 @@ if __name__ == "__main__":
     # get events
     events_onset = events_df.loc[events_df["event"] == "onset"]
     events_wakeup = events_df.loc[events_df["event"] == "wakeup"]
+    events_wakeup = events_wakeup.loc[((events_df["series_id"] != "b750c8c1556c") | (events_df["night"] != 23))] # outlier wakeup time
 
     # create matplotlib figure with 3 plots, one for each event type, and one for all events.
     # they should plot the time distribution of the events, in 1hr bins
@@ -53,4 +54,4 @@ if __name__ == "__main__":
     plt.show()
 
     print(events_wakeup["time_in_day"].max())
-    print(events_onset.loc[events_onset["time_in_day"] <= 20.4432]["time_in_day"].max())
+    print(events_onset.loc[events_onset["time_in_day"] <= 17.0]["time_in_day"].max())

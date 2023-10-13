@@ -160,6 +160,17 @@ def load_all_data_into_dict(all_events=False):
             pass
     return all_data
 
+bad_segmentations_tail = ["31011ade7c0a", "a596ad0b82aa", "13b4d6a01d27", "10469f6765bf",
+                              "05e1944c3818", "a9a2f7fac455", "ccdee561ee5d"] # non completed segmentations ccdee561ee5d
+bad_segmentations_tail = bad_segmentations_tail + [
+    "b7188813d58a", "60d31b0bec3b", "3318a0e3ed6f", "599ca4ed791b", "0f572d690310",
+    "0cfc06c129cc", "55a47ff9dc8a", "a4e48102f402"
+] # probably really take off watch
+bad_segmentations_tail = bad_segmentations_tail + [
+    "4feda0596965", "df33ae359fb5", "72ba4a8afff4"
+] # partial, with some non-completed, some take off watch
+bad_segmentations_head = []
+
 if __name__ == "__main__":
     # Ensure the input directory exists
     assert os.path.exists("individual_train_series"), "You should run extract_individual_series.py before this"
@@ -175,17 +186,6 @@ if __name__ == "__main__":
     min_non_event_series_id, max_non_event_series_id = None, None
     if not os.path.isdir(FOLDER):
         os.mkdir(FOLDER)
-
-    bad_segmentations_tail = ["31011ade7c0a", "a596ad0b82aa", "13b4d6a01d27", "10469f6765bf",
-                              "05e1944c3818", "a9a2f7fac455", "ccdee561ee5d"] # non completed segmentations ccdee561ee5d
-    bad_segmentations_tail = bad_segmentations_tail + [
-        "b7188813d58a", "60d31b0bec3b", "3318a0e3ed6f", "599ca4ed791b", "0f572d690310",
-        "0cfc06c129cc", "55a47ff9dc8a", "a4e48102f402"
-    ] # probably really take off watch
-    bad_segmentations_tail = bad_segmentations_tail + [
-        "4feda0596965", "df33ae359fb5", "72ba4a8afff4"
-    ] # partial, with some non-completed, some take off watch
-    bad_segmentations_head = []
 
     for file in tqdm.tqdm(os.listdir("individual_train_series")):
         series_id = file.split(".")[0]
