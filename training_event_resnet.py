@@ -159,6 +159,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_decay_schedule", action="store_true", help="Whether to use a decay schedule. Default False.")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
     parser.add_argument("--second_momentum", type=float, default=0.999, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
+    parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use. Default 0.0.")
     parser.add_argument("--optimizer", type=str, default="adam", help="Which optimizer to use. Available options: adam, sgd. Default adam.")
     parser.add_argument("--epochs_per_save", type=int, default=2, help="Number of epochs between saves. Default 2.")
     parser.add_argument("--hidden_blocks", type=int, nargs="+", default=[1, 6, 8, 23, 8],
@@ -198,6 +199,7 @@ if __name__ == "__main__":
     use_decay_schedule = args.use_decay_schedule
     momentum = args.momentum
     second_momentum = args.second_momentum
+    weight_decay = args.weight_decay
     optimizer_type = args.optimizer
     epochs_per_save = args.epochs_per_save
     hidden_blocks = args.hidden_blocks
@@ -214,10 +216,6 @@ if __name__ == "__main__":
     num_extra_steps = args.num_extra_steps
 
     print("Epochs: " + str(epochs))
-    print("Learning rate: " + str(learning_rate))
-    print("Momentum: " + str(momentum))
-    print("Second momentum: " + str(second_momentum))
-    print("Optimizer: " + optimizer_type)
     print("Dropout: " + str(dropout))
     print("Dropout pos embeddings: " + str(dropout_pos_embeddings))
     print("Batch norm: " + str(use_batch_norm))
@@ -236,11 +234,15 @@ if __name__ == "__main__":
     print("Learning rate: " + str(learning_rate))
     print("Momentum: " + str(momentum))
     print("Second momentum: " + str(second_momentum))
+    print("Weight decay: " + str(weight_decay))
     print("Optimizer: " + optimizer_type)
     if optimizer_type.lower() == "adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, betas=(momentum, second_momentum))
+        if weight_decay > 0.0:
+            optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(momentum, second_momentum), weight_decay=weight_decay)
+        else:
+            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, betas=(momentum, second_momentum))
     elif optimizer_type.lower() == "sgd":
-        optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+        optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum, weight_decay=weight_decay)
     else:
         print("Invalid optimizer. The available options are: adam, sgd.")
         exit(1)
@@ -274,6 +276,7 @@ if __name__ == "__main__":
         "use_decay_schedule": use_decay_schedule,
         "momentum": momentum,
         "second_momentum": second_momentum,
+        "weight_decay": weight_decay,
         "optimizer": optimizer_type,
         "epochs_per_save": epochs_per_save,
         "hidden_blocks": hidden_blocks,
