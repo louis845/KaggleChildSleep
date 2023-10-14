@@ -48,7 +48,10 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
                             accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
     optimizer_.zero_grad()
     pred_logits = model_(accel_data_batch, deep_supervision=False)  # shape (batch_size, 2, T // 12)
-    loss = focal_loss(pred_logits, labels_batch)
+    if use_ce_loss:
+        loss = ce_loss(pred_logits, labels_batch)
+    else:
+        loss = focal_loss(pred_logits, labels_batch)
     loss.backward()
     optimizer_.step()
 
@@ -68,7 +71,7 @@ def training_step(record: bool):
     # training
     with tqdm.tqdm(total=len(training_sampler)) as pbar:
         while training_sampler.entries_remaining() > 0:
-            accel_data_batch, labels_batch, increment = training_sampler.sample(batch_size)
+            accel_data_batch, labels_batch, increment = training_sampler.sample(batch_size, random_shift=random_shift)
 
             accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
             labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
@@ -99,7 +102,10 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
                            labels_batch: torch.Tensor):
     with torch.no_grad():
         pred_logits = model_(accel_data_batch)  # shape (batch_size, 2, T)
-        loss = focal_loss(pred_logits, labels_batch)
+        if use_ce_loss:
+            loss = ce_loss(pred_logits, labels_batch)
+        else:
+            loss = focal_loss(pred_logits, labels_batch)
         preds = pred_logits > 0.0
 
         return loss.item(), preds.to(torch.long)
@@ -160,10 +166,12 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_channels", type=int, default=32, help="Number of hidden channels. Default None.")
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
-    parser.add_argument("--disable_odd_random_shift", action="store_true", help="Whether to disable odd random shift. Default False.")
+    parser.add_argument("--random_shift", type=int, default=0, help="Randomly shift the intervals by at most this amount. Default 0.")
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--do_not_exclude", action="store_true", help="Whether to not exclude any events where the watch isn't being worn. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
+    parser.add_argument("--dropout_pos_embeddings", action="store_true", help="Whether to dropout the positional embeddings. Default False.")
+    parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use cross entropy loss. Default False.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
@@ -196,10 +204,12 @@ if __name__ == "__main__":
     hidden_channels = args.hidden_channels
     bottleneck_factor = args.bottleneck_factor
     squeeze_excitation = args.squeeze_excitation
-    disable_odd_random_shift = args.disable_odd_random_shift
+    random_shift = args.random_shift
     use_batch_norm = args.use_batch_norm
     do_not_exclude = args.do_not_exclude
     dropout = args.dropout
+    dropout_pos_embeddings = args.dropout_pos_embeddings
+    use_ce_loss = args.use_ce_loss
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
 
@@ -209,6 +219,7 @@ if __name__ == "__main__":
     print("Second momentum: " + str(second_momentum))
     print("Optimizer: " + optimizer_type)
     print("Dropout: " + str(dropout))
+    print("Dropout pos embeddings: " + str(dropout_pos_embeddings))
     print("Batch norm: " + str(use_batch_norm))
     print("Squeeze excitation: " + str(squeeze_excitation))
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
@@ -217,7 +228,8 @@ if __name__ == "__main__":
     model = model_attention_unet.Unet3fDeepSupervision(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
                             bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                             squeeze_excitation_bottleneck_factor=4,
-                            dropout=dropout, use_batch_norm=use_batch_norm, out_channels=2)
+                            dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
+                            use_batch_norm=use_batch_norm, out_channels=2)
     model = model.to(config.device)
 
     # initialize optimizer
@@ -268,10 +280,12 @@ if __name__ == "__main__":
         "hidden_channels": hidden_channels,
         "bottleneck_factor": bottleneck_factor,
         "squeeze_excitation": squeeze_excitation,
-        "disable_odd_random_shift": disable_odd_random_shift,
+        "random_shift": random_shift,
         "use_batch_norm": use_batch_norm,
         "do_not_exclude": do_not_exclude,
         "dropout": dropout,
+        "dropout_pos_embeddings": dropout_pos_embeddings,
+        "use_ce_loss": use_ce_loss,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
     }
@@ -298,6 +312,7 @@ if __name__ == "__main__":
     # Initialize the sampler
     print("Initializing the samplers...")
     print("Batch size: " + str(batch_size))
+    print("Random shift: " + str(random_shift))
     training_sampler = convert_to_interval_events.IntervalEventsSampler(training_entries, all_data, all_interval_segmentations,
                                                                         train_or_test="train")
     val_sampler = convert_to_interval_events.IntervalEventsSampler(validation_entries, all_data, all_interval_segmentations,

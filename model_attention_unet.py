@@ -41,7 +41,8 @@ class MultiHeadAttn1D(torch.nn.Module):
 
 class AttentionBlock1DWithPositionalEncoding(torch.nn.Module):
     def __init__(self, channels, hidden_channels, key_query_channels,
-                 heads=8, dropout=0.0, learned_embeddings=True, input_length=1000):
+                 heads=8, dropout=0.0, learned_embeddings=True, input_length=1000,
+                 dropout_pos_embeddings=False):
         super(AttentionBlock1DWithPositionalEncoding, self).__init__()
         assert channels % 2 == 0, "channels must be divisible by 2"
         self.input_length = input_length
@@ -60,6 +61,8 @@ class AttentionBlock1DWithPositionalEncoding(torch.nn.Module):
         if learned_embeddings:
             self.positional_embedding = torch.nn.Parameter(torch.randn((1, channels // 2, input_length)))
 
+        self.dropout_pos_embeddings = dropout_pos_embeddings
+
     def forward(self, x, positional_embedding=None):
         if self.learned_embeddings:
             assert positional_embedding is None, "positional_embedding must be None if learned_embeddings is True"
@@ -69,6 +72,14 @@ class AttentionBlock1DWithPositionalEncoding(torch.nn.Module):
             assert positional_embedding.shape == (x.shape[0], x.shape[1] // 2, self.input_length),\
                 "positional_embedding.shape: {}, x.shape: {}".format(positional_embedding.shape, x.shape)
         assert x.shape[-1] == self.input_length, "x.shape: {}, self.input_length: {}".format(x.shape, self.input_length)
+
+        if self.training and self.dropout_pos_embeddings:
+            positional_embedding_mean = torch.mean(positional_embedding, dim=-1, keepdim=True)
+            #lam = torch.rand((positional_embedding.shape[0], 1, 1), device=positional_embedding.device, dtype=torch.float32)
+            lam = np.random.beta(0.3, 0.3, size=(positional_embedding.shape[0], 1, 1))
+            lam = torch.tensor(lam, device=positional_embedding.device, dtype=torch.float32)
+            positional_embedding = lam * positional_embedding + (1.0 - lam) * positional_embedding_mean
+
         x_init = x
         x = self.multihead_attn(torch.cat([x, positional_embedding], dim=1))
         x = self.layer_norm1(x)
@@ -152,7 +163,7 @@ class Unet3fDeepSupervision(torch.nn.Module):
 
                  attention_channels=128, attention_heads=4,
                  attention_key_query_channels=64, attention_blocks=4,
-                 expected_attn_input_length=17280):
+                 expected_attn_input_length=17280, dropout_pos_embeddings=False):
         super(Unet3fDeepSupervision, self).__init__()
         assert kernel_size % 2 == 1, "kernel size must be odd"
         assert len(blocks) >= 6, "blocks must have at least 6 elements"
@@ -186,7 +197,8 @@ class Unet3fDeepSupervision(torch.nn.Module):
                                                        heads=attention_heads,
                                                        dropout=dropout,
                                                        learned_embeddings=True,
-                                                       input_length=expected_attn_input_length // (3 * (2 ** (len(blocks) - 2))))
+                                                       input_length=expected_attn_input_length // (3 * (2 ** (len(blocks) - 2))),
+                                                       dropout_pos_embeddings=dropout_pos_embeddings)
             )
         self.no_contraction_head = UnetHead3f(self.pyramid_height - 3, stem_final_layer_channels,
                                                 kernel_size, dropout)
