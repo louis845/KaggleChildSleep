@@ -204,11 +204,12 @@ if __name__ == "__main__":
     all_good_events_no_exclusion = convert_to_good_events.load_all_data_into_dict(all_events=True)
 
     parser = argparse.ArgumentParser(description="Train a sleeping prediction model with only clean data.")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for. Default 50.")
+    parser.add_argument("--epochs", type=int, default=30, help="Number of epochs to train for. Default 30.")
     parser.add_argument("--learning_rate", type=float, default=5e-3, help="Learning rate to use. Default 5e-3.")
     parser.add_argument("--use_decay_schedule", action="store_true", help="Whether to use a decay schedule. Default False.")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
     parser.add_argument("--second_momentum", type=float, default=0.999, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
+    parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use. Default 0.0.")
     parser.add_argument("--optimizer", type=str, default="adam", help="Which optimizer to use. Available options: adam, sgd. Default adam.")
     parser.add_argument("--epochs_per_save", type=int, default=2, help="Number of epochs between saves. Default 2.")
     parser.add_argument("--hidden_blocks", type=int, nargs="+", default=[1, 6, 8, 23, 8],
@@ -216,6 +217,7 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_channels", type=int, default=32, help="Number of hidden channels. Default None.")
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
+    parser.add_argument("--kernel_size", type=int, default=11, help="Kernel size to use. Default 11.")
     parser.add_argument("--disable_odd_random_shift", action="store_true", help="Whether to disable odd random shift. Default False.")
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--use_mixup_training", action="store_true", help="Whether to use mixup training. Default False.")
@@ -249,12 +251,14 @@ if __name__ == "__main__":
     use_decay_schedule = args.use_decay_schedule
     momentum = args.momentum
     second_momentum = args.second_momentum
+    weight_decay = args.weight_decay
     optimizer_type = args.optimizer
     epochs_per_save = args.epochs_per_save
     hidden_blocks = args.hidden_blocks
     hidden_channels = args.hidden_channels
     bottleneck_factor = args.bottleneck_factor
     squeeze_excitation = args.squeeze_excitation
+    kernel_size = args.kernel_size
     disable_odd_random_shift = args.disable_odd_random_shift
     use_batch_norm = args.use_batch_norm
     use_mixup_training = args.use_mixup_training
@@ -266,23 +270,20 @@ if __name__ == "__main__":
     num_extra_steps = args.num_extra_steps
 
     print("Epochs: " + str(epochs))
-    print("Learning rate: " + str(learning_rate))
-    print("Momentum: " + str(momentum))
-    print("Second momentum: " + str(second_momentum))
-    print("Optimizer: " + optimizer_type)
     print("Dropout: " + str(dropout))
     print("Batch norm: " + str(use_batch_norm))
     print("Squeeze excitation: " + str(squeeze_excitation))
+    print("Kernel size: " + str(kernel_size))
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
     if use_deep_supervision:
-        model = model_attention_unet.Unet3fDeepSupervision(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
+        model = model_attention_unet.Unet3fDeepSupervision(2, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                                 bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                                 squeeze_excitation_bottleneck_factor=4,
                                 dropout=dropout, use_batch_norm=use_batch_norm, out_channels=2)
     else:
-        model = model_unet.Unet(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
+        model = model_unet.Unet(2, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                                 bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                                 squeeze_excitation_bottleneck_factor=4, odd_random_shift_training=(not disable_odd_random_shift),
                                 dropout=dropout, use_batch_norm=use_batch_norm, initial_3f_downsampling=True)
@@ -292,11 +293,15 @@ if __name__ == "__main__":
     print("Learning rate: " + str(learning_rate))
     print("Momentum: " + str(momentum))
     print("Second momentum: " + str(second_momentum))
+    print("Weight decay: " + str(weight_decay))
     print("Optimizer: " + optimizer_type)
     if optimizer_type.lower() == "adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, betas=(momentum, second_momentum))
+        if weight_decay > 0.0:
+            optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(momentum, second_momentum), weight_decay=weight_decay)
+        else:
+            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, betas=(momentum, second_momentum))
     elif optimizer_type.lower() == "sgd":
-        optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+        optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum, weight_decay=weight_decay)
     else:
         print("Invalid optimizer. The available options are: adam, sgd.")
         exit(1)
@@ -330,12 +335,14 @@ if __name__ == "__main__":
         "use_decay_schedule": use_decay_schedule,
         "momentum": momentum,
         "second_momentum": second_momentum,
+        "weight_decay": weight_decay,
         "optimizer": optimizer_type,
         "epochs_per_save": epochs_per_save,
         "hidden_blocks": hidden_blocks,
         "hidden_channels": hidden_channels,
         "bottleneck_factor": bottleneck_factor,
         "squeeze_excitation": squeeze_excitation,
+        "kernel_size": kernel_size,
         "disable_odd_random_shift": disable_odd_random_shift,
         "use_batch_norm": use_batch_norm,
         "use_mixup_training": use_mixup_training,
