@@ -163,7 +163,8 @@ class Unet3fDeepSupervision(torch.nn.Module):
 
                  attention_channels=128, attention_heads=4,
                  attention_key_query_channels=64, attention_blocks=4,
-                 expected_attn_input_length=17280, dropout_pos_embeddings=False):
+                 expected_attn_input_length=17280, dropout_pos_embeddings=False,
+                 attn_out_channels=1):
         super(Unet3fDeepSupervision, self).__init__()
         assert kernel_size % 2 == 1, "kernel size must be odd"
         assert len(blocks) >= 6, "blocks must have at least 6 elements"
@@ -176,13 +177,13 @@ class Unet3fDeepSupervision(torch.nn.Module):
                                        use_batch_norm=use_batch_norm, downsample_3f=True)
         self.pyramid_height = len(blocks)
 
-        self.small_head = UnetHead(self.pyramid_height - 2, hidden_channels, kernel_size, use_batch_norm, dropout, initial_downsample_3f=True)
-        self.mid_head = UnetHead(self.pyramid_height - 1, hidden_channels, kernel_size, use_batch_norm, dropout, initial_downsample_3f=True)
-        self.large_head = UnetHead(self.pyramid_height, hidden_channels, kernel_size, use_batch_norm, dropout, initial_downsample_3f=True)
+        self.small_head = UnetHead(self.pyramid_height - 2, hidden_channels, 1, use_batch_norm, dropout, initial_downsample_3f=True)
+        self.mid_head = UnetHead(self.pyramid_height - 1, hidden_channels, 1, use_batch_norm, dropout, initial_downsample_3f=True)
+        self.large_head = UnetHead(self.pyramid_height, hidden_channels, 1, use_batch_norm, dropout, initial_downsample_3f=True)
 
-        self.final_conv_small = torch.nn.Conv1d(hidden_channels, out_channels, kernel_size=kernel_size, bias=False, padding="same", padding_mode="replicate")
-        self.final_conv_mid = torch.nn.Conv1d(hidden_channels, out_channels, kernel_size=kernel_size, bias=False, padding="same", padding_mode="replicate")
-        self.final_conv_large = torch.nn.Conv1d(hidden_channels, out_channels, kernel_size=kernel_size, bias=False, padding="same", padding_mode="replicate")
+        self.final_conv_small = torch.nn.Conv1d(hidden_channels, out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
+        self.final_conv_mid = torch.nn.Conv1d(hidden_channels, out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
+        self.final_conv_large = torch.nn.Conv1d(hidden_channels, out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
 
         self.use_dropout = dropout > 0.0
 
@@ -201,9 +202,9 @@ class Unet3fDeepSupervision(torch.nn.Module):
                                                        dropout_pos_embeddings=dropout_pos_embeddings)
             )
         self.no_contraction_head = UnetHead3f(self.pyramid_height - 3, stem_final_layer_channels,
-                                                kernel_size, dropout)
+                                                kernel_size=1, dropout=dropout)
         self.outconv = torch.nn.Conv1d(stem_final_layer_channels,
-                                       out_channels, kernel_size=1,
+                                       attn_out_channels, kernel_size=1,
                                        bias=True, padding="same", padding_mode="replicate")
         self.expected_attn_input_length = expected_attn_input_length
 

@@ -313,7 +313,7 @@ if __name__ == "__main__":
                             bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                             squeeze_excitation_bottleneck_factor=4,
                             dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
-                            use_batch_norm=use_batch_norm, out_channels=2)
+                            use_batch_norm=use_batch_norm, out_channels=1, attn_out_channels=2)
     model = model.to(config.device)
 
     # initialize optimizer
