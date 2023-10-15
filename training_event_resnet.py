@@ -104,7 +104,7 @@ def training_step(record: bool):
                 # record
                 if record:
                     with torch.no_grad():
-                        train_metrics["deep_loss"].add(loss, increment)
+                        train_metrics["deep_loss"].add(loss, 1)
                         train_metrics["deep_metric"].add(preds, (labels_batch_torch > 0.5).to(torch.long))
 
             else:
