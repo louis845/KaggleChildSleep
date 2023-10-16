@@ -251,6 +251,7 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_channels", type=int, default=32, help="Number of hidden channels. Default None.")
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
+    parser.add_argument("--kernel_size", type=int, default=11, help="Kernel size for the first layer. Default 11.")
     parser.add_argument("--random_shift", type=int, default=0, help="Randomly shift the intervals by at most this amount. Default 0.")
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--do_not_exclude", action="store_true", help="Whether to not exclude any events where the watch isn't being worn. Default False.")
@@ -291,6 +292,7 @@ if __name__ == "__main__":
     hidden_channels = args.hidden_channels
     bottleneck_factor = args.bottleneck_factor
     squeeze_excitation = args.squeeze_excitation
+    kernel_size = args.kernel_size
     random_shift = args.random_shift
     use_batch_norm = args.use_batch_norm
     do_not_exclude = args.do_not_exclude
@@ -306,10 +308,13 @@ if __name__ == "__main__":
     print("Dropout pos embeddings: " + str(dropout_pos_embeddings))
     print("Batch norm: " + str(use_batch_norm))
     print("Squeeze excitation: " + str(squeeze_excitation))
+    print("Bottleneck factor: " + str(bottleneck_factor))
+    print("Hidden channels: " + str(hidden_channels))
+    print("Kernel size: " + str(kernel_size))
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
-    model = model_attention_unet.Unet3fDeepSupervision(2, hidden_channels, kernel_size=11, blocks=hidden_blocks,
+    model = model_attention_unet.Unet3fDeepSupervision(2, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                             bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                             squeeze_excitation_bottleneck_factor=4,
                             dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
@@ -370,6 +375,7 @@ if __name__ == "__main__":
         "hidden_channels": hidden_channels,
         "bottleneck_factor": bottleneck_factor,
         "squeeze_excitation": squeeze_excitation,
+        "kernel_size": kernel_size,
         "random_shift": random_shift,
         "use_batch_norm": use_batch_norm,
         "do_not_exclude": do_not_exclude,
