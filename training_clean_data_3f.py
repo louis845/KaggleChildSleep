@@ -281,7 +281,7 @@ if __name__ == "__main__":
         model = model_attention_unet.Unet3fDeepSupervision(2, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                                 bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                                 squeeze_excitation_bottleneck_factor=4,
-                                dropout=dropout, use_batch_norm=use_batch_norm, out_channels=2)
+                                dropout=dropout, use_batch_norm=use_batch_norm, out_channels=1, attn_out_channels=2)
     else:
         model = model_unet.Unet(2, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                                 bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
