@@ -32,6 +32,8 @@ class NumericalMetric(Metrics):
         self.count += batch_size
 
     def get(self):
+        if self.count == 0:
+            return -1.0
         return self.sum / self.count
 
     def write_to_dict(self, x: dict):
