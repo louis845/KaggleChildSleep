@@ -64,7 +64,7 @@ def single_training_step_deep(model_: torch.nn.Module, optimizer_: torch.optim.O
                             accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
     optimizer_.zero_grad()
     pred_logits_small, pred_logits_mid, pred_logits = model_(accel_data_batch, True) # shape (batch_size, 1, T), where batch_size = 1
-    loss = (ce_loss(pred_logits, labels_batch) + ce_loss(pred_logits_small, labels_batch) + ce_loss(pred_logits_mid, labels_batch)) / 3.0
+    loss = batch_size * (ce_loss(pred_logits, labels_batch) + ce_loss(pred_logits_small, labels_batch) + ce_loss(pred_logits_mid, labels_batch)) / 3.0
     loss.backward()
     optimizer_.step()
 

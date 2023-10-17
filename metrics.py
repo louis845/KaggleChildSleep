@@ -77,7 +77,10 @@ class BinaryMetrics(Metrics):
 
     def get(self):
         """Compute the accuracy, precision, recall."""
-        accuracy = (self.tp + self.tn) / (self.tp + self.tn + self.fp + self.fn)
+        if self.tp + self.tn + self.fp + self.fn == 0:
+            accuracy = -1.0
+        else:
+            accuracy = (self.tp + self.tn) / (self.tp + self.tn + self.fp + self.fn)
         if self.tp + self.fp == 0:
             precision = 0.0
         else:
