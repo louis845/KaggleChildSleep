@@ -85,7 +85,8 @@ def training_step(record: bool):
     cur_deep_supervision = False
     with tqdm.tqdm(total=len(training_sampler)) as pbar:
         while training_sampler.entries_remaining() > 0:
-            if use_deep_supervision is not None:
+            if use_deep_supervision is not None and \
+                    (deep_supervision_limit is None or epoch < deep_supervision_limit):
                 cur_deep_supervision = not cur_deep_supervision
 
             if cur_deep_supervision:
@@ -99,7 +100,6 @@ def training_step(record: bool):
                 loss, preds = single_training_step_deep(model, optimizer,
                                                    accel_data_batch_torch,
                                                    labels_batch_torch)
-                time.sleep(0.3)
 
                 # record
                 if record:
@@ -259,6 +259,7 @@ if __name__ == "__main__":
     parser.add_argument("--dropout_pos_embeddings", action="store_true", help="Whether to dropout the positional embeddings. Default False.")
     parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use cross entropy loss. Default False.")
     parser.add_argument("--use_deep_supervision", type=int, default=None, help="Whether to use deep supervision. Default None. If specified, must be an integer indicating the length of deep supervision training.")
+    parser.add_argument("--deep_supervision_limit", type=int, default=None, help="The maximum number of deep supervision training steps. Default None. If specified, must be an integer. Ignored if not using deep supervision.")
     parser.add_argument("--use_cutmix", action="store_true", help="Whether to use cutmix. Default False.")
     parser.add_argument("--cutmix_skip", type=int, default=540, help="Maximum of random skip intervals for cutmix. Default 540. Ignored if not using cutmix.")
     parser.add_argument("--cutmix_length", type=int, default=540, help="Length of intervals for cutmix. Default 540. Ignored if not using cutmix.")
@@ -303,6 +304,7 @@ if __name__ == "__main__":
     dropout_pos_embeddings = args.dropout_pos_embeddings
     use_ce_loss = args.use_ce_loss
     use_deep_supervision = args.use_deep_supervision
+    deep_supervision_limit = args.deep_supervision_limit
     use_cutmix = args.use_cutmix
     cutmix_skip = args.cutmix_skip
     cutmix_length = args.cutmix_length
@@ -334,6 +336,7 @@ if __name__ == "__main__":
     print("Weight decay: " + str(weight_decay))
     print("Optimizer: " + optimizer_type)
     print("Use deep supervision: " + str(use_deep_supervision))
+    print("Deep supervision limit: " + str(deep_supervision_limit))
     if optimizer_type.lower() == "adam":
         if weight_decay > 0.0:
             optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(momentum, second_momentum), weight_decay=weight_decay)
@@ -389,6 +392,7 @@ if __name__ == "__main__":
         "dropout_pos_embeddings": dropout_pos_embeddings,
         "use_ce_loss": use_ce_loss,
         "use_deep_supervision": use_deep_supervision,
+        "deep_supervision_limit": deep_supervision_limit,
         "use_cutmix": use_cutmix,
         "cutmix_skip": cutmix_skip,
         "cutmix_length": cutmix_length,
