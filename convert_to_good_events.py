@@ -169,6 +169,77 @@ class GoodEvents:
             mask[low:high] = 1.0
         return mask
 
+class GoodEventsSplicedSampler:
+    def __init__(self, data_dict, entries_sublist: list[str], expected_length=720):
+        self.relevant_event_data = []
+        self.relevant_non_event_data = []
+
+
+        for series_id in entries_sublist:
+            if series_id not in data_dict:
+                raise ValueError("Series {} not found in data_dict".format(series_id))
+            for low, high, pos in data_dict[series_id]["event"]:
+                assert pos in ["head", "middle", "tail"]
+
+                high -= 720 # contract sides by 1hr, prevent noisy boundary
+                low += 720
+
+                if (high + 1 - low) < expected_length:
+                    continue
+                self.relevant_event_data.append((low, high + 1, series_id))
+            for low, high, pos in data_dict[series_id]["non_event"]:
+                assert pos in ["head", "middle", "tail"]
+
+                high -= 720 # contract sides by 1hr, prevent noisy boundary
+                low += 720
+
+                if (high - 1 - low) < expected_length:
+                    continue
+                if low == 0:
+                    self.relevant_non_event_data.append((0, high, series_id))
+                else:
+                    self.relevant_non_event_data.append((low + 1, high, series_id))
+
+        assert len(self.relevant_event_data) > 0, "No events found"
+        assert len(self.relevant_non_event_data) > 0, "No non-events found"
+
+        self.current_event_stream_entries = []
+        self.current_non_event_stream_entries = []
+
+        self.current_event_stream_entries.extend(np.random.permutation(len(self.relevant_event_data)))
+        self.current_non_event_stream_entries.extend(np.random.permutation(len(self.relevant_non_event_data)))
+
+        self.expected_length = expected_length
+
+    def sample_event(self):
+        if len(self.current_event_stream_entries) == 0:
+            self.current_event_stream_entries.extend(np.random.permutation(len(self.relevant_event_data)))
+
+        # remove the first entry
+        index = self.current_event_stream_entries.pop(0)
+        low, high, series_id = self.relevant_event_data[index]
+
+        # randomly pick a starting point to match expected length
+        left_erosion = np.random.randint(0, high - low - self.expected_length + 1)
+        low = low + left_erosion
+        high = low + self.expected_length
+
+        return series_id, low, high
+
+    def sample_non_event(self):
+        if len(self.current_non_event_stream_entries) == 0:
+            self.current_non_event_stream_entries.extend(np.random.permutation(len(self.relevant_non_event_data)))
+
+        # remove the first entry
+        index = self.current_non_event_stream_entries.pop(0)
+        low, high, series_id = self.relevant_non_event_data[index]
+
+        # randomly pick a starting point to match expected length
+        left_erosion = np.random.randint(0, high - low - self.expected_length + 1)
+        low = low + left_erosion
+        high = low + self.expected_length
+
+        return series_id, low, high
 
 def load_all_data_into_dict(all_events=False):
     all_data = {}

@@ -117,7 +117,7 @@ def training_step(record: bool):
                 loss, preds = single_training_step(model, optimizer,
                                                    accel_data_batch_torch,
                                                    labels_batch_torch)
-                time.sleep(0.6)
+                #time.sleep(0.2)
 
                 # record
                 if record:
@@ -259,6 +259,9 @@ if __name__ == "__main__":
     parser.add_argument("--dropout_pos_embeddings", action="store_true", help="Whether to dropout the positional embeddings. Default False.")
     parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use cross entropy loss. Default False.")
     parser.add_argument("--use_deep_supervision", type=int, default=None, help="Whether to use deep supervision. Default None. If specified, must be an integer indicating the length of deep supervision training.")
+    parser.add_argument("--use_cutmix", action="store_true", help="Whether to use cutmix. Default False.")
+    parser.add_argument("--cutmix_skip", type=int, default=540, help="Maximum of random skip intervals for cutmix. Default 540. Ignored if not using cutmix.")
+    parser.add_argument("--cutmix_length", type=int, default=540, help="Length of intervals for cutmix. Default 540. Ignored if not using cutmix.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
@@ -300,6 +303,9 @@ if __name__ == "__main__":
     dropout_pos_embeddings = args.dropout_pos_embeddings
     use_ce_loss = args.use_ce_loss
     use_deep_supervision = args.use_deep_supervision
+    use_cutmix = args.use_cutmix
+    cutmix_skip = args.cutmix_skip
+    cutmix_length = args.cutmix_length
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
 
@@ -383,6 +389,9 @@ if __name__ == "__main__":
         "dropout_pos_embeddings": dropout_pos_embeddings,
         "use_ce_loss": use_ce_loss,
         "use_deep_supervision": use_deep_supervision,
+        "use_cutmix": use_cutmix,
+        "cutmix_skip": cutmix_skip,
+        "cutmix_length": cutmix_length,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
     }
@@ -416,8 +425,20 @@ if __name__ == "__main__":
     print("Initializing the samplers...")
     print("Batch size: " + str(batch_size))
     print("Random shift: " + str(random_shift))
-    training_sampler = convert_to_interval_events.IntervalEventsSampler(training_entries, all_data, all_interval_segmentations,
-                                                                        train_or_test="train")
+    print("Use cutmix: " + str(use_cutmix))
+    if use_cutmix:
+        print("Cutmix skip: " + str(cutmix_skip))
+        print("Cutmix length: " + str(cutmix_length))
+        training_sampler = convert_to_interval_events.SemiSyntheticIntervalEventsSampler(training_entries, all_data, all_interval_segmentations,
+                                                                                         spliced_good_events=convert_to_good_events.GoodEventsSplicedSampler(
+                                                                                             data_dict=convert_to_good_events.load_all_data_into_dict(),
+                                                                                             entries_sublist=training_entries,
+                                                                                             expected_length=cutmix_length
+                                                                                         ),
+                                                                                         cutmix_skip=cutmix_skip)
+    else:
+        training_sampler = convert_to_interval_events.IntervalEventsSampler(training_entries, all_data, all_interval_segmentations,
+                                                                            train_or_test="train")
     val_sampler = convert_to_interval_events.IntervalEventsSampler(validation_entries, all_data, all_interval_segmentations,
                                                                         train_or_test="val")
     if use_deep_supervision is not None:
