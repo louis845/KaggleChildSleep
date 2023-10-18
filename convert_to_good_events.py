@@ -202,6 +202,8 @@ class GoodEventsSplicedSampler:
 
         assert len(self.relevant_event_data) > 0, "No events found"
         assert len(self.relevant_non_event_data) > 0, "No non-events found"
+        print("Event entries: {}".format(len(self.relevant_event_data)))
+        print("Non-event entries: {}".format(len(self.relevant_non_event_data)))
 
         self.current_event_stream_entries = []
         self.current_non_event_stream_entries = []

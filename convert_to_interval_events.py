@@ -129,7 +129,7 @@ class SemiSyntheticIntervalEventsSampler:
 
     def shuffle(self):
         if self.shuffle_indices is None:
-            self.shuffle_indices = np.arange(len(self.all_segmentations_list))
+            self.shuffle_indices = np.random.permutation(len(self.all_segmentations_list))
         self.sample_low = 0
 
     def cutmix_segment(self, accel_data: np.ndarray, start: int, end: int, type: str):
@@ -209,13 +209,14 @@ class SemiSyntheticIntervalEventsSampler:
             event_segmentations[1, max(0, wakeup - event_tolerance_width):min(event_segmentations.shape[1], wakeup + event_tolerance_width + 1)] = 1.0
 
         # cutmix
-        prev_end = 0
-        for k in range(len(grouped_events)):
-            self.cutmix_segment(accel_data, prev_end, grouped_events[k]["onset"] - start, type="non_event")
-            self.cutmix_segment(accel_data, grouped_events[k]["onset"] - start, grouped_events[k]["wakeup"] - start, type="event")
-            prev_end = grouped_events[k]["wakeup"] - start
+        if len(grouped_events) > 0:
+            prev_end = 0
+            for k in range(len(grouped_events)):
+                #self.cutmix_segment(accel_data, prev_end, grouped_events[k]["onset"] - start, type="non_event")
+                self.cutmix_segment(accel_data, grouped_events[k]["onset"] - start, grouped_events[k]["wakeup"] - start, type="event")
+                prev_end = grouped_events[k]["wakeup"] - start
 
-        self.cutmix_segment(accel_data, prev_end, accel_data.shape[1], type="non_event")
+            #self.cutmix_segment(accel_data, prev_end, accel_data.shape[1], type="non_event")
 
 
         return accel_data, event_segmentations

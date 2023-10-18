@@ -95,6 +95,8 @@ def training_step(record: bool):
 
                 accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
                 labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
+                if use_anglez_only:
+                    accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
 
                 # train model now
                 loss, preds = single_training_step_deep(model, optimizer,
@@ -112,6 +114,8 @@ def training_step(record: bool):
 
                 accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
                 labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
+                if use_anglez_only:
+                    accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
 
                 # train model now
                 loss, preds = single_training_step(model, optimizer,
@@ -175,6 +179,8 @@ def validation_step():
             accel_data_batch, labels_batch, increment = val_sampler.sample(batch_size)
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
+            if use_anglez_only:
+                accel_data_batch = accel_data_batch[:, 0:1, :]
 
             # val model now
             loss, preds = single_validation_step(model, accel_data_batch, labels_batch)
@@ -202,6 +208,8 @@ def validation_step():
                     .unsqueeze(0)
                 labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)\
                     .unsqueeze(0).unsqueeze(0)
+                if use_anglez_only:
+                    accel_data_batch = accel_data_batch[:, 0:1, :]
 
                 # pad such that lengths is a multiple of 48
                 pad_length = 48 - (accel_data_batch.shape[-1] % 48)
@@ -263,6 +271,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_cutmix", action="store_true", help="Whether to use cutmix. Default False.")
     parser.add_argument("--cutmix_skip", type=int, default=540, help="Maximum of random skip intervals for cutmix. Default 540. Ignored if not using cutmix.")
     parser.add_argument("--cutmix_length", type=int, default=540, help="Length of intervals for cutmix. Default 540. Ignored if not using cutmix.")
+    parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
@@ -308,6 +317,7 @@ if __name__ == "__main__":
     use_cutmix = args.use_cutmix
     cutmix_skip = args.cutmix_skip
     cutmix_length = args.cutmix_length
+    use_anglez_only = args.use_anglez_only
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
 
@@ -322,7 +332,8 @@ if __name__ == "__main__":
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
-    model = model_attention_unet.Unet3fDeepSupervision(2, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
+    in_channels = 1 if use_anglez_only else 2
+    model = model_attention_unet.Unet3fDeepSupervision(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                             bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                             squeeze_excitation_bottleneck_factor=4,
                             dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
@@ -350,11 +361,11 @@ if __name__ == "__main__":
 
     # Load previous model checkpoint if available
     if prev_model_dir is None:
-        warmup_steps = 2
+        warmup_steps = 1
         for g in optimizer.param_groups:
             g["lr"] = 0.0
     else:
-        warmup_steps = 0
+        warmup_steps = 2
         model_checkpoint_path = os.path.join(prev_model_dir, "model.pt")
         optimizer_checkpoint_path = os.path.join(prev_model_dir, "optimizer.pt")
 
@@ -362,7 +373,7 @@ if __name__ == "__main__":
         optimizer.load_state_dict(torch.load(optimizer_checkpoint_path))
 
         for g in optimizer.param_groups:
-            g["lr"] = learning_rate
+            g["lr"] = 0.0
             if optimizer_type == "adam":
                 g["betas"] = (momentum, second_momentum)
             elif optimizer_type == "sgd":
@@ -396,6 +407,7 @@ if __name__ == "__main__":
         "use_cutmix": use_cutmix,
         "cutmix_skip": cutmix_skip,
         "cutmix_length": cutmix_length,
+        "use_anglez_only": use_anglez_only,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
     }
@@ -430,6 +442,7 @@ if __name__ == "__main__":
     print("Batch size: " + str(batch_size))
     print("Random shift: " + str(random_shift))
     print("Use cutmix: " + str(use_cutmix))
+    print("Use anglez only: " + str(use_anglez_only))
     if use_cutmix:
         print("Cutmix skip: " + str(cutmix_skip))
         print("Cutmix length: " + str(cutmix_length))

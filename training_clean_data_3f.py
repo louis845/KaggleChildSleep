@@ -77,6 +77,8 @@ def training_step(record: bool):
             labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
             accel_data_batch_torch = accel_data_batch_torch.unsqueeze(0)
             labels_batch_torch = labels_batch_torch.unsqueeze(0).unsqueeze(0)
+            if use_anglez_only:
+                accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
 
             # train model now
             loss, preds = single_training_step(model, optimizer,
@@ -155,6 +157,9 @@ def validation_step():
             more_mask = val_sampler_more.get_series_mask(batch_entry, all_data)
             more_mask = torch.tensor(more_mask, dtype=torch.float32, device=config.device).unsqueeze(0).unsqueeze(0)
 
+            if use_anglez_only:
+                accel_data_batch = accel_data_batch[:, 0:1, :]
+
             # pad such that lengths is a multiple of 48
             pad_length = 48 - (accel_data_batch.shape[-1] % 48)
             if pad_length == 48:
@@ -222,6 +227,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--use_mixup_training", action="store_true", help="Whether to use mixup training. Default False.")
     parser.add_argument("--use_deep_supervision", action="store_true", help="Whether to use deep supervision. Default False.")
+    parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use anglez only. Default False.")
     parser.add_argument("--record_best_model", action="store_true", help="Whether to record the best model. Default False.")
     parser.add_argument("--do_not_exclude", action="store_true", help="Whether to not exclude any events where the watch isn't being worn. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
@@ -263,6 +269,7 @@ if __name__ == "__main__":
     use_batch_norm = args.use_batch_norm
     use_mixup_training = args.use_mixup_training
     use_deep_supervision = args.use_deep_supervision
+    use_anglez_only = args.use_anglez_only
     record_best_model = args.record_best_model
     do_not_exclude = args.do_not_exclude
     dropout = args.dropout
@@ -277,13 +284,14 @@ if __name__ == "__main__":
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
+    in_channels = 1 if use_anglez_only else 2
     if use_deep_supervision:
-        model = model_attention_unet.Unet3fDeepSupervision(2, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
+        model = model_attention_unet.Unet3fDeepSupervision(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                                 bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                                 squeeze_excitation_bottleneck_factor=4,
                                 dropout=dropout, use_batch_norm=use_batch_norm, out_channels=1, attn_out_channels=2)
     else:
-        model = model_unet.Unet(2, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
+        model = model_unet.Unet(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                                 bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                                 squeeze_excitation_bottleneck_factor=4, odd_random_shift_training=(not disable_odd_random_shift),
                                 dropout=dropout, use_batch_norm=use_batch_norm, initial_3f_downsampling=True)
@@ -347,6 +355,7 @@ if __name__ == "__main__":
         "use_batch_norm": use_batch_norm,
         "use_mixup_training": use_mixup_training,
         "use_deep_supervision": use_deep_supervision,
+        "use_anglez_only": use_anglez_only,
         "record_best_model": record_best_model,
         "do_not_exclude": do_not_exclude,
         "dropout": dropout,
