@@ -116,7 +116,8 @@ def training_step(record: bool):
 
             else:
                 accel_data_batch, labels_batch, increment = training_sampler.sample(batch_size, random_shift=random_shift,
-                                                                                    random_flip=random_flip, always_flip=always_flip)
+                                                                                    random_flip=random_flip, always_flip=always_flip,
+                                                                                    expand=expand)
 
                 accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
                 labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
@@ -190,7 +191,7 @@ def validation_step():
     with (tqdm.tqdm(total=len(val_sampler)) as pbar):
         while val_sampler.entries_remaining() > 0:
             # load the batch
-            accel_data_batch, labels_batch, increment = val_sampler.sample(batch_size)
+            accel_data_batch, labels_batch, increment = val_sampler.sample(batch_size, expand=expand)
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
             if use_anglez_only:
