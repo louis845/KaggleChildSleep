@@ -17,6 +17,7 @@ import config
 import manager_folds
 import manager_models
 import metrics
+import metrics_iou
 import logging_memory_utils
 import convert_to_h5py_naive
 import convert_to_interval_events
@@ -97,6 +98,10 @@ def training_step(record: bool):
                 labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
                 if use_anglez_only:
                     accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
+                if random_flip:
+                    if np.random.rand() > 0.5:
+                        accel_data_batch_torch = torch.flip(accel_data_batch_torch, dims=(2,))
+                        labels_batch_torch = torch.flip(labels_batch_torch, dims=(2,))
 
                 # train model now
                 loss, preds = single_training_step_deep(model, optimizer,
@@ -110,7 +115,8 @@ def training_step(record: bool):
                         train_metrics["deep_metric"].add(preds, (labels_batch_torch > 0.5).to(torch.long))
 
             else:
-                accel_data_batch, labels_batch, increment = training_sampler.sample(batch_size, random_shift=random_shift)
+                accel_data_batch, labels_batch, increment = training_sampler.sample(batch_size, random_shift=random_shift,
+                                                                                    random_flip=random_flip, always_flip=always_flip)
 
                 accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
                 labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
@@ -126,8 +132,16 @@ def training_step(record: bool):
                 # record
                 if record:
                     with torch.no_grad():
+                        labels_long = (labels_batch_torch > 0.5).to(torch.long)
                         train_metrics["loss"].add(loss, increment)
-                        train_metrics["metric"].add(preds, (labels_batch_torch > 0.5).to(torch.long))
+                        train_metrics["metric"].add(preds, labels_long)
+                        true_positives, false_positives, true_negatives, false_negatives =\
+                            metrics_iou.compute_iou_metrics(labels_long[:, 0:1, :], preds[:, 0:1, :])
+                        train_metrics["onset_iou_metric"].add_direct(true_positives, true_negatives, false_positives, false_negatives)
+                        true_positives, false_positives, true_negatives, false_negatives = \
+                            metrics_iou.compute_iou_metrics(labels_long[:, 1:2, :], preds[:, 1:2, :])
+                        train_metrics["wakeup_iou_metric"].add_direct(true_positives, true_negatives, false_positives,
+                                                                     false_negatives)
 
                 pbar.update(increment)
 
@@ -193,6 +207,33 @@ def validation_step():
                 val_metrics["onset_metric"].add(preds[:, 0, :], labels_long[:, 0, :])
                 val_metrics["wakeup_metric"].add(preds[:, 1, :], labels_long[:, 1, :])
 
+                true_positives, false_positives, true_negatives, false_negatives = \
+                    metrics_iou.compute_iou_metrics(labels_long[:, 0:1, :], preds[:, 0:1, :], iou_threshold=0.1)
+                val_metrics["onset_iou_metric1"].add_direct(true_positives, true_negatives, false_positives,
+                                                            false_negatives)
+                true_positives, false_positives, true_negatives, false_negatives = \
+                    metrics_iou.compute_iou_metrics(labels_long[:, 1:2, :], preds[:, 1:2, :], iou_threshold=0.1)
+                val_metrics["wakeup_iou_metric1"].add_direct(true_positives, true_negatives, false_positives,
+                                                             false_negatives)
+
+                true_positives, false_positives, true_negatives, false_negatives = \
+                    metrics_iou.compute_iou_metrics(labels_long[:, 0:1, :], preds[:, 0:1, :], iou_threshold=0.3)
+                val_metrics["onset_iou_metric3"].add_direct(true_positives, true_negatives, false_positives,
+                                                            false_negatives)
+                true_positives, false_positives, true_negatives, false_negatives = \
+                    metrics_iou.compute_iou_metrics(labels_long[:, 1:2, :], preds[:, 1:2, :], iou_threshold=0.3)
+                val_metrics["wakeup_iou_metric3"].add_direct(true_positives, true_negatives, false_positives,
+                                                             false_negatives)
+
+                true_positives, false_positives, true_negatives, false_negatives = \
+                    metrics_iou.compute_iou_metrics(labels_long[:, 0:1, :], preds[:, 0:1, :])
+                val_metrics["onset_iou_metric5"].add_direct(true_positives, true_negatives, false_positives,
+                                                             false_negatives)
+                true_positives, false_positives, true_negatives, false_negatives = \
+                    metrics_iou.compute_iou_metrics(labels_long[:, 1:2, :], preds[:, 1:2, :])
+                val_metrics["wakeup_iou_metric5"].add_direct(true_positives, true_negatives, false_positives,
+                                                              false_negatives)
+
             pbar.update(increment)
 
     # validation on deep supervision
@@ -256,11 +297,15 @@ if __name__ == "__main__":
     parser.add_argument("--epochs_per_save", type=int, default=2, help="Number of epochs between saves. Default 2.")
     parser.add_argument("--hidden_blocks", type=int, nargs="+", default=[1, 6, 8, 23, 8],
                         help="Number of hidden 2d blocks for ResNet backbone.")
-    parser.add_argument("--hidden_channels", type=int, default=32, help="Number of hidden channels. Default None.")
+    parser.add_argument("--hidden_channels", type=int, nargs="+", default=[2], help="Number of hidden channels. Default 2. Can be a list to specify num channels in each downsampled layer.")
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
     parser.add_argument("--kernel_size", type=int, default=11, help="Kernel size for the first layer. Default 11.")
+    parser.add_argument("--attention_bottleneck", type=int, default=None, help="The bottleneck factor of the attention module. Default None.")
     parser.add_argument("--random_shift", type=int, default=0, help="Randomly shift the intervals by at most this amount. Default 0.")
+    parser.add_argument("--random_flip", action="store_true", help="Randomly flip the intervals. Default False.")
+    parser.add_argument("--always_flip", action="store_true", help="Always flip the intervals. Default False.")
+    parser.add_argument("--expand", type=int, default=0, help="Expand the intervals by this amount. Default 0.")
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--do_not_exclude", action="store_true", help="Whether to not exclude any events where the watch isn't being worn. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
@@ -306,7 +351,11 @@ if __name__ == "__main__":
     bottleneck_factor = args.bottleneck_factor
     squeeze_excitation = args.squeeze_excitation
     kernel_size = args.kernel_size
+    attention_bottleneck = args.attention_bottleneck
     random_shift = args.random_shift
+    random_flip = args.random_flip
+    always_flip = args.always_flip
+    expand = args.expand
     use_batch_norm = args.use_batch_norm
     do_not_exclude = args.do_not_exclude
     dropout = args.dropout
@@ -321,6 +370,14 @@ if __name__ == "__main__":
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
 
+    if isinstance(hidden_channels, int):
+        hidden_channels = [hidden_channels]
+    if len(hidden_channels) == 1:
+        chnls = hidden_channels[0]
+        hidden_channels = []
+        for k in range(len(hidden_blocks)):
+            hidden_channels.append(chnls * (2 ** k))
+
     print("Epochs: " + str(epochs))
     print("Dropout: " + str(dropout))
     print("Dropout pos embeddings: " + str(dropout_pos_embeddings))
@@ -329,6 +386,7 @@ if __name__ == "__main__":
     print("Bottleneck factor: " + str(bottleneck_factor))
     print("Hidden channels: " + str(hidden_channels))
     print("Kernel size: " + str(kernel_size))
+    print("Attention bottleneck: " + str(attention_bottleneck))
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
@@ -337,7 +395,8 @@ if __name__ == "__main__":
                             bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                             squeeze_excitation_bottleneck_factor=4,
                             dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
-                            use_batch_norm=use_batch_norm, out_channels=1, attn_out_channels=2)
+                            use_batch_norm=use_batch_norm, out_channels=1, attn_out_channels=2, attention_bottleneck=attention_bottleneck,
+                            expected_attn_input_length=17280 + (2 * expand))
     model = model.to(config.device)
 
     # initialize optimizer
@@ -396,7 +455,11 @@ if __name__ == "__main__":
         "bottleneck_factor": bottleneck_factor,
         "squeeze_excitation": squeeze_excitation,
         "kernel_size": kernel_size,
+        "attention_bottleneck": attention_bottleneck,
         "random_shift": random_shift,
+        "random_flip": random_flip,
+        "always_flip": always_flip,
+        "expand": expand,
         "use_batch_norm": use_batch_norm,
         "do_not_exclude": do_not_exclude,
         "dropout": dropout,
@@ -423,6 +486,8 @@ if __name__ == "__main__":
     val_metrics = {}
     train_metrics["loss"] = metrics.NumericalMetric("train_loss")
     train_metrics["metric"] = metrics.BinaryMetrics("train_metric")
+    train_metrics["onset_iou_metric"] = metrics.BinaryMetrics("train_onset_iou_metric")
+    train_metrics["wakeup_iou_metric"] = metrics.BinaryMetrics("train_wakeup_iou_metric")
     if use_deep_supervision is not None:
         train_metrics["deep_loss"] = metrics.NumericalMetric("train_deep_loss")
         train_metrics["deep_metric"] = metrics.BinaryMetrics("train_deep_metric")
@@ -430,6 +495,12 @@ if __name__ == "__main__":
     val_metrics["metric"] = metrics.BinaryMetrics("val_metric")
     val_metrics["onset_metric"] = metrics.BinaryMetrics("val_onset_metric")
     val_metrics["wakeup_metric"] = metrics.BinaryMetrics("val_wakeup_metric")
+    val_metrics["onset_iou_metric1"] = metrics.BinaryMetrics("val_onset_iou_metric1")
+    val_metrics["wakeup_iou_metric1"] = metrics.BinaryMetrics("val_wakeup_iou_metric1")
+    val_metrics["onset_iou_metric3"] = metrics.BinaryMetrics("val_onset_iou_metric3")
+    val_metrics["wakeup_iou_metric3"] = metrics.BinaryMetrics("val_wakeup_iou_metric3")
+    val_metrics["onset_iou_metric5"] = metrics.BinaryMetrics("val_onset_iou_metric5")
+    val_metrics["wakeup_iou_metric5"] = metrics.BinaryMetrics("val_wakeup_iou_metric5")
     if use_deep_supervision is not None:
         val_metrics["deep_loss"] = metrics.NumericalMetric("val_deep_loss")
         val_metrics["deep_metric"] = metrics.BinaryMetrics("val_deep_metric")
@@ -441,6 +512,9 @@ if __name__ == "__main__":
     print("Initializing the samplers...")
     print("Batch size: " + str(batch_size))
     print("Random shift: " + str(random_shift))
+    print("Random flip: " + str(random_flip))
+    print("Always flip: " + str(always_flip))
+    print("Expand: " + str(expand))
     print("Use cutmix: " + str(use_cutmix))
     print("Use anglez only: " + str(use_anglez_only))
     if use_cutmix:

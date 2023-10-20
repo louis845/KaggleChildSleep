@@ -36,7 +36,8 @@ class IntervalEventsSampler:
                 self.shuffle_indices = np.arange(len(self.all_segmentations_list))
         self.sample_low = 0
 
-    def sample_single(self, index: int, random_shift: int=0):
+    def sample_single(self, index: int, random_shift: int=0, flip: bool=False, expand: int=0):
+        assert expand % 12 == 0, "expand must be a multiple of 12"
         # index denotes the index in self.all_segmentations_list
         # returns (accel_data, event_segmentations), where event_segmentations[0, :] is onset, and event_segmentations[1, :] is wakeup
 
@@ -46,12 +47,23 @@ class IntervalEventsSampler:
         end = night_info["end"]
         total_length = int(self.naive_all_data[series_id]["accel"].shape[1])
 
+        # shift if expansion makes it out of boundaries
+        if expand > 0:
+            if start - expand < 0:
+                start += (expand - start)
+                end += (expand - start)
+            if end + expand > total_length:
+                end -= (end + expand - total_length)
+                start -= (end + expand - total_length)
+
         # apply random shift
         shift = 0
         if random_shift > 0:
             shift = np.random.randint(-random_shift, random_shift + 1)
-            shift = max(min(shift, total_length - end), -start)
+            shift = max(min(shift, total_length - end - expand), -start + expand)
         start, end = start + shift, end + shift
+
+        assert start >= 0 and end <= total_length, "start: {}, end: {}, total_length: {}".format(start, end, total_length)
 
         # load events
         series_events = self.events.loc[self.events["series_id"] == series_id]
@@ -67,19 +79,45 @@ class IntervalEventsSampler:
                         "onset": int(evts.iloc[0]["step"]),
                         "wakeup": int(evts.iloc[1]["step"])
                     })
+                else:
+                    """
+                    if evts.iloc[0]["event"] == "onset":
+                        grouped_events.append({
+                            "onset": int(evts.iloc[0]["step"]),
+                            "wakeup": None
+                        })
+                    elif evts.iloc[0]["event"] == "wakeup":
+                        grouped_events.append({
+                            "onset": None,
+                            "wakeup": int(evts.iloc[0]["step"])
+                        })
+                    else:
+                        raise ValueError("Unknown event type: {}".format(evts.iloc[0]["event"]))"""
+                    pass
 
-        accel_data = self.naive_all_data[series_id]["accel"][:, start:end]
-        event_segmentations = np.zeros((2, accel_data.shape[1] // 12), dtype=np.float32)
+        accel_data = self.naive_all_data[series_id]["accel"][:, (start - expand):(end + expand)]
+        event_segmentations = np.zeros((2, (end - start) // 12), dtype=np.float32)
         event_tolerance_width = 30
         for event in grouped_events:
-            onset = int(np.round((event["onset"] - start) / 12.0))
-            wakeup = int(np.round((event["wakeup"] - start) / 12.0))
-            event_segmentations[0, max(0, onset - event_tolerance_width):min(event_segmentations.shape[1], onset + event_tolerance_width + 1)] = 1.0
-            event_segmentations[1, max(0, wakeup - event_tolerance_width):min(event_segmentations.shape[1], wakeup + event_tolerance_width + 1)] = 1.0
+            onset = ((event["onset"] - start) // 12) if event["onset"] is not None else None
+            wakeup = ((event["wakeup"] - start) // 12) if event["wakeup"] is not None else None
+            if flip:
+                onset, wakeup = wakeup, onset
+            if onset is not None:
+                event_segmentations[0, max(0, onset - event_tolerance_width):min(event_segmentations.shape[1], onset + event_tolerance_width + 1)] = 1.0
+            if wakeup is not None:
+                event_segmentations[1, max(0, wakeup - event_tolerance_width):min(event_segmentations.shape[1], wakeup + event_tolerance_width + 1)] = 1.0
+
+        if expand > 0:
+            event_segmentations = np.pad(event_segmentations, ((0, 0), (expand // 12, expand // 12)), mode="constant", constant_values=0.0)
+
+        if flip:
+            accel_data = np.flip(accel_data, axis=1)
+            event_segmentations = np.flip(event_segmentations, axis=1)
 
         return accel_data, event_segmentations
 
-    def sample(self, batch_size: int, random_shift: int=0):
+    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, expand: int=0):
         assert self.shuffle_indices is not None, "shuffle_indices is None, call shuffle() first"
 
         accel_datas = []
@@ -88,7 +126,13 @@ class IntervalEventsSampler:
         increment = min(batch_size, len(self.all_segmentations_list) - self.sample_low)
 
         for k in range(self.sample_low, self.sample_low + increment):
-            accel_data, event_segmentation = self.sample_single(self.shuffle_indices[k], random_shift=random_shift)
+            flip = False
+            if random_flip:
+                flip = np.random.randint(0, 2) == 1
+            if always_flip:
+                flip = True
+            accel_data, event_segmentation = self.sample_single(self.shuffle_indices[k], random_shift=random_shift,
+                                                                flip=flip, expand=expand)
             accel_datas.append(accel_data)
             event_segmentations.append(event_segmentation)
 
@@ -146,14 +190,14 @@ class SemiSyntheticIntervalEventsSampler:
             return
         elif mix_method == 1:
             start += np.random.randint(0, self.cutmix_skip)
-            while start + self.cutmix_length <= end:
+            while start + self.cutmix_length * 2 <= end:
                 cut_segments.append((start, start + self.cutmix_length))
-                start = start + self.cutmix_length + np.random.randint(0, self.cutmix_skip)
+                start = start + self.cutmix_length * 2 + np.random.randint(0, self.cutmix_skip)
         else:
             end -= np.random.randint(0, self.cutmix_skip)
-            while end - self.cutmix_length >= start:
+            while end - self.cutmix_length * 2 >= start:
                 cut_segments.append((end - self.cutmix_length, end))
-                end = end - self.cutmix_length - np.random.randint(0, self.cutmix_skip)
+                end = end - self.cutmix_length * 2 - np.random.randint(0, self.cutmix_skip)
 
         # cut and replace here
         for seg_start, seg_end in cut_segments:
@@ -221,8 +265,11 @@ class SemiSyntheticIntervalEventsSampler:
 
         return accel_data, event_segmentations
 
-    def sample(self, batch_size: int, random_shift: int=0):
+    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, expand: int=0):
         assert self.shuffle_indices is not None, "shuffle_indices is None, call shuffle() first"
+        assert not random_flip, "random_flip not supported"
+        assert not always_flip, "always_flip not supported"
+        assert expand == 0, "expand not supported"
 
         accel_datas = []
         event_segmentations = []

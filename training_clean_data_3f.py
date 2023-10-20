@@ -219,7 +219,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs_per_save", type=int, default=2, help="Number of epochs between saves. Default 2.")
     parser.add_argument("--hidden_blocks", type=int, nargs="+", default=[1, 6, 8, 23, 8],
                         help="Number of hidden 2d blocks for ResNet backbone.")
-    parser.add_argument("--hidden_channels", type=int, default=32, help="Number of hidden channels. Default None.")
+    parser.add_argument("--hidden_channels", type=int, nargs="+", default=[2], help="Number of hidden channels. Default 2. Can be a list to specify num channels in each downsampled layer.")
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
     parser.add_argument("--kernel_size", type=int, default=11, help="Kernel size to use. Default 11.")
@@ -276,7 +276,16 @@ if __name__ == "__main__":
     length = args.length
     num_extra_steps = args.num_extra_steps
 
+    if isinstance(hidden_channels, int):
+        hidden_channels = [hidden_channels]
+    if len(hidden_channels) == 1:
+        chnls = hidden_channels[0]
+        hidden_channels = []
+        for k in range(len(hidden_blocks)):
+            hidden_channels.append(chnls * (2 ** k))
+
     print("Epochs: " + str(epochs))
+    print("Hidden channels: " + str(hidden_channels))
     print("Dropout: " + str(dropout))
     print("Batch norm: " + str(use_batch_norm))
     print("Squeeze excitation: " + str(squeeze_excitation))

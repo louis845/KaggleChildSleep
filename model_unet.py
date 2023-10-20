@@ -262,25 +262,30 @@ class ResNetBackbone(torch.nn.Module):
                  dropout=0.0, use_batch_norm=False, downsample_3f=False):
         super(ResNetBackbone, self).__init__()
         assert kernel_size % 2 == 1, "kernel size must be odd"
+        assert isinstance(hidden_channels, list), "hidden_channels must be a list"
+        assert len(hidden_channels) == len(blocks), "hidden_channels must have the same length as blocks"
+        for channel in hidden_channels:
+            assert isinstance(channel, int), "hidden_channels must be a list of ints"
+
         self.pyramid_height = len(blocks)
 
         self.conv_down = torch.nn.ModuleList()
-        self.initial_conv = torch.nn.Conv1d(in_channels, hidden_channels, kernel_size=kernel_size,
+        self.initial_conv = torch.nn.Conv1d(in_channels, hidden_channels[0], kernel_size=kernel_size,
                                             bias=False, padding="same", padding_mode="replicate")
         if use_batch_norm:
-            self.initial_batch_norm = torch.nn.BatchNorm1d(hidden_channels, momentum=BATCH_NORM_MOMENTUM, affine=True)
+            self.initial_batch_norm = torch.nn.BatchNorm1d(hidden_channels[0], momentum=BATCH_NORM_MOMENTUM, affine=True)
         else:
-            self.initial_batch_norm = torch.nn.InstanceNorm1d(hidden_channels)
+            self.initial_batch_norm = torch.nn.InstanceNorm1d(hidden_channels[0])
         self.initial_nonlin = torch.nn.GELU()
 
-        if hidden_channels <= 2:
+        if hidden_channels[0] <= 2:
             dropout = 0.0
-        elif hidden_channels < 8:
+        elif hidden_channels[0] < 8:
             dropout = 0.05
         if dropout > 0.0:
             self.initial_dropout = torch.nn.Dropout1d(min(dropout, 0.1))
 
-        self.conv_down.append(ResConv1D(hidden_channels, hidden_channels, blocks[0], downsample=False,
+        self.conv_down.append(ResConv1D(hidden_channels[0], hidden_channels[0], blocks[0], downsample=False,
                                    bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                                    squeeze_excitation_bottleneck_factor=squeeze_excitation_bottleneck_factor,
                                    kernel_size=kernel_size, dropout=dropout, use_batch_norm=use_batch_norm))
@@ -288,7 +293,7 @@ class ResNetBackbone(torch.nn.Module):
             use_3d_ds = False
             if (i == 0) and downsample_3f:
                 use_3d_ds = True
-            self.conv_down.append(ResConv1D(hidden_channels * (2 ** i), hidden_channels * (2 ** (i + 1)),
+            self.conv_down.append(ResConv1D(hidden_channels[i], hidden_channels[i + 1],
                                             blocks[i + 1], downsample=not use_3d_ds, bottleneck_factor=bottleneck_factor,
                                             squeeze_excitation=squeeze_excitation,
                                             squeeze_excitation_bottleneck_factor=squeeze_excitation_bottleneck_factor,
@@ -317,36 +322,40 @@ class UnetHead(torch.nn.Module):
     def __init__(self, pyramid_height, hidden_channels, kernel_size,
                  use_batch_norm: bool, dropout: float, initial_downsample_3f: bool):
         super(UnetHead, self).__init__()
+        assert isinstance(hidden_channels, list), "hidden_channels must be a list"
+        for channel in hidden_channels:
+            assert isinstance(channel, int), "hidden_channels must be a list of ints"
+
         self.pyramid_height = pyramid_height
 
         self.upsample_conv = torch.nn.ModuleList()
         self.upsample_norms = torch.nn.ModuleList()
         for k in range(self.pyramid_height - 1):
-            if (hidden_channels * (2 ** k)) % 4 == 0:
-                num_groups = (hidden_channels * (2 ** k)) // 4
-                self.upsample_conv.append(torch.nn.Conv1d(hidden_channels * (2 ** (k + 1)), hidden_channels * (2 ** k),
+            if hidden_channels[k] % 4 == 0:
+                num_groups = hidden_channels[k] // 4
+                self.upsample_conv.append(torch.nn.Conv1d(hidden_channels[k + 1], hidden_channels[k],
                                                           kernel_size=kernel_size, groups=num_groups, bias=False,
                                                           padding="same", padding_mode="replicate"))
             else:
-                self.upsample_conv.append(torch.nn.Conv1d(hidden_channels * (2 ** (k + 1)), hidden_channels * (2 ** k),
+                self.upsample_conv.append(torch.nn.Conv1d(hidden_channels[k + 1], hidden_channels[k],
                                                           kernel_size=1, bias=False, padding="same",
                                                           padding_mode="replicate"))
             if use_batch_norm:
                 self.upsample_norms.append(
-                    torch.nn.BatchNorm1d(hidden_channels * (2 ** k), momentum=BATCH_NORM_MOMENTUM, affine=True))
+                    torch.nn.BatchNorm1d(hidden_channels[k], momentum=BATCH_NORM_MOMENTUM, affine=True))
             else:
-                self.upsample_norms.append(torch.nn.InstanceNorm1d(hidden_channels * (2 ** k)))
+                self.upsample_norms.append(torch.nn.InstanceNorm1d(hidden_channels[k]))
 
         self.cat_conv = torch.nn.ModuleList()
         self.cat_norms = torch.nn.ModuleList()
         for k in range(self.pyramid_height - 1):
-            self.cat_conv.append(torch.nn.Conv1d(hidden_channels * (2 ** (k + 1)), hidden_channels * (2 ** k),
+            self.cat_conv.append(torch.nn.Conv1d(hidden_channels[k] * 2, hidden_channels[k],
                                                  kernel_size=1, bias=False, padding="same", padding_mode="replicate"))
             if use_batch_norm:
                 self.cat_norms.append(
-                    torch.nn.BatchNorm1d(hidden_channels * (2 ** k), momentum=BATCH_NORM_MOMENTUM, affine=True))
+                    torch.nn.BatchNorm1d(hidden_channels[k], momentum=BATCH_NORM_MOMENTUM, affine=True))
             else:
-                self.cat_norms.append(torch.nn.InstanceNorm1d(hidden_channels * (2 ** k)))
+                self.cat_norms.append(torch.nn.InstanceNorm1d(hidden_channels[k]))
 
         self.nonlin = torch.nn.GELU()
         if dropout > 0.0:
