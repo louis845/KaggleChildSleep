@@ -50,11 +50,13 @@ class IntervalEventsSampler:
         # shift if expansion makes it out of boundaries
         if expand > 0:
             if start - expand < 0:
-                start += (expand - start)
-                end += (expand - start)
+                overhead = expand - start
+                start += overhead
+                end += overhead
             if end + expand > total_length:
-                end -= (end + expand - total_length)
-                start -= (end + expand - total_length)
+                overhead = end + expand - total_length
+                end -= overhead
+                start -= overhead
 
         # apply random shift
         shift = 0
@@ -63,7 +65,7 @@ class IntervalEventsSampler:
             shift = max(min(shift, total_length - end - expand), -start + expand)
         start, end = start + shift, end + shift
 
-        assert start >= 0 and end <= total_length, "start: {}, end: {}, total_length: {}".format(start, end, total_length)
+        assert start - expand >= 0 and end + expand <= total_length, "start: {}, end: {}, total_length: {}".format(start, end, total_length)
 
         # load events
         series_events = self.events.loc[self.events["series_id"] == series_id]

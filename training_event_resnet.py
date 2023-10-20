@@ -44,6 +44,14 @@ def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tens
     else:
         return torch.sum(torch.mean(((torch.sigmoid(preds) - ground_truth) ** 2) * bce * mask, dim=(1, 2)))
 
+def dice_loss(preds: torch.Tensor, ground_truth: torch.Tensor, eps=1e-5):
+    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
+                                                                                                 ground_truth.shape)
+    intersection = torch.sum(preds * ground_truth, dim=(1, 2))
+    union = torch.sum(preds + ground_truth, dim=(1, 2))
+    return torch.sum(1 - (2 * intersection + eps) / (union + eps))
+
+
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
                             accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
@@ -51,6 +59,8 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
     pred_logits = model_(accel_data_batch, deep_supervision=False)  # shape (batch_size, 2, T // 12)
     if use_ce_loss:
         loss = ce_loss(pred_logits, labels_batch)
+    elif use_iou_loss:
+        loss = dice_loss(pred_logits, labels_batch)
     else:
         loss = focal_loss(pred_logits, labels_batch)
     loss.backward()
@@ -160,6 +170,8 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
         pred_logits = model_(accel_data_batch)  # shape (batch_size, 2, T)
         if use_ce_loss:
             loss = ce_loss(pred_logits, labels_batch)
+        elif use_iou_loss:
+            loss = dice_loss(pred_logits, labels_batch)
         else:
             loss = focal_loss(pred_logits, labels_batch)
         preds = pred_logits > 0.0
@@ -312,6 +324,7 @@ if __name__ == "__main__":
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
     parser.add_argument("--dropout_pos_embeddings", action="store_true", help="Whether to dropout the positional embeddings. Default False.")
     parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use cross entropy loss. Default False.")
+    parser.add_argument("--use_iou_loss", action="store_true", help="Whether to use IOU loss. Default False.")
     parser.add_argument("--use_deep_supervision", type=int, default=None, help="Whether to use deep supervision. Default None. If specified, must be an integer indicating the length of deep supervision training.")
     parser.add_argument("--deep_supervision_limit", type=int, default=None, help="The maximum number of deep supervision training steps. Default None. If specified, must be an integer. Ignored if not using deep supervision.")
     parser.add_argument("--use_cutmix", action="store_true", help="Whether to use cutmix. Default False.")
@@ -362,6 +375,7 @@ if __name__ == "__main__":
     dropout = args.dropout
     dropout_pos_embeddings = args.dropout_pos_embeddings
     use_ce_loss = args.use_ce_loss
+    use_iou_loss = args.use_iou_loss
     use_deep_supervision = args.use_deep_supervision
     deep_supervision_limit = args.deep_supervision_limit
     use_cutmix = args.use_cutmix
@@ -370,6 +384,8 @@ if __name__ == "__main__":
     use_anglez_only = args.use_anglez_only
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
+
+    assert not (use_iou_loss and use_ce_loss), "Cannot use both IOU loss and cross entropy loss."
 
     if isinstance(hidden_channels, int):
         hidden_channels = [hidden_channels]
@@ -401,6 +417,8 @@ if __name__ == "__main__":
     model = model.to(config.device)
 
     # initialize optimizer
+    loss_print = "Cross entropy" if use_ce_loss else ("IOU" if use_iou_loss else "Focal")
+    print("Loss: " + loss_print)
     print("Learning rate: " + str(learning_rate))
     print("Momentum: " + str(momentum))
     print("Second momentum: " + str(second_momentum))
