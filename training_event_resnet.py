@@ -61,7 +61,7 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
     if use_ce_loss:
         loss = ce_loss(pred_logits, labels_batch)
     elif use_iou_loss:
-        loss = dice_loss(pred_logits, labels_batch) + 0.001 * focal_loss(pred_logits, labels_batch)
+        loss = 0.01 * dice_loss(pred_logits, labels_batch) + focal_loss(pred_logits, labels_batch)
     else:
         loss = focal_loss(pred_logits, labels_batch)
     loss.backward()
@@ -172,7 +172,7 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
         if use_ce_loss:
             loss = ce_loss(pred_logits, labels_batch)
         elif use_iou_loss:
-            loss = dice_loss(pred_logits, labels_batch) + 0.001 * focal_loss(pred_logits, labels_batch)
+            loss = 0.01 * dice_loss(pred_logits, labels_batch) + focal_loss(pred_logits, labels_batch)
         else:
             loss = focal_loss(pred_logits, labels_batch)
         preds = pred_logits > 0.0

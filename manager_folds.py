@@ -58,6 +58,17 @@ if __name__ == "__main__":
             save_dataset(f"fold_{(fold + 1)}_train", train_data)
             save_dataset(f"fold_{(fold + 1)}_val", val_data)
 
+    # 5 folds, indicated by prefix 5
+    if not os.path.isfile("folds/fold_1_train_5cv.json"):
+        kf = KFold(n_splits=5, shuffle=True)
+        for fold, (train_index, val_index) in enumerate(kf.split(all_series)):
+            train_data = [all_series[index] for index in train_index]
+            val_data = [all_series[index] for index in val_index]
+
+            save_dataset(f"fold_{(fold + 1)}_train_5cv", train_data)
+            save_dataset(f"fold_{(fold + 1)}_val_5cv", val_data)
+
+
     # 5 folds, 10 cv
     if not os.path.isfile("folds/fold_1_train_10cv.json"):
         kf = KFold(n_splits=5, shuffle=True)
