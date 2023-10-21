@@ -47,8 +47,9 @@ def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tens
 def dice_loss(preds: torch.Tensor, ground_truth: torch.Tensor, eps=1e-5):
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
                                                                                                  ground_truth.shape)
-    intersection = torch.sum(preds * ground_truth, dim=(1, 2))
-    union = torch.sum(preds + ground_truth, dim=(1, 2))
+    pred_probas = torch.sigmoid(preds)
+    intersection = torch.sum(pred_probas * ground_truth, dim=(1, 2))
+    union = torch.sum(pred_probas + ground_truth, dim=(1, 2))
     return torch.sum(1 - (2 * intersection + eps) / (union + eps))
 
 
@@ -60,7 +61,7 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
     if use_ce_loss:
         loss = ce_loss(pred_logits, labels_batch)
     elif use_iou_loss:
-        loss = dice_loss(pred_logits, labels_batch)
+        loss = dice_loss(pred_logits, labels_batch) + 0.001 * focal_loss(pred_logits, labels_batch)
     else:
         loss = focal_loss(pred_logits, labels_batch)
     loss.backward()
@@ -171,7 +172,7 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
         if use_ce_loss:
             loss = ce_loss(pred_logits, labels_batch)
         elif use_iou_loss:
-            loss = dice_loss(pred_logits, labels_batch)
+            loss = dice_loss(pred_logits, labels_batch) + 0.001 * focal_loss(pred_logits, labels_batch)
         else:
             loss = focal_loss(pred_logits, labels_batch)
         preds = pred_logits > 0.0
@@ -443,7 +444,7 @@ if __name__ == "__main__":
         for g in optimizer.param_groups:
             g["lr"] = 0.0
     else:
-        warmup_steps = 2
+        warmup_steps = 1
         model_checkpoint_path = os.path.join(prev_model_dir, "model.pt")
         optimizer_checkpoint_path = os.path.join(prev_model_dir, "optimizer.pt")
 
