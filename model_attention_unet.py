@@ -93,22 +93,26 @@ class AttentionBlock1DWithPositionalEncoding(torch.nn.Module):
 
 class UnetHead3f(torch.nn.Module):
     def __init__(self, upconv_layers, stem_hidden_channels,
-                 kernel_size, dropout: float):
+                 kernel_size, dropout: float, input_attn=True):
         super(UnetHead3f, self).__init__()
+        if input_attn:
+            assert upconv_layers <= len(stem_hidden_channels), "upconv_layers must be <= len(stem_hidden_channels)"
+        else:
+            assert upconv_layers < len(stem_hidden_channels), "upconv_layers must be < len(stem_hidden_channels)"
+
         stem_final_layer_channels = stem_hidden_channels[-1]
         assert stem_final_layer_channels % 4 == 0, "stem_final_layer_channels must be divisible by 4"
 
         self.upconv_layers = upconv_layers
 
-        """self.attn_stem_cat = torch.nn.Conv1d(stem_final_layer_channels * 2, stem_final_layer_channels,
-                                                kernel_size=kernel_size, groups=stem_final_layer_channels // 4,
-                                                bias=False, padding="same", padding_mode="replicate")"""
-
         self.upsample_conv = torch.nn.ModuleList()
         self.upsample_norms = torch.nn.ModuleList()
 
         for k in range(upconv_layers):
-            deep_num_channels = stem_hidden_channels[-(k + 1)]
+            if input_attn:
+                deep_num_channels = stem_hidden_channels[-(k + 1)]
+            else:
+                deep_num_channels = stem_hidden_channels[-(k + 2)]
             if deep_num_channels % 4 == 0:
                 num_groups = deep_num_channels // 4
             else:
@@ -116,7 +120,6 @@ class UnetHead3f(torch.nn.Module):
             self.upsample_conv.append(torch.nn.Conv1d(deep_num_channels, stem_final_layer_channels,
                                                       kernel_size=kernel_size, groups=num_groups, bias=False,
                                                       padding="same", padding_mode="replicate"))
-            #self.upsample_norms.append(torch.nn.GroupNorm(num_channels=stem_final_layer_channels, num_groups=1))
             self.upsample_norms.append(torch.nn.BatchNorm1d(stem_final_layer_channels))
 
         self.cat_conv = torch.nn.ModuleList()
@@ -124,7 +127,6 @@ class UnetHead3f(torch.nn.Module):
         for k in range(upconv_layers):
             self.cat_conv.append(torch.nn.Conv1d(stem_final_layer_channels * 2, stem_final_layer_channels,
                                                  kernel_size=1, bias=False, padding="same", padding_mode="replicate"))
-            #self.cat_norms.append(torch.nn.GroupNorm(num_channels=stem_final_layer_channels, num_groups=1))
             self.cat_norms.append(torch.nn.BatchNorm1d(stem_final_layer_channels))
 
         self.nonlin = torch.nn.GELU()
@@ -132,18 +134,47 @@ class UnetHead3f(torch.nn.Module):
             self.dropout = torch.nn.Dropout1d(dropout)
 
         self.use_dropout = dropout > 0.0
+        self.input_attn = input_attn
+        self.upsamples = []
 
-    def forward(self, ret, attn_out):
-        x = attn_out
+        if input_attn:
+            for k in range(upconv_layers):
+                if k == 0:
+                    self.upsamples.append(1)
+                elif k == len(stem_hidden_channels) - 1:
+                    self.upsamples.append(3)
+                else:
+                    self.upsamples.append(2)
+        else:
+            for k in range(upconv_layers):
+                if k == len(stem_hidden_channels) - 2:
+                    self.upsamples.append(3)
+                else:
+                    self.upsamples.append(2)
+
+    def forward(self, ret, attn_out=None):
+        if self.input_attn:
+            assert attn_out is not None, "attn_out must be given if input_attn is True"
+            x = attn_out
+        else:
+            assert attn_out is None, "attn_out must be None if input_attn is False"
+            x = ret[-1]
+
         for i in range(self.upconv_layers):
-            up_channels = self.upsample_conv[i](ret[-(i + 1)])
+            if self.input_attn:
+                up_channels = self.upsample_conv[i](ret[-(i + 1)])
+            else:
+                up_channels = self.upsample_conv[i](ret[-(i + 2)])
             up_channels = self.upsample_norms[i](up_channels)
             up_channels = self.nonlin(up_channels)
             if self.use_dropout:
                 up_channels = self.dropout(up_channels)
 
-            if i > 0:
+            if self.upsamples[i] == 2:
                 x = self.upsample(x)
+            elif self.upsamples[i] == 3:
+                x = self.upsample_3f(x)
+
             assert x.shape == up_channels.shape, "x.shape: {}, up_channels.shape: {}".format(x.shape, up_channels.shape)
             x = torch.cat([x, up_channels], dim=1)
             x = self.cat_conv[i](x)
@@ -162,9 +193,11 @@ class UnetHead3f(torch.nn.Module):
 class Unet3fDeepSupervision(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, kernel_size, blocks=[4, 6, 8, 8, 8, 8],
                  bottleneck_factor=4, squeeze_excitation=True, squeeze_excitation_bottleneck_factor=4,
-                 dropout=0.0, out_channels=1, use_batch_norm=False,
+                 dropout=0.0, out_channels=1, use_batch_norm=False, # settings for stem (backbone)
 
-                 attention_channels=128, attention_heads=4,
+                 deep_supervision_kernel_size=1, deep_supervision_contraction=True, # settings for deep outputs (without attn)
+
+                 attention_channels=128, attention_heads=4, # settings for attention upsampling module
                  attention_key_query_channels=64, attention_blocks=4,
                  expected_attn_input_length=17280, dropout_pos_embeddings=False,
                  attn_out_channels=1, attention_bottleneck=None):
@@ -184,14 +217,28 @@ class Unet3fDeepSupervision(torch.nn.Module):
                                        use_batch_norm=use_batch_norm, downsample_3f=True)
         self.pyramid_height = len(blocks)
 
-        self.small_head = UnetHead(self.pyramid_height - 2, hidden_channels[:-2], 1, use_batch_norm, dropout, initial_downsample_3f=True)
-        self.mid_head = UnetHead(self.pyramid_height - 1, hidden_channels[:-1], 1, use_batch_norm, dropout, initial_downsample_3f=True)
-        self.large_head = UnetHead(self.pyramid_height, hidden_channels, 1, use_batch_norm, dropout, initial_downsample_3f=True)
+        # modules for deep supervision expanding path
+        if deep_supervision_contraction:
+            self.small_head = UnetHead(self.pyramid_height - 2, hidden_channels[:-2], deep_supervision_kernel_size, use_batch_norm, dropout, initial_downsample_3f=True)
+            self.mid_head = UnetHead(self.pyramid_height - 1, hidden_channels[:-1], deep_supervision_kernel_size, use_batch_norm, dropout, initial_downsample_3f=True)
+            self.large_head = UnetHead(self.pyramid_height, hidden_channels, deep_supervision_kernel_size, use_batch_norm, dropout, initial_downsample_3f=True)
 
-        self.final_conv_small = torch.nn.Conv1d(hidden_channels[0], out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
-        self.final_conv_mid = torch.nn.Conv1d(hidden_channels[0], out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
-        self.final_conv_large = torch.nn.Conv1d(hidden_channels[0], out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
+            self.final_conv_small = torch.nn.Conv1d(hidden_channels[0], out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
+            self.final_conv_mid = torch.nn.Conv1d(hidden_channels[0], out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
+            self.final_conv_large = torch.nn.Conv1d(hidden_channels[0], out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
+        else:
+            self.small_head = UnetHead3f(self.pyramid_height - 3, hidden_channels[:-2],
+                                         kernel_size=deep_supervision_kernel_size, dropout=dropout, input_attn=False)
+            self.mid_head = UnetHead3f(self.pyramid_height - 2, hidden_channels[:-1],
+                                         kernel_size=deep_supervision_kernel_size, dropout=dropout, input_attn=False)
+            self.large_head = UnetHead3f(self.pyramid_height - 1, hidden_channels,
+                                         kernel_size=deep_supervision_kernel_size, dropout=dropout, input_attn=False)
 
+            self.final_conv_small = torch.nn.Conv1d(hidden_channels[-3], out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
+            self.final_conv_mid = torch.nn.Conv1d(hidden_channels[-2], out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
+            self.final_conv_large = torch.nn.Conv1d(hidden_channels[-1], out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
+
+        self.deep_supervision_contraction = deep_supervision_contraction
         self.use_dropout = dropout > 0.0
 
         # modules for attention and outconv
@@ -226,31 +273,57 @@ class Unet3fDeepSupervision(torch.nn.Module):
         self.expected_attn_input_length = expected_attn_input_length
         self.attention_bottleneck = attention_bottleneck
 
-    def forward(self, x, deep_supervision=False):
+    def call_deep(self, ret, downsampling_methods):
+        if self.deep_supervision_contraction:
+            x_small = self.small_head(ret[:-2], downsampling_methods)
+            x_mid = self.mid_head(ret[:-1], downsampling_methods)
+            x_large = self.large_head(ret, downsampling_methods)
+        else:
+            x_small = self.small_head(ret[:-2])
+            x_mid = self.mid_head(ret[:-1])
+            x_large = self.large_head(ret)
+
+        x_small = self.final_conv_small(x_small)
+        x_mid = self.final_conv_mid(x_mid)
+        x_large = self.final_conv_large(x_large)
+        return x_small, x_mid, x_large
+
+    def forward(self, x, ret_type="all"):
+        assert ret_type in ["all", "deep", "attn"], "ret_type must be one of all, deep, attn"
+
         N, C, T = x.shape
         # generate list of downsampling methods
         downsampling_methods = [0] * self.pyramid_height
         assert T % self.input_length_multiple == 0, "T must be divisible by {}".format(self.input_length_multiple)
 
-        if not deep_supervision:
+        if ret_type != "deep":
             assert T == self.expected_attn_input_length, "T: {}, self.expected_attn_input_length: {}".format(T, self.expected_attn_input_length)
 
         # run stem
         ret = self.stem(x, downsampling_methods)
 
-        # upsampling path for deep supervision
-        x_small = self.small_head(ret[:-2], downsampling_methods)
-        x_mid = self.mid_head(ret[:-1], downsampling_methods)
-        x_large = self.large_head(ret, downsampling_methods)
-
         # final conv
-        x_small = self.final_conv_small(x_small)
-        x_mid = self.final_conv_mid(x_mid)
-        x_large = self.final_conv_large(x_large)
+        if ret_type == "deep":
+            return self.call_deep(ret, downsampling_methods)
+        elif ret_type == "attn":
+            x = ret[-1]  # final layer from conv stem
+            if self.attention_bottleneck is not None:
+                x = self.attn_bottleneck_in(x)
+                x = self.attn_bottleneck_in_norm(x)
+                x = self.attn_bottleneck_in_nonlin(x)
+                x = self.attn_bottleneck_out(x)
+                x = self.attn_bottleneck_out_norm(x)
+                x = self.attn_bottleneck_out_nonlin(x)
 
-        if deep_supervision:
-            return x_small, x_mid, x_large
-        else:
+            for i in range(len(self.attention_blocks)):
+                x = self.attention_blocks[i](x)
+
+            x = self.no_contraction_head(ret, x)
+            x = self.outconv(x)
+            return x, None, None, None
+        elif ret_type == "all":
+            x_small, x_mid, x_large = self.call_deep(ret, downsampling_methods)
+
             x = ret[-1] # final layer from conv stem
             if self.attention_bottleneck is not None:
                 x = self.attn_bottleneck_in(x)
