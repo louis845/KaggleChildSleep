@@ -8,6 +8,22 @@ import tqdm
 import convert_to_h5py_naive
 import convert_to_good_events
 
+def create_regression_range(mask: np.ndarray, values: np.ndarray, event_type: int, location: int, window_radius: int):
+    assert mask.shape == values.shape, "mask and values must have the same shape"
+    assert event_type in [0, 1], "event_type must be 0 or 1"
+    assert mask.shape[0] == 2
+
+    window_max = location + window_radius + 1
+    window_min = location - window_radius
+    window_max = min(window_max, mask.shape[1])
+    window_min = max(window_min, 0)
+
+    mask[event_type, window_min:window_max] = 1.0
+    min_val = window_min - location
+    max_val = window_max - location
+    values[event_type, window_min:window_max] = np.arange(min_val, max_val)
+
+
 class IntervalEventsSampler:
     def __init__(self, series_ids: list[str], naive_all_data: dict, all_segmentations: dict,
                  train_or_test="train"):
@@ -36,10 +52,16 @@ class IntervalEventsSampler:
                 self.shuffle_indices = np.arange(len(self.all_segmentations_list))
         self.sample_low = 0
 
-    def sample_single(self, index: int, random_shift: int=0, flip: bool=False, expand: int=0):
-        assert expand % 12 == 0, "expand must be a multiple of 12"
+    def sample_single(self, index: int, random_shift: int=0, flip: bool=False, expand: int=0, event_regressions: list[int]=None):
         # index denotes the index in self.all_segmentations_list
         # returns (accel_data, event_segmentations), where event_segmentations[0, :] is onset, and event_segmentations[1, :] is wakeup
+
+        assert expand % 12 == 0, "expand must be a multiple of 12"
+        if event_regressions is not None:
+            assert isinstance(event_regressions, list), "event_regressions must be a list"
+            for k in event_regressions:
+                assert isinstance(k, int), "event_regressions must be a list of integers"
+
 
         night_info = self.all_segmentations_list[index]
         series_id = night_info["series_id"]
@@ -97,6 +119,7 @@ class IntervalEventsSampler:
                         raise ValueError("Unknown event type: {}".format(evts.iloc[0]["event"]))"""
                     pass
 
+        # Load acceleration data and event segmentations
         accel_data = self.naive_all_data[series_id]["accel"][:, (start - expand):(end + expand)]
         event_segmentations = np.zeros((2, (end - start) // 12), dtype=np.float32)
         event_tolerance_width = 30
@@ -117,13 +140,39 @@ class IntervalEventsSampler:
             accel_data = np.flip(accel_data, axis=1)
             event_segmentations = np.flip(event_segmentations, axis=1)
 
-        return accel_data, event_segmentations
+        # Load event regression data
+        event_regression_values = None if event_regressions is None else [np.zeros((2, end - start + 2 * expand), dtype=np.float32) for _ in event_regressions]
+        event_regression_mask = None if event_regressions is None else [np.zeros((2, end - start + 2 * expand), dtype=np.float32) for _ in event_regressions]
 
-    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, expand: int=0):
+        if event_regressions is not None:
+            length = end - start
+            for event in grouped_events:
+                onset = event["onset"] - start
+                wakeup = event["wakeup"] - start
+                if flip:
+                    onset, wakeup = length - wakeup, length - onset
+                onset += expand
+                wakeup += expand
+
+                for k in range(len(event_regressions)):
+                    regression_range = event_regressions[k]
+                    create_regression_range(event_regression_mask[k], event_regression_values[k], event_type=0, location=onset, window_radius=regression_range)
+                    create_regression_range(event_regression_mask[k], event_regression_values[k], event_type=1, location=wakeup, window_radius=regression_range)
+
+        return accel_data, event_segmentations, event_regression_values, event_regression_mask
+
+    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, expand: int=0, event_regressions: list[int]=None):
         assert self.shuffle_indices is not None, "shuffle_indices is None, call shuffle() first"
 
         accel_datas = []
         event_segmentations = []
+        if event_regressions is None:
+            event_regression_values = None
+            event_regression_masks = None
+        else:
+            assert isinstance(event_regressions, list), "event_regressions must be a list of integers"
+            event_regression_values = [[] for _ in event_regressions]
+            event_regression_masks = [[] for _ in event_regressions]
 
         increment = min(batch_size, len(self.all_segmentations_list) - self.sample_low)
 
@@ -133,16 +182,24 @@ class IntervalEventsSampler:
                 flip = np.random.randint(0, 2) == 1
             if always_flip:
                 flip = True
-            accel_data, event_segmentation = self.sample_single(self.shuffle_indices[k], random_shift=random_shift,
-                                                                flip=flip, expand=expand)
+            accel_data, event_segmentation, event_regression_value, event_regression_mask =\
+                self.sample_single(self.shuffle_indices[k], random_shift=random_shift, flip=flip, expand=expand, event_regressions=event_regressions)
             accel_datas.append(accel_data)
             event_segmentations.append(event_segmentation)
+            if event_regressions is not None:
+                for k in range(len(event_regressions)):
+                    event_regression_values[k].append(event_regression_value[k])
+                    event_regression_masks[k].append(event_regression_mask[k])
 
         self.sample_low += increment
         accel_datas = np.stack(accel_datas, axis=0)
         event_segmentations = np.stack(event_segmentations, axis=0)
+        if event_regressions is not None:
+            for k in range(len(event_regressions)):
+                event_regression_values[k] = np.stack(event_regression_values[k], axis=0)
+                event_regression_masks[k] = np.stack(event_regression_masks[k], axis=0)
 
-        return accel_datas, event_segmentations, increment
+        return accel_datas, event_segmentations, event_regression_values, event_regression_masks, increment
 
     def __len__(self):
         return len(self.all_segmentations_list)

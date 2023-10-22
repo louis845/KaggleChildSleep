@@ -51,38 +51,59 @@ def dice_loss(preds: torch.Tensor, ground_truth: torch.Tensor, eps=1e-5):
     union = torch.sum(preds + ground_truth, dim=(1, 2))
     return torch.sum(1 - (2 * intersection + eps) / (union + eps))
 
+def masked_huber_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor):
+    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
+                                                                                                 ground_truth.shape)
+    assert preds.shape == mask.shape, "preds.shape = {}, mask.shape = {}".format(preds.shape, mask.shape)
+    mask_per_batch = torch.sum(mask, dim=(1, 2))
+    loss_per_batch = torch.where(mask_per_batch > 0, torch.sum(torch.nn.functional.huber_loss(preds, ground_truth, reduction="none") * mask, dim=(1, 2)) / mask_per_batch,
+                                    torch.zeros_like(mask_per_batch))
+    return torch.sum(loss_per_batch)
+
+def masked_mae_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor):
+    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
+                                                                                                 ground_truth.shape)
+    assert preds.shape == mask.shape, "preds.shape = {}, mask.shape = {}".format(preds.shape, mask.shape)
+    mask_per_batch = torch.sum(mask, dim=(1, 2))
+    loss_per_batch = torch.where(mask_per_batch > 0, torch.sum(torch.abs(preds - ground_truth) * mask, dim=(1, 2)) / mask_per_batch,
+                                    torch.zeros_like(mask_per_batch))
+    return torch.sum(loss_per_batch)
 
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
-                            accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
+                            accel_data_batch: torch.Tensor, labels_batch: torch.Tensor,
+                            event_regression_values: list[torch.Tensor], event_regression_masks: list[torch.Tensor]):
     optimizer_.zero_grad()
-    pred_logits = model_(accel_data_batch, deep_supervision=False)  # shape (batch_size, 2, T // 12)
+    pred_logits, pred_small, pred_mid, pred_large = model_(accel_data_batch, deep_supervision=False)  # shape (batch_size, 2, T // 12)
     if use_ce_loss:
         loss = ce_loss(pred_logits, labels_batch)
     elif use_iou_loss:
         loss = dice_loss(pred_logits, labels_batch)
     else:
         loss = focal_loss(pred_logits, labels_batch)
-    loss.backward()
+
+    if use_deep_supervision is not None:
+        small_optim_loss = masked_huber_loss(pred_small, event_regression_values[0], event_regression_masks[0])
+        mid_optim_loss = masked_huber_loss(pred_mid, event_regression_values[1], event_regression_masks[1])
+        large_optim_loss = masked_huber_loss(pred_large, event_regression_values[2], event_regression_masks[2])
+        floss = loss + small_optim_loss + mid_optim_loss + large_optim_loss
+        floss.backward()
+    else:
+        loss.backward()
     optimizer_.step()
 
     with torch.no_grad():
         preds = pred_logits > 0.0
+        if use_deep_supervision is not None:
+            small_loss = masked_mae_loss(pred_small, event_regression_values[0], event_regression_masks[0]).item()
+            mid_loss = masked_mae_loss(pred_mid, event_regression_values[1], event_regression_masks[1]).item()
+            large_loss = masked_mae_loss(pred_large, event_regression_values[2], event_regression_masks[2]).item()
 
-    return loss.item(), preds.to(torch.long)
+            num_events = torch.sum(torch.sum(event_regression_masks[0], dim=(1, 2)) > 0).item() # number of events in batch
+        else:
+            small_loss = mid_loss = large_loss = num_events = None
 
-def single_training_step_deep(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
-                            accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
-    optimizer_.zero_grad()
-    pred_logits_small, pred_logits_mid, pred_logits = model_(accel_data_batch, True) # shape (batch_size, 1, T), where batch_size = 1
-    loss = batch_size * (ce_loss(pred_logits, labels_batch) + ce_loss(pred_logits_small, labels_batch) + ce_loss(pred_logits_mid, labels_batch)) / 3.0
-    loss.backward()
-    optimizer_.step()
-
-    with torch.no_grad():
-        preds = pred_logits > 0.0
-
-    return loss.item(), preds.to(torch.long)
+    return loss.item(), preds.to(torch.long), small_loss, mid_loss, large_loss, num_events
 
 def training_step(record: bool):
     if record:
@@ -93,68 +114,55 @@ def training_step(record: bool):
     training_sampler.shuffle()
 
     # training
-    cur_deep_supervision = False
     with tqdm.tqdm(total=len(training_sampler)) as pbar:
         while training_sampler.entries_remaining() > 0:
-            if use_deep_supervision is not None and \
-                    (deep_supervision_limit is None or epoch < deep_supervision_limit):
-                cur_deep_supervision = not cur_deep_supervision
+            accel_data_batch, labels_batch, event_regression_values, event_regression_masks, increment =\
+                training_sampler.sample(batch_size, random_shift=random_shift,
+                                        random_flip=random_flip, always_flip=always_flip,
+                                        expand=expand, event_regressions=use_deep_supervision)
 
-            if cur_deep_supervision:
-                accel_data_batch, labels_batch = training_sampler_deep.get_next_streaming(target_length=use_deep_supervision,
-                                                                                                     all_series_data=all_data)
-
-                accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
-                labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
-                if use_anglez_only:
-                    accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
-                if random_flip:
-                    if np.random.rand() > 0.5:
-                        accel_data_batch_torch = torch.flip(accel_data_batch_torch, dims=(2,))
-                        labels_batch_torch = torch.flip(labels_batch_torch, dims=(2,))
-
-                # train model now
-                loss, preds = single_training_step_deep(model, optimizer,
-                                                   accel_data_batch_torch,
-                                                   labels_batch_torch)
-
-                # record
-                if record:
-                    with torch.no_grad():
-                        train_metrics["deep_loss"].add(loss, 1)
-                        train_metrics["deep_metric"].add(preds, (labels_batch_torch > 0.5).to(torch.long))
-
+            accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
+            labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
+            if use_deep_supervision is None:
+                event_regression_values_torch = None
+                event_regression_masks_torch = None
             else:
-                accel_data_batch, labels_batch, increment = training_sampler.sample(batch_size, random_shift=random_shift,
-                                                                                    random_flip=random_flip, always_flip=always_flip,
-                                                                                    expand=expand)
+                event_regression_values_torch = [torch.tensor(event_regression_values[k], dtype=torch.float32, device=config.device)
+                                                    for k in range(3)]
+                event_regression_masks_torch = [torch.tensor(event_regression_masks[k], dtype=torch.float32, device=config.device)
+                                                    for k in range(3)]
 
-                accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
-                labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
-                if use_anglez_only:
-                    accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
+            if use_anglez_only:
+                accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
 
-                # train model now
-                loss, preds = single_training_step(model, optimizer,
-                                                   accel_data_batch_torch,
-                                                   labels_batch_torch)
-                #time.sleep(0.2)
+            # train model now
+            loss, preds, small_loss, mid_loss, large_loss, num_events = single_training_step(model, optimizer,
+                                                                           accel_data_batch_torch,
+                                                                           labels_batch_torch,
+                                                                           event_regression_values_torch,
+                                                                           event_regression_masks_torch)
+            #time.sleep(0.2)
 
-                # record
-                if record:
-                    with torch.no_grad():
-                        labels_long = (labels_batch_torch > 0.5).to(torch.long)
-                        train_metrics["loss"].add(loss, increment)
-                        train_metrics["metric"].add(preds, labels_long)
-                        true_positives, false_positives, true_negatives, false_negatives =\
-                            metrics_iou.compute_iou_metrics(labels_long[:, 0:1, :], preds[:, 0:1, :])
-                        train_metrics["onset_iou_metric"].add_direct(true_positives, true_negatives, false_positives, false_negatives)
-                        true_positives, false_positives, true_negatives, false_negatives = \
-                            metrics_iou.compute_iou_metrics(labels_long[:, 1:2, :], preds[:, 1:2, :])
-                        train_metrics["wakeup_iou_metric"].add_direct(true_positives, true_negatives, false_positives,
-                                                                     false_negatives)
+            # record
+            if record:
+                with torch.no_grad():
+                    labels_long = (labels_batch_torch > 0.5).to(torch.long)
+                    train_metrics["loss"].add(loss, increment)
+                    train_metrics["metric"].add(preds, labels_long)
+                    true_positives, false_positives, true_negatives, false_negatives =\
+                        metrics_iou.compute_iou_metrics(labels_long[:, 0:1, :], preds[:, 0:1, :])
+                    train_metrics["onset_iou_metric"].add_direct(true_positives, true_negatives, false_positives, false_negatives)
+                    true_positives, false_positives, true_negatives, false_negatives = \
+                        metrics_iou.compute_iou_metrics(labels_long[:, 1:2, :], preds[:, 1:2, :])
+                    train_metrics["wakeup_iou_metric"].add_direct(true_positives, true_negatives, false_positives,
+                                                                 false_negatives)
 
-                pbar.update(increment)
+                    if use_deep_supervision is not None:
+                        train_metrics["small_loss"].add(small_loss, num_events)
+                        train_metrics["mid_loss"].add(mid_loss, num_events)
+                        train_metrics["large_loss"].add(large_loss, num_events)
+
+            pbar.update(increment)
 
     if record:
         current_metrics = {}
@@ -165,34 +173,28 @@ def training_step(record: bool):
             train_history[key].append(current_metrics[key])
 
 def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tensor,
-                           labels_batch: torch.Tensor):
+                           labels_batch: torch.Tensor, event_regression_values: list[torch.Tensor],
+                           event_regression_masks: list[torch.Tensor]):
     with torch.no_grad():
-        pred_logits = model_(accel_data_batch)  # shape (batch_size, 2, T)
+        pred_logits, pred_small, pred_mid, pred_large = model_(accel_data_batch)  # shape (batch_size, 2, T)
         if use_ce_loss:
             loss = ce_loss(pred_logits, labels_batch)
         elif use_iou_loss:
             loss = dice_loss(pred_logits, labels_batch)
         else:
             loss = focal_loss(pred_logits, labels_batch)
-        preds = pred_logits > 0.0
-
-        return loss.item(), preds.to(torch.long)
-
-def single_validation_step_deep(model_: torch.nn.Module, accel_data_batch: torch.Tensor,
-                           labels_batch: torch.Tensor, pad_left, pad_right):
-    with torch.no_grad():
-        accel_data_batch = torch.nn.functional.pad(accel_data_batch, (pad_left, pad_right), mode="replicate")
-
-        pred_logits_small, pred_logits_mid, pred_logits = model_(accel_data_batch, True)  # shape (batch_size, 1, T), where batch_size = 1
-        pred_logits = pred_logits[..., pad_left:(pred_logits.shape[-1] - pad_right)]
-        pred_logits_small = pred_logits_small[..., pad_left:(pred_logits_small.shape[-1] - pad_right)]
-        pred_logits_mid = pred_logits_mid[..., pad_left:(pred_logits_mid.shape[-1] - pad_right)]
-
-        loss = (ce_loss(pred_logits, labels_batch) + ce_loss(pred_logits_small, labels_batch) + ce_loss(pred_logits_mid, labels_batch)) / 3.0
 
         preds = pred_logits > 0.0
+        if use_deep_supervision is not None:
+            small_loss = masked_mae_loss(pred_small, event_regression_values[0], event_regression_masks[0]).item()
+            mid_loss = masked_mae_loss(pred_mid, event_regression_values[1], event_regression_masks[1]).item()
+            large_loss = masked_mae_loss(pred_large, event_regression_values[2], event_regression_masks[2]).item()
 
-        return loss.item(), preds.to(torch.long)
+            num_events = torch.sum(torch.sum(event_regression_masks[0], dim=(1, 2)) > 0).item() # number of events in batch
+        else:
+            small_loss = mid_loss = large_loss = None
+
+        return loss.item(), preds.to(torch.long), small_loss, mid_loss, large_loss, num_events
 
 def validation_step():
     for key in val_metrics:
@@ -203,14 +205,24 @@ def validation_step():
     with (tqdm.tqdm(total=len(val_sampler)) as pbar):
         while val_sampler.entries_remaining() > 0:
             # load the batch
-            accel_data_batch, labels_batch, increment = val_sampler.sample(batch_size, expand=expand)
+            accel_data_batch, labels_batch, event_regression_values, event_regression_masks, increment =\
+                val_sampler.sample(batch_size, expand=expand, event_regressions=use_deep_supervision)
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
+            if use_deep_supervision is None:
+                event_regression_values = None
+                event_regression_masks = None
+            else:
+                event_regression_values = [torch.tensor(event_regression_values[k], dtype=torch.float32, device=config.device)
+                                                    for k in range(3)]
+                event_regression_masks = [torch.tensor(event_regression_masks[k], dtype=torch.float32, device=config.device)
+                                                    for k in range(3)]
+
             if use_anglez_only:
                 accel_data_batch = accel_data_batch[:, 0:1, :]
 
             # val model now
-            loss, preds = single_validation_step(model, accel_data_batch, labels_batch)
+            loss, preds, small_loss, mid_loss, large_loss, num_events = single_validation_step(model, accel_data_batch, labels_batch, event_regression_values, event_regression_masks)
 
             # record
             with torch.no_grad():
@@ -247,39 +259,12 @@ def validation_step():
                 val_metrics["wakeup_iou_metric5"].add_direct(true_positives, true_negatives, false_positives,
                                                               false_negatives)
 
+                if use_deep_supervision is not None:
+                    val_metrics["small_loss"].add(small_loss, num_events)
+                    val_metrics["mid_loss"].add(mid_loss, num_events)
+                    val_metrics["large_loss"].add(large_loss, num_events)
+
             pbar.update(increment)
-
-    # validation on deep supervision
-    if use_deep_supervision is not None:
-        with (tqdm.tqdm(total=len(validation_entries)) as pbar):
-            for k in range(len(validation_entries)):
-                batch_entry = validation_entries[k]  # series ids
-
-                # load the batch
-                accel_data_batch = all_data[batch_entry]["accel"]
-                labels_batch = all_data[batch_entry]["sleeping_timesteps"]
-                accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)\
-                    .unsqueeze(0)
-                labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)\
-                    .unsqueeze(0).unsqueeze(0)
-                if use_anglez_only:
-                    accel_data_batch = accel_data_batch[:, 0:1, :]
-
-                # pad such that lengths is a multiple of 48
-                pad_length = 48 - (accel_data_batch.shape[-1] % 48)
-                if pad_length == 48:
-                    pad_length = 0
-                pad_left = pad_length // 2
-                pad_right = pad_length - pad_left
-
-                loss, preds = single_validation_step_deep(model, accel_data_batch, labels_batch, pad_left, pad_right)
-
-                # record
-                with torch.no_grad():
-                    val_metrics["deep_loss"].add(loss, 1)
-                    val_metrics["deep_metric"].add(preds, labels_batch.to(torch.long))
-
-                pbar.update(1)
 
     current_metrics = {}
     for key in val_metrics:
@@ -325,11 +310,7 @@ if __name__ == "__main__":
     parser.add_argument("--dropout_pos_embeddings", action="store_true", help="Whether to dropout the positional embeddings. Default False.")
     parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use cross entropy loss. Default False.")
     parser.add_argument("--use_iou_loss", action="store_true", help="Whether to use IOU loss. Default False.")
-    parser.add_argument("--use_deep_supervision", type=int, default=None, help="Whether to use deep supervision. Default None. If specified, must be an integer indicating the length of deep supervision training.")
-    parser.add_argument("--deep_supervision_limit", type=int, default=None, help="The maximum number of deep supervision training steps. Default None. If specified, must be an integer. Ignored if not using deep supervision.")
-    parser.add_argument("--use_cutmix", action="store_true", help="Whether to use cutmix. Default False.")
-    parser.add_argument("--cutmix_skip", type=int, default=540, help="Maximum of random skip intervals for cutmix. Default 540. Ignored if not using cutmix.")
-    parser.add_argument("--cutmix_length", type=int, default=540, help="Length of intervals for cutmix. Default 540. Ignored if not using cutmix.")
+    parser.add_argument("--use_deep_supervision", type=int, nargs="+", default=None, help="Whether to use deep supervision. Default None. If specified, must be an integer indicating the length of deep supervision training.")
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
@@ -377,15 +358,15 @@ if __name__ == "__main__":
     use_ce_loss = args.use_ce_loss
     use_iou_loss = args.use_iou_loss
     use_deep_supervision = args.use_deep_supervision
-    deep_supervision_limit = args.deep_supervision_limit
-    use_cutmix = args.use_cutmix
-    cutmix_skip = args.cutmix_skip
-    cutmix_length = args.cutmix_length
     use_anglez_only = args.use_anglez_only
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
 
     assert not (use_iou_loss and use_ce_loss), "Cannot use both IOU loss and cross entropy loss."
+    if use_deep_supervision is not None:
+        assert isinstance(use_deep_supervision, list), "Deep supervision must be a list of integers."
+        assert len(use_deep_supervision) == 3, "Deep supervision must be a list of length 3."
+        assert all([isinstance(x, int) for x in use_deep_supervision]), "Deep supervision must be a list of integers."
 
     if isinstance(hidden_channels, int):
         hidden_channels = [hidden_channels]
@@ -424,8 +405,6 @@ if __name__ == "__main__":
     print("Second momentum: " + str(second_momentum))
     print("Weight decay: " + str(weight_decay))
     print("Optimizer: " + optimizer_type)
-    print("Use deep supervision: " + str(use_deep_supervision))
-    print("Deep supervision limit: " + str(deep_supervision_limit))
     if optimizer_type.lower() == "adam":
         if weight_decay > 0.0:
             optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(momentum, second_momentum), weight_decay=weight_decay)
@@ -484,11 +463,8 @@ if __name__ == "__main__":
         "dropout": dropout,
         "dropout_pos_embeddings": dropout_pos_embeddings,
         "use_ce_loss": use_ce_loss,
+        "use_iou_loss": use_iou_loss,
         "use_deep_supervision": use_deep_supervision,
-        "deep_supervision_limit": deep_supervision_limit,
-        "use_cutmix": use_cutmix,
-        "cutmix_skip": cutmix_skip,
-        "cutmix_length": cutmix_length,
         "use_anglez_only": use_anglez_only,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
@@ -505,13 +481,18 @@ if __name__ == "__main__":
     val_metrics = {}
     train_metrics["loss"] = metrics.NumericalMetric("train_loss")
     train_metrics["metric"] = metrics.BinaryMetrics("train_metric")
+    if use_deep_supervision is not None:
+        train_metrics["mae_small"] = metrics.NumericalMetric("train_mae_small")
+        train_metrics["mae_medium"] = metrics.NumericalMetric("train_mae_medium")
+        train_metrics["mae_large"] = metrics.NumericalMetric("train_mae_large")
     train_metrics["onset_iou_metric"] = metrics.BinaryMetrics("train_onset_iou_metric")
     train_metrics["wakeup_iou_metric"] = metrics.BinaryMetrics("train_wakeup_iou_metric")
-    if use_deep_supervision is not None:
-        train_metrics["deep_loss"] = metrics.NumericalMetric("train_deep_loss")
-        train_metrics["deep_metric"] = metrics.BinaryMetrics("train_deep_metric")
     val_metrics["loss"] = metrics.NumericalMetric("val_loss")
     val_metrics["metric"] = metrics.BinaryMetrics("val_metric")
+    if use_deep_supervision is not None:
+        val_metrics["mae_small"] = metrics.NumericalMetric("val_mae_small")
+        val_metrics["mae_medium"] = metrics.NumericalMetric("val_mae_medium")
+        val_metrics["mae_large"] = metrics.NumericalMetric("val_mae_large")
     val_metrics["onset_metric"] = metrics.BinaryMetrics("val_onset_metric")
     val_metrics["wakeup_metric"] = metrics.BinaryMetrics("val_wakeup_metric")
     val_metrics["onset_iou_metric1"] = metrics.BinaryMetrics("val_onset_iou_metric1")
@@ -520,9 +501,6 @@ if __name__ == "__main__":
     val_metrics["wakeup_iou_metric3"] = metrics.BinaryMetrics("val_wakeup_iou_metric3")
     val_metrics["onset_iou_metric5"] = metrics.BinaryMetrics("val_onset_iou_metric5")
     val_metrics["wakeup_iou_metric5"] = metrics.BinaryMetrics("val_wakeup_iou_metric5")
-    if use_deep_supervision is not None:
-        val_metrics["deep_loss"] = metrics.NumericalMetric("val_deep_loss")
-        val_metrics["deep_metric"] = metrics.BinaryMetrics("val_deep_metric")
 
     # Compile
     #single_training_step_compile = torch.compile(single_training_step)
@@ -534,25 +512,12 @@ if __name__ == "__main__":
     print("Random flip: " + str(random_flip))
     print("Always flip: " + str(always_flip))
     print("Expand: " + str(expand))
-    print("Use cutmix: " + str(use_cutmix))
     print("Use anglez only: " + str(use_anglez_only))
-    if use_cutmix:
-        print("Cutmix skip: " + str(cutmix_skip))
-        print("Cutmix length: " + str(cutmix_length))
-        training_sampler = convert_to_interval_events.SemiSyntheticIntervalEventsSampler(training_entries, all_data, all_interval_segmentations,
-                                                                                         spliced_good_events=convert_to_good_events.GoodEventsSplicedSampler(
-                                                                                             data_dict=convert_to_good_events.load_all_data_into_dict(),
-                                                                                             entries_sublist=training_entries,
-                                                                                             expected_length=cutmix_length
-                                                                                         ),
-                                                                                         cutmix_skip=cutmix_skip)
-    else:
-        training_sampler = convert_to_interval_events.IntervalEventsSampler(training_entries, all_data, all_interval_segmentations,
-                                                                            train_or_test="train")
+    print("Use deep supervision: " + str(use_deep_supervision))
+    training_sampler = convert_to_interval_events.IntervalEventsSampler(training_entries, all_data, all_interval_segmentations,
+                                                                        train_or_test="train")
     val_sampler = convert_to_interval_events.IntervalEventsSampler(validation_entries, all_data, all_interval_segmentations,
                                                                         train_or_test="val")
-    if use_deep_supervision is not None:
-        training_sampler_deep = convert_to_good_events.GoodEvents(all_good_events_no_exclusion, training_entries, is_train=True, train_streaming=True)
 
 
     # Start training loop

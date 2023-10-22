@@ -206,15 +206,6 @@ class Unet3fDeepSupervision(torch.nn.Module):
             self.attn_bottleneck_out_norm = torch.nn.GroupNorm(num_channels=stem_final_layer_channels, num_groups=1)
             self.attn_bottleneck_out_nonlin = torch.nn.GELU()
 
-            """self.attn_bottleneck2_in = torch.nn.Conv1d(stem_final_layer_channels, attention_bottleneck, kernel_size=1,
-                                                      bias=False)
-            self.attn_bottleneck2_in_norm = torch.nn.GroupNorm(num_channels=attention_bottleneck, num_groups=1)
-            self.attn_bottleneck2_in_nonlin = torch.nn.Tanh()
-            self.attn_bottleneck2_out = torch.nn.Conv1d(attention_bottleneck, stem_final_layer_channels, kernel_size=1,
-                                                       bias=False)
-            self.attn_bottleneck2_out_norm = torch.nn.GroupNorm(num_channels=stem_final_layer_channels, num_groups=1)
-            self.attn_bottleneck2_out_nonlin = torch.nn.GELU()"""
-
         self.attention_blocks = torch.nn.ModuleList()
         for i in range(attention_blocks):
             self.attention_blocks.append(
@@ -247,16 +238,17 @@ class Unet3fDeepSupervision(torch.nn.Module):
         # run stem
         ret = self.stem(x, downsampling_methods)
 
-        if deep_supervision:
-            # upsampling path for deep supervision
-            x_small = self.small_head(ret[:-2], downsampling_methods)
-            x_mid = self.mid_head(ret[:-1], downsampling_methods)
-            x_large = self.large_head(ret, downsampling_methods)
+        # upsampling path for deep supervision
+        x_small = self.small_head(ret[:-2], downsampling_methods)
+        x_mid = self.mid_head(ret[:-1], downsampling_methods)
+        x_large = self.large_head(ret, downsampling_methods)
 
-            # final conv
-            x_small = self.final_conv_small(x_small)
-            x_mid = self.final_conv_mid(x_mid)
-            x_large = self.final_conv_large(x_large)
+        # final conv
+        x_small = self.final_conv_small(x_small)
+        x_mid = self.final_conv_mid(x_mid)
+        x_large = self.final_conv_large(x_large)
+
+        if deep_supervision:
             return x_small, x_mid, x_large
         else:
             x = ret[-1] # final layer from conv stem
@@ -271,14 +263,6 @@ class Unet3fDeepSupervision(torch.nn.Module):
             for i in range(len(self.attention_blocks)):
                 x = self.attention_blocks[i](x)
 
-            """if self.attention_bottleneck is not None:
-                x = self.attn_bottleneck2_in(x)
-                x = self.attn_bottleneck2_in_norm(x)
-                x = self.attn_bottleneck2_in_nonlin(x)
-                x = self.attn_bottleneck2_out(x)
-                x = self.attn_bottleneck2_out_norm(x)
-                x = self.attn_bottleneck2_out_nonlin(x)"""
-
             x = self.no_contraction_head(ret, x)
             x = self.outconv(x)
-            return x
+            return x, x_small, x_mid, x_large
