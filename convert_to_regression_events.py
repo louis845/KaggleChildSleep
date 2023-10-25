@@ -23,10 +23,37 @@ def create_regression_range(mask: np.ndarray, values: np.ndarray, event_type: in
     max_val = window_max - location
     values[event_type, window_min:window_max] = np.arange(min_val, max_val)
 
+def create_regression_kernel(mask: np.ndarray, values: np.ndarray, event_type: int, location: int, window_radius: int,
+                             kernel_radius: int):
+    assert mask.shape == values.shape, "mask and values must have the same shape"
+    assert event_type in [0, 1], "event_type must be 0 or 1"
+    assert mask.shape[0] == 2
+
+    window_max = location + window_radius + 1
+    window_min = location - window_radius
+    window_max = min(window_max, mask.shape[1])
+    window_min = max(window_min, 0)
+
+    mask[event_type, window_min:window_max] = 1.0
+
+    kernel_max = location + kernel_radius + 1
+    kernel_min = location - kernel_radius
+    kernel_max = min(kernel_max, mask.shape[1])
+    kernel_min = max(kernel_min, 0)
+
+    min_val = kernel_min - location
+    max_val = kernel_max - location
+    kernel_values = (1 - np.abs(np.arange(min_val, max_val)).astype(np.float32) / kernel_radius) ** 2
+    assert np.all(kernel_values >= 0.0) and np.all(kernel_values <= 1.0), "kernel_values must be between 0 and 1"
+    values[event_type, kernel_min:kernel_max] = kernel_values
+
 
 class IntervalRegressionSampler:
     def __init__(self, series_ids: list[str], naive_all_data: dict, event_regressions: list[int],
-                 train_or_test: str="train"):
+                 train_or_test: str="train", use_kernel: int=None):
+        if use_kernel is not None:
+            assert isinstance(use_kernel, int), "use_kernel must be an integer"
+            assert use_kernel >= 12, "use_kernel must be a positive integer >= 12"
         assert isinstance(event_regressions, list), "event_regressions must be a list of integers"
         for k in event_regressions:
             assert isinstance(k, int), "event_regressions must be a list of integers"
@@ -89,6 +116,8 @@ class IntervalRegressionSampler:
                         })
             self.series_ids = series_ids_with_events
 
+        self.use_kernel = use_kernel
+
 
     def shuffle(self):
         if self.train_or_test == "train":
@@ -136,8 +165,14 @@ class IntervalRegressionSampler:
 
         for k in range(len(self.event_regressions)):
             regression_range = self.event_regressions[k]
-            create_regression_range(event_regression_mask[k], event_regression_values[k], event_type=0, location=onset, window_radius=regression_range)
-            create_regression_range(event_regression_mask[k], event_regression_values[k], event_type=1, location=wakeup, window_radius=regression_range)
+            if self.use_kernel is not None:
+                create_regression_kernel(event_regression_mask[k], event_regression_values[k], event_type=0,
+                                        location=onset, window_radius=regression_range, kernel_radius=self.use_kernel)
+                create_regression_kernel(event_regression_mask[k], event_regression_values[k], event_type=1,
+                                        location=wakeup, window_radius=regression_range, kernel_radius=self.use_kernel)
+            else:
+                create_regression_range(event_regression_mask[k], event_regression_values[k], event_type=0, location=onset, window_radius=regression_range)
+                create_regression_range(event_regression_mask[k], event_regression_values[k], event_type=1, location=wakeup, window_radius=regression_range)
 
         return accel_data, event_regression_values, event_regression_mask
 
@@ -183,10 +218,18 @@ class IntervalRegressionSampler:
             for event_info in self.event_regression_samples[series_id]:
                 onset = event_info["onset"]
                 wakeup = event_info["wakeup"]
-                create_regression_range(event_regression_mask[k], event_regression_values[k], event_type=0, location=onset,
-                                        window_radius=regression_range)
-                create_regression_range(event_regression_mask[k], event_regression_values[k], event_type=1, location=wakeup,
-                                        window_radius=regression_range)
+                if self.use_kernel is not None:
+                    create_regression_kernel(event_regression_mask[k], event_regression_values[k], event_type=0,
+                                             location=onset, window_radius=regression_range,
+                                             kernel_radius=self.use_kernel)
+                    create_regression_kernel(event_regression_mask[k], event_regression_values[k], event_type=1,
+                                             location=wakeup, window_radius=regression_range,
+                                             kernel_radius=self.use_kernel)
+                else:
+                    create_regression_range(event_regression_mask[k], event_regression_values[k], event_type=0, location=onset,
+                                            window_radius=regression_range)
+                    create_regression_range(event_regression_mask[k], event_regression_values[k], event_type=1, location=wakeup,
+                                            window_radius=regression_range)
 
         # Contract equally on both sides so that the length is a multiple of target_multiple
         series_length = accel_data.shape[1]

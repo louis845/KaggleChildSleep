@@ -23,6 +23,25 @@ import convert_to_h5py_naive
 import convert_to_regression_events
 import model_unet
 import model_attention_unet
+import kernel_utils
+
+def masked_ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
+    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
+                                                                                                 ground_truth.shape)
+    bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
+    mask_per_batch = torch.sum(mask, dim=(1, 2))
+    loss_per_batch = torch.where(mask_per_batch > 0, torch.sum(bce * mask, dim=(1, 2)) / (mask_per_batch + 1e-7),
+                                 torch.zeros_like(mask_per_batch))
+    return torch.sum(loss_per_batch)
+
+def masked_focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
+    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
+    bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
+    focal_bce = ((torch.sigmoid(preds) - ground_truth) ** 2) * bce
+    mask_per_batch = torch.sum(mask, dim=(1, 2))
+    loss_per_batch = torch.where(mask_per_batch > 0, torch.sum(focal_bce * mask, dim=(1, 2)) / (mask_per_batch + 1e-7),
+                                 torch.zeros_like(mask_per_batch))
+    return torch.sum(loss_per_batch)
 
 def masked_huber_mse_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor):
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
@@ -68,6 +87,21 @@ def masked_mae_loss_raw(preds: torch.Tensor, ground_truth: torch.Tensor, mask: t
     loss = torch.sum(torch.abs(preds - ground_truth) * mask)
     return loss
 
+def masked_ce_loss_raw(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor):
+    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
+                                                                                                 ground_truth.shape)
+    assert preds.shape == mask.shape, "preds.shape = {}, mask.shape = {}".format(preds.shape, mask.shape)
+    loss = torch.sum(torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none") * mask)
+    return loss
+
+def masked_focal_loss_raw(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor):
+    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
+                                                                                                 ground_truth.shape)
+    assert preds.shape == mask.shape, "preds.shape = {}, mask.shape = {}".format(preds.shape, mask.shape)
+    loss = torch.sum(((torch.sigmoid(preds) - ground_truth) ** 2) *
+                     torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none") * mask)
+    return loss
+
 def local_median_ae_loss(preds: np.ndarray, event: int, width: int):
     low = max(0, event - width)
     high = min(preds.shape[0], event + width + 1)
@@ -84,7 +118,7 @@ def local_median_ae_loss(preds: np.ndarray, event: int, width: int):
                  (low + int(width * 0.4), low + int(width * 0.8)),
                  (low + int(width * 0.6), high)]
     return np.max(
-        [np.abs(np.median(preds[low:high] + np.arange(low, high)) - event) for low, high in intervals]
+        [np.abs(np.mean(np.arange(low, high) - preds[low:high]) - event) for low, high in intervals]
     )
 
 def local_mean_ae_loss(preds: np.ndarray, event: int, width: int):
@@ -93,11 +127,38 @@ def local_mean_ae_loss(preds: np.ndarray, event: int, width: int):
 
     width = high - low
     intervals = [(low, high),
-                 (low + int(width * 0.1), high - int(width * 0.1)),
-                 (low + int(width * 0.2), high - int(width * 0.2))]
+                 (low, low + int(width * 0.8)),
+                 (low + int(width * 0.2), high),
+                 (low, low + int(width * 0.6)),
+                 (low + int(width * 0.2), low + int(width * 0.8)),
+                 (low + int(width * 0.4), high),
+                 (low, low + int(width * 0.4)),
+                 (low + int(width * 0.2), low + int(width * 0.6)),
+                 (low + int(width * 0.4), low + int(width * 0.8)),
+                 (low + int(width * 0.6), high)]
     return np.max(
-        [np.abs(np.mean(preds[low:high] + np.arange(low, high)) - event) for low, high in intervals]
+        [np.abs(np.mean(np.arange(low, high) - preds[low:high]) - event) for low, high in intervals]
     )
+
+def local_argmax_kernel_loss(preds: torch.Tensor, event: int, width: int):
+    expanded_width = width * 3
+    low = max(0, event - width)
+    high = min(preds.shape[0], event + width + 1)
+    low_expanded = max(0, event - expanded_width)
+    high_expanded = min(preds.shape[0], event + expanded_width + 1)
+
+    locations = torch.arange(start=low_expanded, end=high_expanded, step=1, dtype=torch.float32, device=preds.device) - preds[low_expanded:high_expanded] - low
+
+    kernel_preds = kernel_utils.generate_kernel_preds(high - low, locations, kernel_radius=6).cpu().numpy()
+    assert kernel_preds.shape == (high - low,), "kernel_preds.shape = {}, high - low = {}".format(kernel_preds.shape, high - low)
+
+    return np.abs(np.argmax(kernel_preds) + low - event)
+
+def local_argmax_loss(preds: np.ndarray, event: int, width: int):
+    low = max(0, event - width)
+    high = min(preds.shape[0], event + width + 1)
+
+    return np.abs(np.argmax(preds[low:high]) + low - event)
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
                             accel_data_batch: torch.Tensor,
@@ -105,17 +166,41 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
     optimizer_.zero_grad()
     pred_small, pred_mid, pred_large = model_(accel_data_batch, ret_type="deep")
 
-    small_optim_loss = masked_huber_mse_loss(pred_small, event_regression_values[0], event_regression_masks[0])
-    mid_optim_loss = masked_huber_mse_loss(pred_mid, event_regression_values[1], event_regression_masks[1])
-    large_optim_loss = masked_huber_mse_loss(pred_large, event_regression_values[2], event_regression_masks[2])
+    if loss_type == "huber":
+        small_optim_loss = masked_huber_loss(pred_small, event_regression_values[0], event_regression_masks[0])
+        mid_optim_loss = masked_huber_loss(pred_mid, event_regression_values[1], event_regression_masks[1])
+        large_optim_loss = masked_huber_loss(pred_large, event_regression_values[2], event_regression_masks[2])
+    elif loss_type == "mse":
+        small_optim_loss = masked_mse_loss(pred_small, event_regression_values[0], event_regression_masks[0])
+        mid_optim_loss = masked_mse_loss(pred_mid, event_regression_values[1], event_regression_masks[1])
+        large_optim_loss = masked_mse_loss(pred_large, event_regression_values[2], event_regression_masks[2])
+    elif loss_type == "huber_mse":
+        small_optim_loss = masked_huber_mse_loss(pred_small, event_regression_values[0], event_regression_masks[0])
+        mid_optim_loss = masked_huber_mse_loss(pred_mid, event_regression_values[1], event_regression_masks[1])
+        large_optim_loss = masked_huber_mse_loss(pred_large, event_regression_values[2], event_regression_masks[2])
+    elif loss_type == "ce":
+        small_optim_loss = masked_ce_loss(pred_small, event_regression_values[0], event_regression_masks[0])
+        mid_optim_loss = masked_ce_loss(pred_mid, event_regression_values[1], event_regression_masks[1])
+        large_optim_loss = masked_ce_loss(pred_large, event_regression_values[2], event_regression_masks[2])
+    elif loss_type == "focal":
+        small_optim_loss = masked_focal_loss(pred_small, event_regression_values[0], event_regression_masks[0])
+        mid_optim_loss = masked_focal_loss(pred_mid, event_regression_values[1], event_regression_masks[1])
+        large_optim_loss = masked_focal_loss(pred_large, event_regression_values[2], event_regression_masks[2])
+    else:
+        raise ValueError("Unknown loss type {}".format(loss_type))
     loss = small_optim_loss + mid_optim_loss + large_optim_loss
     loss.backward()
     optimizer_.step()
 
     with torch.no_grad():
-        small_loss = masked_mae_loss(pred_small, event_regression_values[0], event_regression_masks[0]).item()
-        mid_loss = masked_mae_loss(pred_mid, event_regression_values[1], event_regression_masks[1]).item()
-        large_loss = masked_mae_loss(pred_large, event_regression_values[2], event_regression_masks[2]).item()
+        if loss_type in ["ce", "focal"]:
+            small_loss = small_optim_loss.detach().item()
+            mid_loss = mid_optim_loss.detach().item()
+            large_loss = large_optim_loss.detach().item()
+        else:
+            small_loss = masked_mae_loss(pred_small, event_regression_values[0], event_regression_masks[0]).item()
+            mid_loss = masked_mae_loss(pred_mid, event_regression_values[1], event_regression_masks[1]).item()
+            large_loss = masked_mae_loss(pred_large, event_regression_values[2], event_regression_masks[2]).item()
 
         num_events = torch.sum(torch.sum(event_regression_masks[0], dim=(1, 2)) > 0).item() # number of events in batch
 
@@ -176,9 +261,18 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
     with torch.no_grad():
         pred_small, pred_mid, pred_large = model_(accel_data_batch, ret_type="deep")
 
-        small_loss = masked_mae_loss_raw(pred_small, event_regression_values[0], event_regression_masks[0]).item()
-        mid_loss = masked_mae_loss_raw(pred_mid, event_regression_values[1], event_regression_masks[1]).item()
-        large_loss = masked_mae_loss_raw(pred_large, event_regression_values[2], event_regression_masks[2]).item()
+        if loss_type == "ce":
+            small_loss = masked_ce_loss_raw(pred_small, event_regression_values[0], event_regression_masks[0]).item()
+            mid_loss = masked_ce_loss_raw(pred_mid, event_regression_values[1], event_regression_masks[1]).item()
+            large_loss = masked_ce_loss_raw(pred_large, event_regression_values[2], event_regression_masks[2]).item()
+        elif loss_type == "focal":
+            small_loss = masked_focal_loss_raw(pred_small, event_regression_values[0], event_regression_masks[0]).item()
+            mid_loss = masked_focal_loss_raw(pred_mid, event_regression_values[1], event_regression_masks[1]).item()
+            large_loss = masked_focal_loss_raw(pred_large, event_regression_values[2], event_regression_masks[2]).item()
+        else:
+            small_loss = masked_mae_loss_raw(pred_small, event_regression_values[0], event_regression_masks[0]).item()
+            mid_loss = masked_mae_loss_raw(pred_mid, event_regression_values[1], event_regression_masks[1]).item()
+            large_loss = masked_mae_loss_raw(pred_large, event_regression_values[2], event_regression_masks[2]).item()
 
         small_mask_num = torch.sum(event_regression_masks[0]).item()
         mid_mask_num = torch.sum(event_regression_masks[1]).item()
@@ -218,6 +312,10 @@ def validation_step():
                 val_metrics["mae_mid"].add(mid_loss, mid_mask_num)
                 val_metrics["mae_large"].add(large_loss, large_mask_num)
 
+                pred_small_torch = pred_small[0, ...]
+                pred_mid_torch = pred_mid[0, ...]
+                pred_large_torch = pred_large[0, ...]
+                preds_torch = [pred_small_torch, pred_mid_torch, pred_large_torch]
                 pred_small = pred_small[0, ...].cpu().numpy()
                 pred_mid = pred_mid[0, ...].cpu().numpy()
                 pred_large = pred_large[0, ...].cpu().numpy()
@@ -225,6 +323,7 @@ def validation_step():
                 preds = [pred_small, pred_mid, pred_large]
                 metric_labels = ["median_ae_small", "median_ae_mid", "median_ae_large"]
                 metric_labels_mean = ["mean_ae_small", "mean_ae_mid", "mean_ae_large"]
+                metric_labels_argmax = ["argmax_ae_small", "argmax_ae_mid", "argmax_ae_large"]
 
                 for event in event_locs:
                     onset = event["onset"]
@@ -232,15 +331,26 @@ def validation_step():
 
                     for k in range(len(regression_width)):
                         width = int(regression_width[k] * 1.0)
-                        onset_median_ae = local_median_ae_loss(preds[k][0, :], onset, width)
-                        wakeup_median_ae = local_median_ae_loss(preds[k][1, :], wakeup, width)
-                        val_metrics[metric_labels[k]].add(onset_median_ae, 1)
-                        val_metrics[metric_labels[k]].add(wakeup_median_ae, 1)
+                        if loss_type in ["ce", "focal"]:
+                            onset_argmax_ae = local_argmax_loss(preds[k][0, :], onset, width)
+                            wakeup_argmax_ae = local_argmax_loss(preds[k][1, :], wakeup, width)
+                            val_metrics[metric_labels_argmax[k]].add(onset_argmax_ae, 1)
+                            val_metrics[metric_labels_argmax[k]].add(wakeup_argmax_ae, 1)
+                        else:
+                            onset_median_ae = local_median_ae_loss(preds[k][0, :], onset, width)
+                            wakeup_median_ae = local_median_ae_loss(preds[k][1, :], wakeup, width)
+                            val_metrics[metric_labels[k]].add(onset_median_ae, 1)
+                            val_metrics[metric_labels[k]].add(wakeup_median_ae, 1)
 
-                        onset_mean_ae = local_mean_ae_loss(preds[k][0, :], onset, width)
-                        wakeup_mean_ae = local_mean_ae_loss(preds[k][1, :], wakeup, width)
-                        val_metrics[metric_labels_mean[k]].add(onset_mean_ae, 1)
-                        val_metrics[metric_labels_mean[k]].add(wakeup_mean_ae, 1)
+                            onset_mean_ae = local_mean_ae_loss(preds[k][0, :], onset, width)
+                            wakeup_mean_ae = local_mean_ae_loss(preds[k][1, :], wakeup, width)
+                            val_metrics[metric_labels_mean[k]].add(onset_mean_ae, 1)
+                            val_metrics[metric_labels_mean[k]].add(wakeup_mean_ae, 1)
+
+                            onset_argmax_ae = local_argmax_kernel_loss(preds_torch[k][0, :], onset, width)
+                            wakeup_argmax_ae = local_argmax_kernel_loss(preds_torch[k][1, :], wakeup, width)
+                            val_metrics[metric_labels_argmax[k]].add(onset_argmax_ae, 1)
+                            val_metrics[metric_labels_argmax[k]].add(wakeup_argmax_ae, 1)
 
 
             pbar.update(1)
@@ -263,7 +373,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train a sleeping prediction model with only clean data.")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for. Default 50.")
+    parser.add_argument("--loss", type=str, default="huber", help="Loss to use. Default huber. Available options: huber, mse, huber_mse, ce, focal.")
     parser.add_argument("--regression_width", type=int, nargs="+", default=[60, 120, 240], help="Number of regression values to predict for each event. Default [60, 120, 240].")
+    parser.add_argument("--regression_kernel", type=int, default=None, help="Kernel size for the regression layers. Default None, which means usual regression is performed.")
     parser.add_argument("--learning_rate", type=float, default=5e-3, help="Learning rate to use. Default 5e-3.")
     parser.add_argument("--use_decay_schedule", action="store_true", help="Whether to use a decay schedule. Default False.")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
@@ -305,7 +417,9 @@ if __name__ == "__main__":
 
     # obtain model and training parameters
     epochs = args.epochs
+    loss_type = args.loss
     regression_width = args.regression_width
+    regression_kernel = args.regression_kernel
     learning_rate = args.learning_rate
     use_decay_schedule = args.use_decay_schedule
     momentum = args.momentum
@@ -330,6 +444,11 @@ if __name__ == "__main__":
     assert not (use_anglez_only and use_enmo_only), "Cannot use both anglez only and enmo only."
     assert isinstance(regression_width, list), "Regression width must be a list."
     assert len(regression_width) == 3, "Regression width must be a list of length 3."
+    assert loss_type in ["huber", "mse", "huber_mse", "ce", "focal"], "Invalid loss type."
+    if regression_kernel is not None:
+        assert loss_type in ["ce", "focal"], "Must use probability loss type if using regression kernel."
+    else:
+        assert loss_type in ["huber", "mse", "huber_mse"], "Must use regression loss type if not using regression kernel."
 
     if isinstance(hidden_channels, int):
         hidden_channels = [hidden_channels]
@@ -340,6 +459,7 @@ if __name__ == "__main__":
             hidden_channels.append(chnls * (2 ** k))
 
     print("Epochs: " + str(epochs))
+    print("Loss type: " + loss_type)
     print("Regression width: " + str(regression_width))
     print("Dropout: " + str(dropout))
     print("Bottleneck factor: " + str(bottleneck_factor))
@@ -405,7 +525,9 @@ if __name__ == "__main__":
         "training_dataset": train_dset_name,
         "validation_dataset": val_dset_name,
         "epochs": epochs,
+        "loss_type": loss_type,
         "regression_width": regression_width,
+        "regression_kernel": regression_kernel,
         "learning_rate": learning_rate,
         "use_decay_schedule": use_decay_schedule,
         "momentum": momentum,
@@ -443,12 +565,16 @@ if __name__ == "__main__":
     val_metrics["mae_small"] = metrics.NumericalMetric("val_mae_small")
     val_metrics["mae_mid"] = metrics.NumericalMetric("val_mae_mid")
     val_metrics["mae_large"] = metrics.NumericalMetric("val_mae_large")
-    val_metrics["median_ae_small"] = metrics.NumericalMetric("val_median_ae_small")
-    val_metrics["median_ae_mid"] = metrics.NumericalMetric("val_median_ae_mid")
-    val_metrics["median_ae_large"] = metrics.NumericalMetric("val_median_ae_large")
-    val_metrics["mean_ae_small"] = metrics.NumericalMetric("val_mean_ae_small")
-    val_metrics["mean_ae_mid"] = metrics.NumericalMetric("val_mean_ae_mid")
-    val_metrics["mean_ae_large"] = metrics.NumericalMetric("val_mean_ae_large")
+    if loss_type not in ["ce", "focal"]:
+        val_metrics["median_ae_small"] = metrics.NumericalMetric("val_median_ae_small")
+        val_metrics["median_ae_mid"] = metrics.NumericalMetric("val_median_ae_mid")
+        val_metrics["median_ae_large"] = metrics.NumericalMetric("val_median_ae_large")
+        val_metrics["mean_ae_small"] = metrics.NumericalMetric("val_mean_ae_small")
+        val_metrics["mean_ae_mid"] = metrics.NumericalMetric("val_mean_ae_mid")
+        val_metrics["mean_ae_large"] = metrics.NumericalMetric("val_mean_ae_large")
+    val_metrics["argmax_ae_small"] = metrics.NumericalMetric("val_argmax_ae_small")
+    val_metrics["argmax_ae_mid"] = metrics.NumericalMetric("val_argmax_ae_mid")
+    val_metrics["argmax_ae_large"] = metrics.NumericalMetric("val_argmax_ae_large")
 
     # Compile
     #single_training_step_compile = torch.compile(single_training_step)
@@ -460,9 +586,9 @@ if __name__ == "__main__":
     print("Expand: " + str(expand))
     print("Input type: " + input_type)
     training_sampler = convert_to_regression_events.IntervalRegressionSampler(training_entries, all_data, event_regressions=regression_width,
-                                                                              train_or_test="train")
+                                                                              train_or_test="train", use_kernel=regression_kernel)
     val_sampler = convert_to_regression_events.IntervalRegressionSampler(validation_entries, all_data, event_regressions=regression_width,
-                                                                        train_or_test="test")
+                                                                        train_or_test="test", use_kernel=regression_kernel)
     target_multiple = 3 * (2 ** (len(hidden_blocks) - 2))
     target_length = training_sampler.max_length + (2 * expand)
     target_length = int(np.ceil((target_length + 0.0) / target_multiple)) * int(target_multiple)

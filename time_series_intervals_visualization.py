@@ -10,6 +10,14 @@ from matplotlib.figure import Figure
 import tqdm
 
 import convert_to_interval_events
+import inference_regression_preds
+import kernel_utils
+
+def generate_kernel_preds(preds_array: np.ndarray):
+    kernel_preds_array = np.zeros_like(preds_array)
+    for k in tqdm.tqdm(range(len(preds_array))):
+        kernel_utils.add_kernel(kernel_preds_array, k - float(preds_array[k]))
+    return kernel_preds_array
 
 
 class MatplotlibWidget(QWidget):
@@ -29,7 +37,7 @@ class MatplotlibWidget(QWidget):
         self.min_y = -10.0
 
 
-    def plot_data(self, title, anglez, enmo, timestamp, events):
+    def plot_data(self, title, anglez, enmo, extras, timestamp, events):
         self.axis.clear()
         x = pd.to_datetime(timestamp)  # Automatically parses the timestamp
         y1 = anglez / 35.52 # std computed by check_series_properties.py
@@ -37,6 +45,10 @@ class MatplotlibWidget(QWidget):
         self.axis.set_ylim([self.min_y, self.max_y])
         self.axis.plot(x, y1, label="anglez")
         self.axis.plot(x, y2, label="enmo")
+        self.axis.plot(x, extras["large_onset"] / 100.0, label="onset")
+        self.axis.plot(x, extras["large_wakeup"] / 100.0, label="wakeup")
+        self.axis.plot(x, extras["large_onset_kernel"] / 20.0, label="onset_kernel")
+        self.axis.plot(x, extras["large_wakeup_kernel"] / 20.0, label="wakeup_kernel")
 
         for event_time, event_type in events:
             color = "blue" if event_type == 1 else "red"
@@ -109,7 +121,7 @@ class MainWidget(QWidget):
         series_id = item.text()
         self.preloaded_intervals.clear()
 
-        anglez, enmo, timestamp = load_file(series_id)
+        anglez, enmo, timestamp, extras = load_file(series_id)
 
         # load every interval (night)
         all_night_infos = self.intervals_all_info[series_id]
@@ -127,8 +139,11 @@ class MainWidget(QWidget):
             interval_anglez = anglez.iloc[start:end]
             interval_enmo = enmo.iloc[start:end]
             interval_timestamp = timestamp.iloc[start:end]
+            local_extras = {}
+            for key, value in extras.items():
+                local_extras[key] = value[start:end]
 
-            self.preloaded_intervals.append((series_id, start, end, interval_anglez, interval_enmo, interval_timestamp, events))
+            self.preloaded_intervals.append((series_id, start, end, interval_anglez, interval_enmo, local_extras, interval_timestamp, events))
         self.selection_slider.setValue(0)
         self.selection_slider.setMaximum(len(self.preloaded_intervals) - 1)
 
@@ -164,14 +179,21 @@ class MainWidget(QWidget):
 
         selected_index = self.selection_slider.value()
         self.series_label.setText(str(selected_index))
-        series_id, start, end, anglez, enmo, timestamp, events = self.preloaded_intervals[selected_index]
-        self.display_widget.plot_data(series_id, anglez, enmo, timestamp, events)
+        series_id, start, end, anglez, enmo, extras, timestamp, events = self.preloaded_intervals[selected_index]
+        self.display_widget.plot_data(series_id, anglez, enmo, extras, timestamp, events)
 
 def load_file(item):
     filename = "./individual_train_series/" + item + ".parquet"
     df = pd.read_parquet(filename)
+    extras = {}
+    folders = os.listdir(inference_regression_preds.FOLDER)
+    for folder in folders:
+        extras[folder] = np.load(os.path.join(inference_regression_preds.FOLDER, folder, item + ".npy"))
 
-    return df["anglez"], df["enmo"], df["timestamp"]
+    for folder in folders:
+        extras[folder + "_kernel"] = generate_kernel_preds(extras[folder])
+
+    return df["anglez"], df["enmo"], df["timestamp"], extras
 
 def load_extra_events(series_id: str, start, end):
     events = pd.read_csv("data/train_events.csv")
