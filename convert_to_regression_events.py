@@ -245,8 +245,11 @@ class IntervalRegressionSampler:
             event_regression_mask[k] = np.expand_dims(event_regression_mask[k], axis=0)
 
         self.sample_low += 1
+        shifted_samples = []
+        for event in self.event_regression_samples[series_id]:
+            shifted_samples.append({"onset": event["onset"] - start, "wakeup": event["wakeup"] - start})
 
-        return np.expand_dims(accel_data, axis=0), event_regression_values, event_regression_mask, self.event_regression_samples[series_id]
+        return np.expand_dims(accel_data, axis=0), event_regression_values, event_regression_mask, shifted_samples
 
     def __len__(self):
         if self.train_or_test == "train":
