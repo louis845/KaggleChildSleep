@@ -21,6 +21,7 @@ import metrics_iou
 import logging_memory_utils
 import convert_to_h5py_naive
 import convert_to_regression_events
+import model_event_unet
 import model_unet
 import model_attention_unet
 import kernel_utils
@@ -58,7 +59,7 @@ def masked_huber_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: tor
                                                                                                  ground_truth.shape)
     assert preds.shape == mask.shape, "preds.shape = {}, mask.shape = {}".format(preds.shape, mask.shape)
     mask_per_batch = torch.sum(mask, dim=(1, 2))
-    loss_per_batch = torch.where(mask_per_batch > 0, torch.sum(torch.nn.functional.huber_loss(preds, ground_truth, reduction="none") * mask, dim=(1, 2)) / (mask_per_batch + 1e-7),
+    loss_per_batch = torch.where(mask_per_batch > 0, torch.sum(torch.nn.functional.huber_loss(preds, ground_truth, reduction="none") * mask, dim=(1, 2)) / (mask_per_batch + 1e-5),
                                     torch.zeros_like(mask_per_batch))
     return torch.sum(loss_per_batch)
 
@@ -206,6 +207,24 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
 
     return loss.item(), small_loss, mid_loss, large_loss, num_events
 
+def single_training_step_standard(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
+                            accel_data_batch: torch.Tensor,
+                            event_regression_values: list[torch.Tensor], event_regression_masks: list[torch.Tensor]):
+    optimizer_.zero_grad()
+    preds = model_(accel_data_batch, ret_type="deep")
+
+    assert loss_type == "huber", "loss_type must be huber"
+    loss = masked_huber_loss(preds, event_regression_values[0], event_regression_masks[0])
+    loss.backward()
+    optimizer_.step()
+
+    with torch.no_grad():
+        mae_loss = masked_mae_loss(preds, event_regression_values[0], event_regression_masks[0]).item()
+
+        num_events = torch.sum(torch.sum(event_regression_masks[0], dim=(1, 2)) > 0).item() # number of events in batch
+
+    return loss.item(), mae_loss, num_events
+
 def training_step(record: bool):
     if record:
         for key in train_metrics:
@@ -232,18 +251,26 @@ def training_step(record: bool):
                 accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
 
             # train model now
-            loss, small_loss, mid_loss, large_loss, num_events = single_training_step(model, optimizer,
-                                                                           accel_data_batch_torch,
-                                                                           event_regression_values_torch,
-                                                                           event_regression_masks_torch)
-            #time.sleep(0.2)
+            if use_standard_model:
+                loss, mae_loss, num_events = single_training_step_standard(model, optimizer,
+                                                                               accel_data_batch_torch,
+                                                                               event_regression_values_torch,
+                                                                               event_regression_masks_torch)
+            else:
+                loss, small_loss, mid_loss, large_loss, num_events = single_training_step(model, optimizer,
+                                                                               accel_data_batch_torch,
+                                                                               event_regression_values_torch,
+                                                                               event_regression_masks_torch)
 
             # record
             if record:
                 with torch.no_grad():
-                    train_metrics["mae_small"].add(small_loss, num_events)
-                    train_metrics["mae_mid"].add(mid_loss, num_events)
-                    train_metrics["mae_large"].add(large_loss, num_events)
+                    if use_standard_model:
+                        train_metrics["mae"].add(mae_loss, num_events)
+                    else:
+                        train_metrics["mae_small"].add(small_loss, num_events)
+                        train_metrics["mae_mid"].add(mid_loss, num_events)
+                        train_metrics["mae_large"].add(large_loss, num_events)
 
             pbar.update(increment)
 
@@ -280,6 +307,18 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
 
         return small_loss, mid_loss, large_loss, small_mask_num, mid_mask_num, large_mask_num, pred_small, pred_mid, pred_large
 
+def single_validation_step_standard(model_: torch.nn.Module, accel_data_batch: torch.Tensor,
+                           event_regression_values: list[torch.Tensor],
+                           event_regression_masks: list[torch.Tensor]):
+    with torch.no_grad():
+        preds = model_(accel_data_batch, ret_type="deep")
+
+        loss = masked_mae_loss_raw(preds, event_regression_values[0], event_regression_masks[0]).item()
+
+        mask_num = torch.sum(event_regression_masks[0]).item()
+
+        return loss, mask_num, preds
+
 def validation_step():
     for key in val_metrics:
         val_metrics[key].reset()
@@ -302,55 +341,75 @@ def validation_step():
                 accel_data_batch = accel_data_batch[:, 1:2, :]
 
             # val model now
-            small_loss, mid_loss, large_loss, small_mask_num, mid_mask_num, large_mask_num,\
-                pred_small, pred_mid, pred_large = single_validation_step(model, accel_data_batch,
+            if use_standard_model:
+                loss, mask_num, preds = single_validation_step_standard(model, accel_data_batch,
                                                                             event_regression_values, event_regression_masks)
+            else:
+                small_loss, mid_loss, large_loss, small_mask_num, mid_mask_num, large_mask_num,\
+                    pred_small, pred_mid, pred_large = single_validation_step(model, accel_data_batch,
+                                                                                event_regression_values, event_regression_masks)
 
             # record
             with torch.no_grad():
-                val_metrics["mae_small"].add(small_loss, small_mask_num)
-                val_metrics["mae_mid"].add(mid_loss, mid_mask_num)
-                val_metrics["mae_large"].add(large_loss, large_mask_num)
+                if use_standard_model:
+                    val_metrics["mae"].add(loss, mask_num)
 
-                pred_small_torch = pred_small[0, ...]
-                pred_mid_torch = pred_mid[0, ...]
-                pred_large_torch = pred_large[0, ...]
-                preds_torch = [pred_small_torch, pred_mid_torch, pred_large_torch]
-                pred_small = pred_small[0, ...].cpu().numpy()
-                pred_mid = pred_mid[0, ...].cpu().numpy()
-                pred_large = pred_large[0, ...].cpu().numpy()
-                assert pred_small.shape == pred_mid.shape == pred_large.shape, "pred_small.shape = {}, pred_mid.shape = {}, pred_large.shape = {}".format(pred_small.shape, pred_mid.shape, pred_large.shape)
-                preds = [pred_small, pred_mid, pred_large]
-                metric_labels = ["median_ae_small", "median_ae_mid", "median_ae_large"]
-                metric_labels_mean = ["mean_ae_small", "mean_ae_mid", "mean_ae_large"]
-                metric_labels_argmax = ["argmax_ae_small", "argmax_ae_mid", "argmax_ae_large"]
+                    pred_torch = preds[0, ...]
 
-                for event in event_locs:
-                    onset = event["onset"]
-                    wakeup = event["wakeup"]
+                    for event in event_locs:
+                        onset = event["onset"]
+                        wakeup = event["wakeup"]
 
-                    for k in range(len(regression_width)):
-                        width = int(regression_width[k] * 1.0)
-                        if loss_type in ["ce", "focal"]:
-                            onset_argmax_ae = local_argmax_loss(preds[k][0, :], onset, width)
-                            wakeup_argmax_ae = local_argmax_loss(preds[k][1, :], wakeup, width)
-                            val_metrics[metric_labels_argmax[k]].add(onset_argmax_ae, 1)
-                            val_metrics[metric_labels_argmax[k]].add(wakeup_argmax_ae, 1)
-                        else:
-                            onset_median_ae = local_median_ae_loss(preds[k][0, :], onset, width)
-                            wakeup_median_ae = local_median_ae_loss(preds[k][1, :], wakeup, width)
-                            val_metrics[metric_labels[k]].add(onset_median_ae, 1)
-                            val_metrics[metric_labels[k]].add(wakeup_median_ae, 1)
+                        width = int(regression_width[0] * 1.0)
 
-                            onset_mean_ae = local_mean_ae_loss(preds[k][0, :], onset, width)
-                            wakeup_mean_ae = local_mean_ae_loss(preds[k][1, :], wakeup, width)
-                            val_metrics[metric_labels_mean[k]].add(onset_mean_ae, 1)
-                            val_metrics[metric_labels_mean[k]].add(wakeup_mean_ae, 1)
+                        onset_argmax_ae = local_argmax_kernel_loss(pred_torch[0, :], onset, width)
+                        wakeup_argmax_ae = local_argmax_kernel_loss(pred_torch[1, :], wakeup, width)
+                        val_metrics["argmax_ae"].add(onset_argmax_ae, 1)
+                        val_metrics["argmax_ae"].add(wakeup_argmax_ae, 1)
+                else:
+                    val_metrics["mae_small"].add(small_loss, small_mask_num)
+                    val_metrics["mae_mid"].add(mid_loss, mid_mask_num)
+                    val_metrics["mae_large"].add(large_loss, large_mask_num)
 
-                            onset_argmax_ae = local_argmax_kernel_loss(preds_torch[k][0, :], onset, width)
-                            wakeup_argmax_ae = local_argmax_kernel_loss(preds_torch[k][1, :], wakeup, width)
-                            val_metrics[metric_labels_argmax[k]].add(onset_argmax_ae, 1)
-                            val_metrics[metric_labels_argmax[k]].add(wakeup_argmax_ae, 1)
+                    pred_small_torch = pred_small[0, ...]
+                    pred_mid_torch = pred_mid[0, ...]
+                    pred_large_torch = pred_large[0, ...]
+                    preds_torch = [pred_small_torch, pred_mid_torch, pred_large_torch]
+                    pred_small = pred_small[0, ...].cpu().numpy()
+                    pred_mid = pred_mid[0, ...].cpu().numpy()
+                    pred_large = pred_large[0, ...].cpu().numpy()
+                    assert pred_small.shape == pred_mid.shape == pred_large.shape, "pred_small.shape = {}, pred_mid.shape = {}, pred_large.shape = {}".format(pred_small.shape, pred_mid.shape, pred_large.shape)
+                    preds = [pred_small, pred_mid, pred_large]
+                    metric_labels = ["median_ae_small", "median_ae_mid", "median_ae_large"]
+                    metric_labels_mean = ["mean_ae_small", "mean_ae_mid", "mean_ae_large"]
+                    metric_labels_argmax = ["argmax_ae_small", "argmax_ae_mid", "argmax_ae_large"]
+
+                    for event in event_locs:
+                        onset = event["onset"]
+                        wakeup = event["wakeup"]
+
+                        for k in range(len(regression_width)):
+                            width = int(regression_width[k] * 1.0)
+                            if loss_type in ["ce", "focal"]:
+                                onset_argmax_ae = local_argmax_loss(preds[k][0, :], onset, width)
+                                wakeup_argmax_ae = local_argmax_loss(preds[k][1, :], wakeup, width)
+                                val_metrics[metric_labels_argmax[k]].add(onset_argmax_ae, 1)
+                                val_metrics[metric_labels_argmax[k]].add(wakeup_argmax_ae, 1)
+                            else:
+                                onset_median_ae = local_median_ae_loss(preds[k][0, :], onset, width)
+                                wakeup_median_ae = local_median_ae_loss(preds[k][1, :], wakeup, width)
+                                val_metrics[metric_labels[k]].add(onset_median_ae, 1)
+                                val_metrics[metric_labels[k]].add(wakeup_median_ae, 1)
+
+                                onset_mean_ae = local_mean_ae_loss(preds[k][0, :], onset, width)
+                                wakeup_mean_ae = local_mean_ae_loss(preds[k][1, :], wakeup, width)
+                                val_metrics[metric_labels_mean[k]].add(onset_mean_ae, 1)
+                                val_metrics[metric_labels_mean[k]].add(wakeup_mean_ae, 1)
+
+                                onset_argmax_ae = local_argmax_kernel_loss(preds_torch[k][0, :], onset, width)
+                                wakeup_argmax_ae = local_argmax_kernel_loss(preds_torch[k][1, :], wakeup, width)
+                                val_metrics[metric_labels_argmax[k]].add(onset_argmax_ae, 1)
+                                val_metrics[metric_labels_argmax[k]].add(wakeup_argmax_ae, 1)
 
 
             pbar.update(1)
@@ -383,6 +442,7 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use. Default 0.0.")
     parser.add_argument("--optimizer", type=str, default="adam", help="Which optimizer to use. Available options: adam, sgd. Default adam.")
     parser.add_argument("--epochs_per_save", type=int, default=2, help="Number of epochs between saves. Default 2.")
+    parser.add_argument("--use_standard_model", action="store_true", help="Whether to use the standard model. Default False. This overrides the options below.")
     parser.add_argument("--hidden_blocks", type=int, nargs="+", default=[1, 6, 8, 23, 8],
                         help="Number of hidden 2d blocks for ResNet backbone.")
     parser.add_argument("--hidden_channels", type=int, nargs="+", default=[2], help="Number of hidden channels. Default 2. Can be a list to specify num channels in each downsampled layer.")
@@ -427,6 +487,7 @@ if __name__ == "__main__":
     weight_decay = args.weight_decay
     optimizer_type = args.optimizer
     epochs_per_save = args.epochs_per_save
+    use_standard_model = args.use_standard_model
     hidden_blocks = args.hidden_blocks
     hidden_channels = args.hidden_channels
     bottleneck_factor = args.bottleneck_factor
@@ -449,6 +510,9 @@ if __name__ == "__main__":
         assert loss_type in ["ce", "focal"], "Must use probability loss type if using regression kernel."
     else:
         assert loss_type in ["huber", "mse", "huber_mse"], "Must use regression loss type if not using regression kernel."
+    if use_standard_model:
+        assert use_anglez_only, "Must use anglez only if using standard model."
+        assert loss_type == "huber", "Must use huber loss if using standard model."
 
     if isinstance(hidden_channels, int):
         hidden_channels = [hidden_channels]
@@ -460,27 +524,34 @@ if __name__ == "__main__":
 
     print("Epochs: " + str(epochs))
     print("Loss type: " + loss_type)
-    print("Regression width: " + str(regression_width))
-    print("Dropout: " + str(dropout))
-    print("Bottleneck factor: " + str(bottleneck_factor))
-    print("Hidden channels: " + str(hidden_channels))
-    print("Hidden blocks: " + str(hidden_blocks))
-    print("Kernel size: " + str(kernel_size))
-    print("Deep upconv contraction: " + str(not disable_deep_upconv_contraction))
-    print("Deep upconv kernel: " + str(deep_upconv_kernel))
-    print("Deep upconv channels override: " + str(deep_upconv_channels_override))
+    if use_standard_model:
+        print("Regression width: " + str(regression_width[0]))
+        print("--- Using standard model ---")
+    else:
+        print("Regression width: " + str(regression_width))
+        print("Dropout: " + str(dropout))
+        print("Bottleneck factor: " + str(bottleneck_factor))
+        print("Hidden channels: " + str(hidden_channels))
+        print("Hidden blocks: " + str(hidden_blocks))
+        print("Kernel size: " + str(kernel_size))
+        print("Deep upconv contraction: " + str(not disable_deep_upconv_contraction))
+        print("Deep upconv kernel: " + str(deep_upconv_kernel))
+        print("Deep upconv channels override: " + str(deep_upconv_channels_override))
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
     in_channels = 1 if (use_anglez_only or use_enmo_only) else 2
-    model = model_attention_unet.Unet3fDeepSupervision(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
-                            bottleneck_factor=bottleneck_factor, squeeze_excitation=False,
-                            squeeze_excitation_bottleneck_factor=4,
-                            dropout=dropout,
-                            use_batch_norm=True, out_channels=2, attn_out_channels=2,
+    if use_standard_model:
+        model = model_event_unet.EventRegressorUnet()
+    else:
+        model = model_attention_unet.Unet3fDeepSupervision(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
+                                bottleneck_factor=bottleneck_factor, squeeze_excitation=False,
+                                squeeze_excitation_bottleneck_factor=4,
+                                dropout=dropout,
+                                use_batch_norm=True, out_channels=2, attn_out_channels=2,
 
-                            deep_supervision_contraction=not disable_deep_upconv_contraction, deep_supervision_kernel_size=deep_upconv_kernel,
-                            deep_supervision_channels_override=deep_upconv_channels_override)
+                                deep_supervision_contraction=not disable_deep_upconv_contraction, deep_supervision_kernel_size=deep_upconv_kernel,
+                                deep_supervision_channels_override=deep_upconv_channels_override)
     model = model.to(config.device)
 
     # initialize optimizer
@@ -559,22 +630,27 @@ if __name__ == "__main__":
     train_metrics = {}
     val_history = collections.defaultdict(list)
     val_metrics = {}
-    train_metrics["mae_small"] = metrics.NumericalMetric("train_mae_small")
-    train_metrics["mae_mid"] = metrics.NumericalMetric("train_mae_mid")
-    train_metrics["mae_large"] = metrics.NumericalMetric("train_mae_large")
-    val_metrics["mae_small"] = metrics.NumericalMetric("val_mae_small")
-    val_metrics["mae_mid"] = metrics.NumericalMetric("val_mae_mid")
-    val_metrics["mae_large"] = metrics.NumericalMetric("val_mae_large")
-    if loss_type not in ["ce", "focal"]:
-        val_metrics["median_ae_small"] = metrics.NumericalMetric("val_median_ae_small")
-        val_metrics["median_ae_mid"] = metrics.NumericalMetric("val_median_ae_mid")
-        val_metrics["median_ae_large"] = metrics.NumericalMetric("val_median_ae_large")
-        val_metrics["mean_ae_small"] = metrics.NumericalMetric("val_mean_ae_small")
-        val_metrics["mean_ae_mid"] = metrics.NumericalMetric("val_mean_ae_mid")
-        val_metrics["mean_ae_large"] = metrics.NumericalMetric("val_mean_ae_large")
-    val_metrics["argmax_ae_small"] = metrics.NumericalMetric("val_argmax_ae_small")
-    val_metrics["argmax_ae_mid"] = metrics.NumericalMetric("val_argmax_ae_mid")
-    val_metrics["argmax_ae_large"] = metrics.NumericalMetric("val_argmax_ae_large")
+    if use_standard_model:
+        train_metrics["mae"] = metrics.NumericalMetric("train_mae")
+        val_metrics["mae"] = metrics.NumericalMetric("val_mae")
+        val_metrics["argmax_ae"] = metrics.NumericalMetric("val_argmax_ae")
+    else:
+        train_metrics["mae_small"] = metrics.NumericalMetric("train_mae_small")
+        train_metrics["mae_mid"] = metrics.NumericalMetric("train_mae_mid")
+        train_metrics["mae_large"] = metrics.NumericalMetric("train_mae_large")
+        val_metrics["mae_small"] = metrics.NumericalMetric("val_mae_small")
+        val_metrics["mae_mid"] = metrics.NumericalMetric("val_mae_mid")
+        val_metrics["mae_large"] = metrics.NumericalMetric("val_mae_large")
+        if loss_type not in ["ce", "focal"]:
+            val_metrics["median_ae_small"] = metrics.NumericalMetric("val_median_ae_small")
+            val_metrics["median_ae_mid"] = metrics.NumericalMetric("val_median_ae_mid")
+            val_metrics["median_ae_large"] = metrics.NumericalMetric("val_median_ae_large")
+            val_metrics["mean_ae_small"] = metrics.NumericalMetric("val_mean_ae_small")
+            val_metrics["mean_ae_mid"] = metrics.NumericalMetric("val_mean_ae_mid")
+            val_metrics["mean_ae_large"] = metrics.NumericalMetric("val_mean_ae_large")
+        val_metrics["argmax_ae_small"] = metrics.NumericalMetric("val_argmax_ae_small")
+        val_metrics["argmax_ae_mid"] = metrics.NumericalMetric("val_argmax_ae_mid")
+        val_metrics["argmax_ae_large"] = metrics.NumericalMetric("val_argmax_ae_large")
 
     # Compile
     #single_training_step_compile = torch.compile(single_training_step)
@@ -610,7 +686,8 @@ if __name__ == "__main__":
 
             print("Running the usual step of gradient descent.")
             training_step(record=True)
-            if np.isnan(train_history["train_mae_small"][-1]):
+            ref_metric = "train_mae" if use_standard_model else "train_mae_small"
+            if np.isnan(train_history[ref_metric][-1]):
                 print("Is nan. Reverting...")
                 model.load_state_dict(torch.load(os.path.join(model_dir, "latest_model.pt")))
                 optimizer.load_state_dict(torch.load(os.path.join(model_dir, "latest_optimizer.pt")))
@@ -646,8 +723,8 @@ if __name__ == "__main__":
                         g["lr"] = learning_rate
             else:
                 if use_decay_schedule:
-                    if epoch > 25:
-                        new_rate = learning_rate * 0.98 * np.power(0.9, (epoch - 25)) + learning_rate * 0.02
+                    if epoch > 100:
+                        new_rate = learning_rate * 0.98 * np.power(0.9, (epoch - 100)) + learning_rate * 0.02
                         print("Setting learning rate to {:.5f}".format(new_rate))
                         for g in optimizer.param_groups:
                             g["lr"] = new_rate
