@@ -26,7 +26,7 @@ def create_regression_range(mask: np.ndarray, values: np.ndarray, event_type: in
 
 class IntervalEventsSampler:
     def __init__(self, series_ids: list[str], naive_all_data: dict, all_segmentations: dict,
-                 train_or_test="train"):
+                 train_or_test="train", use_detailed_probas: bool=False):
         self.series_ids = series_ids
         self.naive_all_data = naive_all_data
 
@@ -43,6 +43,7 @@ class IntervalEventsSampler:
 
         events = pd.read_csv("data/train_events.csv")
         self.events = events.dropna()
+        self.use_detailed_probas = use_detailed_probas
 
     def shuffle(self):
         if self.train_or_test == "train":
@@ -121,20 +122,35 @@ class IntervalEventsSampler:
 
         # Load acceleration data and event segmentations
         accel_data = self.naive_all_data[series_id]["accel"][:, (start - expand):(end + expand)]
-        event_segmentations = np.zeros((2, (end - start) // 12), dtype=np.float32)
-        event_tolerance_width = 30
-        for event in grouped_events:
-            onset = ((event["onset"] - start) // 12) if event["onset"] is not None else None
-            wakeup = ((event["wakeup"] - start) // 12) if event["wakeup"] is not None else None
-            if flip:
-                onset, wakeup = wakeup, onset
-            if onset is not None:
-                event_segmentations[0, max(0, onset - event_tolerance_width):min(event_segmentations.shape[1], onset + event_tolerance_width + 1)] = 1.0
-            if wakeup is not None:
-                event_segmentations[1, max(0, wakeup - event_tolerance_width):min(event_segmentations.shape[1], wakeup + event_tolerance_width + 1)] = 1.0
+        if self.use_detailed_probas:
+            event_segmentations = np.zeros((2, end - start + 2 * expand), dtype=np.float32)
+            event_tolerance_width = 30 * 12 - 1
+            for event in grouped_events:
+                onset = (int(event["onset"] - start + expand)) if event["onset"] is not None else None
+                wakeup = (int(event["wakeup"] - start + expand)) if event["wakeup"] is not None else None
+                if flip:
+                    onset, wakeup = wakeup, onset
+                if onset is not None:
+                    event_segmentations[0, max(0, onset - event_tolerance_width):min(event_segmentations.shape[1],
+                                                                                     onset + event_tolerance_width + 1)] = 1.0
+                if wakeup is not None:
+                    event_segmentations[1, max(0, wakeup - event_tolerance_width):min(event_segmentations.shape[1],
+                                                                                      wakeup + event_tolerance_width + 1)] = 1.0
+        else:
+            event_segmentations = np.zeros((2, (end - start) // 12), dtype=np.float32)
+            event_tolerance_width = 30
+            for event in grouped_events:
+                onset = ((event["onset"] - start) // 12) if event["onset"] is not None else None
+                wakeup = ((event["wakeup"] - start) // 12) if event["wakeup"] is not None else None
+                if flip:
+                    onset, wakeup = wakeup, onset
+                if onset is not None:
+                    event_segmentations[0, max(0, onset - event_tolerance_width):min(event_segmentations.shape[1], onset + event_tolerance_width + 1)] = 1.0
+                if wakeup is not None:
+                    event_segmentations[1, max(0, wakeup - event_tolerance_width):min(event_segmentations.shape[1], wakeup + event_tolerance_width + 1)] = 1.0
 
-        if expand > 0:
-            event_segmentations = np.pad(event_segmentations, ((0, 0), (expand // 12, expand // 12)), mode="constant", constant_values=0.0)
+            if expand > 0:
+                event_segmentations = np.pad(event_segmentations, ((0, 0), (expand // 12, expand // 12)), mode="constant", constant_values=0.0)
 
         if flip:
             accel_data = np.flip(accel_data, axis=1)

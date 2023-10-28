@@ -24,6 +24,7 @@ import convert_to_interval_events
 import convert_to_good_events
 import model_unet
 import model_attention_unet
+import model_event_unet
 
 # same as training_clean_data.py, but with 3 factor downsampling at the first layer
 
@@ -320,6 +321,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_deep_supervision", type=int, nargs="+", default=None, help="Whether to use deep supervision. Default None. If specified, must be an integer indicating the length of deep supervision training.")
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
+    parser.add_argument("--use_detailed_probas", action="store_true", help="Whether to use detailed probas. Default False.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
@@ -370,6 +372,7 @@ if __name__ == "__main__":
     use_deep_supervision = args.use_deep_supervision
     use_anglez_only = args.use_anglez_only
     use_enmo_only = args.use_enmo_only
+    use_detailed_probas = args.use_detailed_probas
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
 
@@ -405,15 +408,23 @@ if __name__ == "__main__":
 
     # initialize model
     in_channels = 1 if (use_anglez_only or use_enmo_only) else 2
-    model = model_attention_unet.Unet3fDeepSupervision(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
-                            bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
-                            squeeze_excitation_bottleneck_factor=4,
-                            dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
-                            use_batch_norm=use_batch_norm, out_channels=2, attn_out_channels=2, attention_bottleneck=attention_bottleneck,
-                            expected_attn_input_length=17280 + (2 * expand),
+    if use_detailed_probas:
+        model = model_event_unet.EventConfidenceUnet(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
+                                bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
+                                squeeze_excitation_bottleneck_factor=4,
+                                dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
+                                use_batch_norm=use_batch_norm, attn_out_channels=2, attention_bottleneck=attention_bottleneck,
+                                expected_attn_input_length=17280 + (2 * expand))
+    else:
+        model = model_attention_unet.Unet3fDeepSupervision(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
+                                bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
+                                squeeze_excitation_bottleneck_factor=4,
+                                dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
+                                use_batch_norm=use_batch_norm, out_channels=2, attn_out_channels=2, attention_bottleneck=attention_bottleneck,
+                                expected_attn_input_length=17280 + (2 * expand),
 
-                            deep_supervision_contraction=not disable_deep_upconv_contraction, deep_supervision_kernel_size=deep_upconv_kernel,
-                            deep_supervision_channels_override=deep_upconv_channels_override)
+                                deep_supervision_contraction=not disable_deep_upconv_contraction, deep_supervision_kernel_size=deep_upconv_kernel,
+                                deep_supervision_channels_override=deep_upconv_channels_override)
     model = model.to(config.device)
 
     # initialize optimizer
@@ -488,6 +499,7 @@ if __name__ == "__main__":
         "use_deep_supervision": use_deep_supervision,
         "use_anglez_only": use_anglez_only,
         "use_enmo_only": use_enmo_only,
+        "use_detailed_probas": use_detailed_probas,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
     }
@@ -537,9 +549,9 @@ if __name__ == "__main__":
     print("Use anglez only: " + str(use_anglez_only))
     print("Use deep supervision: " + str(use_deep_supervision))
     training_sampler = convert_to_interval_events.IntervalEventsSampler(training_entries, all_data, all_interval_segmentations,
-                                                                        train_or_test="train")
+                                                                        train_or_test="train", use_detailed_probas=use_detailed_probas)
     val_sampler = convert_to_interval_events.IntervalEventsSampler(validation_entries, all_data, all_interval_segmentations,
-                                                                        train_or_test="val")
+                                                                        train_or_test="val", use_detailed_probas=use_detailed_probas)
 
 
     # Start training loop

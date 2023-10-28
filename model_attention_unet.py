@@ -125,7 +125,7 @@ class UnetHead3f(torch.nn.Module):
                 num_groups = 1
             self.upsample_conv.append(torch.nn.Conv1d(deep_num_channels, stem_final_layer_channels,
                                                       kernel_size=kernel_size, groups=num_groups, bias=False,
-                                                      padding="same", padding_mode="replicate"))
+                                                      padding="same", padding_mode="replicate")) # channel upsampling
             self.upsample_norms.append(torch.nn.BatchNorm1d(stem_final_layer_channels))
 
         self.cat_conv = torch.nn.ModuleList()
