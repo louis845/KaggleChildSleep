@@ -305,6 +305,7 @@ if __name__ == "__main__":
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
     parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
     parser.add_argument("--kernel_size", type=int, default=11, help="Kernel size for the first layer. Default 11.")
+    parser.add_argument("--attention_blocks", type=int, default=4, help="Number of attention blocks to use. Default 4.")
     parser.add_argument("--attention_bottleneck", type=int, default=None, help="The bottleneck factor of the attention module. Default None.")
     parser.add_argument("--disable_deep_upconv_contraction", action="store_true", help="Whether to disable the deep upconv contraction. Default False.")
     parser.add_argument("--deep_upconv_kernel", type=int, default=5, help="Kernel size for the deep upconv layers. Default 5.")
@@ -356,6 +357,7 @@ if __name__ == "__main__":
     bottleneck_factor = args.bottleneck_factor
     squeeze_excitation = args.squeeze_excitation
     kernel_size = args.kernel_size
+    attention_blocks = args.attention_blocks
     attention_bottleneck = args.attention_bottleneck
     disable_deep_upconv_contraction = args.disable_deep_upconv_contraction
     deep_upconv_kernel = args.deep_upconv_kernel
@@ -414,14 +416,14 @@ if __name__ == "__main__":
                                 squeeze_excitation_bottleneck_factor=4,
                                 dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
                                 use_batch_norm=use_batch_norm, attn_out_channels=2, attention_bottleneck=attention_bottleneck,
-                                expected_attn_input_length=17280 + (2 * expand))
+                                expected_attn_input_length=17280 + (2 * expand), attention_blocks=attention_blocks)
     else:
         model = model_attention_unet.Unet3fDeepSupervision(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                                 bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                                 squeeze_excitation_bottleneck_factor=4,
                                 dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
                                 use_batch_norm=use_batch_norm, out_channels=2, attn_out_channels=2, attention_bottleneck=attention_bottleneck,
-                                expected_attn_input_length=17280 + (2 * expand),
+                                expected_attn_input_length=17280 + (2 * expand), attention_blocks=attention_blocks,
 
                                 deep_supervision_contraction=not disable_deep_upconv_contraction, deep_supervision_kernel_size=deep_upconv_kernel,
                                 deep_supervision_channels_override=deep_upconv_channels_override)
@@ -483,6 +485,7 @@ if __name__ == "__main__":
         "bottleneck_factor": bottleneck_factor,
         "squeeze_excitation": squeeze_excitation,
         "kernel_size": kernel_size,
+        "attention_blocks": attention_blocks,
         "attention_bottleneck": attention_bottleneck,
         "disable_deep_upconv_contraction": disable_deep_upconv_contraction,
         "deep_upconv_kernel": deep_upconv_kernel,
