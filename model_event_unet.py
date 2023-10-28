@@ -175,7 +175,7 @@ class EventConfidenceUnet(torch.nn.Module):
             )
         self.no_contraction_head = UnetAttnHead(self.pyramid_height + 1, hidden_channels + [hidden_channels[-1]],
                                                 kernel_size=1, use_batch_norm=True, dropout=dropout)
-        self.outconv = torch.nn.Conv1d(stem_final_layer_channels,
+        self.outconv = torch.nn.Conv1d(hidden_channels[0],
                                        attn_out_channels, kernel_size=1,
                                        bias=True, padding="same", padding_mode="replicate")
         self.expected_attn_input_length = expected_attn_input_length
