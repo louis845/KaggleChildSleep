@@ -416,7 +416,8 @@ if __name__ == "__main__":
                                 squeeze_excitation_bottleneck_factor=4,
                                 dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
                                 use_batch_norm=use_batch_norm, attn_out_channels=2, attention_bottleneck=attention_bottleneck,
-                                expected_attn_input_length=17280 + (2 * expand), attention_blocks=attention_blocks)
+                                expected_attn_input_length=17280 + (2 * expand), attention_blocks=attention_blocks,
+                                upconv_channels_override=deep_upconv_channels_override)
     else:
         model = model_attention_unet.Unet3fDeepSupervision(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                                 bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,

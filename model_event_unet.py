@@ -131,7 +131,8 @@ class EventConfidenceUnet(torch.nn.Module):
                  attention_channels=128, attention_heads=4, # settings for attention upsampling module
                  attention_key_query_channels=64, attention_blocks=4,
                  expected_attn_input_length=17280, dropout_pos_embeddings=False,
-                 attn_out_channels=1, attention_bottleneck=None):
+                 attn_out_channels=1, attention_bottleneck=None,
+                 upconv_channels_override=None):
         super(EventConfidenceUnet, self).__init__()
         assert kernel_size % 2 == 1, "kernel size must be odd"
         assert len(blocks) >= 6, "blocks must have at least 6 elements"
@@ -179,10 +180,16 @@ class EventConfidenceUnet(torch.nn.Module):
                                        attn_out_channels, kernel_size=1,
                                        bias=True, padding="same", padding_mode="replicate")"""
         self.no_contraction_head = UnetHead3f(self.pyramid_height, hidden_channels,
-                                                kernel_size=1, dropout=dropout, input_attn=True, use_batch_norm=use_batch_norm)
-        self.outconv = torch.nn.Conv1d(hidden_channels[-1],
-                                       attn_out_channels, kernel_size=1,
-                                       bias=True, padding="same", padding_mode="replicate")
+                                                kernel_size=1, dropout=dropout, input_attn=True, use_batch_norm=use_batch_norm,
+                                                target_channels_override=upconv_channels_override)
+        if upconv_channels_override is not None:
+            self.outconv = torch.nn.Conv1d(upconv_channels_override,
+                                           attn_out_channels, kernel_size=1,
+                                           bias=True, padding="same", padding_mode="replicate")
+        else:
+            self.outconv = torch.nn.Conv1d(hidden_channels[-1],
+                                           attn_out_channels, kernel_size=1,
+                                           bias=True, padding="same", padding_mode="replicate")
         self.expected_attn_input_length = expected_attn_input_length
         self.attention_bottleneck = attention_bottleneck
 
