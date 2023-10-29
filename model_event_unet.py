@@ -173,9 +173,14 @@ class EventConfidenceUnet(torch.nn.Module):
                                                        input_length=expected_attn_input_length // (3 * (2 ** (len(blocks) - 2))),
                                                        dropout_pos_embeddings=dropout_pos_embeddings)
             )
-        self.no_contraction_head = UnetAttnHead(self.pyramid_height + 1, hidden_channels + [hidden_channels[-1]],
+        """self.no_contraction_head = UnetAttnHead(self.pyramid_height + 1, hidden_channels + [hidden_channels[-1]],
                                                 kernel_size=1, use_batch_norm=True, dropout=dropout)
         self.outconv = torch.nn.Conv1d(hidden_channels[0],
+                                       attn_out_channels, kernel_size=1,
+                                       bias=True, padding="same", padding_mode="replicate")"""
+        self.no_contraction_head = UnetHead3f(self.pyramid_height, hidden_channels,
+                                                kernel_size=1, dropout=dropout, input_attn=True, use_batch_norm=use_batch_norm)
+        self.outconv = torch.nn.Conv1d(hidden_channels[-1],
                                        attn_out_channels, kernel_size=1,
                                        bias=True, padding="same", padding_mode="replicate")
         self.expected_attn_input_length = expected_attn_input_length
@@ -207,6 +212,6 @@ class EventConfidenceUnet(torch.nn.Module):
         for i in range(len(self.attention_blocks)):
             x = self.attention_blocks[i](x)
 
-        x = self.no_contraction_head(ret + [x])
+        x = self.no_contraction_head(ret, x)
         x = self.outconv(x)
         return x, None, None, None

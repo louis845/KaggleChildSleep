@@ -93,7 +93,7 @@ class AttentionBlock1DWithPositionalEncoding(torch.nn.Module):
 
 class UnetHead3f(torch.nn.Module):
     def __init__(self, upconv_layers, stem_hidden_channels,
-                 kernel_size, dropout: float, input_attn=True, target_channels_override=None):
+                 kernel_size, dropout: float, input_attn=True, target_channels_override=None, use_batch_norm=True):
         super(UnetHead3f, self).__init__()
         if input_attn:
             assert upconv_layers <= len(stem_hidden_channels), "upconv_layers must be <= len(stem_hidden_channels)"
@@ -105,7 +105,10 @@ class UnetHead3f(torch.nn.Module):
             assert isinstance(target_channels_override, int), "target_channels_override must be an integer"
             self.initial_conv = torch.nn.Conv1d(stem_final_layer_channels, target_channels_override,
                                                 kernel_size=1, bias=False, padding="same", padding_mode="replicate")
-            self.initial_norm = torch.nn.BatchNorm1d(target_channels_override)
+            if use_batch_norm:
+                self.initial_norm = torch.nn.BatchNorm1d(target_channels_override)
+            else:
+                self.initial_norm = torch.nn.GroupNorm(num_channels=target_channels_override, num_groups=1)
             stem_final_layer_channels = target_channels_override
         assert stem_final_layer_channels % 4 == 0, "stem_final_layer_channels must be divisible by 4"
 
@@ -126,14 +129,20 @@ class UnetHead3f(torch.nn.Module):
             self.upsample_conv.append(torch.nn.Conv1d(deep_num_channels, stem_final_layer_channels,
                                                       kernel_size=kernel_size, groups=num_groups, bias=False,
                                                       padding="same", padding_mode="replicate")) # channel upsampling
-            self.upsample_norms.append(torch.nn.BatchNorm1d(stem_final_layer_channels))
+            if use_batch_norm:
+                self.upsample_norms.append(torch.nn.BatchNorm1d(stem_final_layer_channels))
+            else:
+                self.upsample_norms.append(torch.nn.GroupNorm(num_channels=stem_final_layer_channels, num_groups=1))
 
         self.cat_conv = torch.nn.ModuleList()
         self.cat_norms = torch.nn.ModuleList()
         for k in range(upconv_layers):
             self.cat_conv.append(torch.nn.Conv1d(stem_final_layer_channels * 2, stem_final_layer_channels,
                                                  kernel_size=1, bias=False, padding="same", padding_mode="replicate"))
-            self.cat_norms.append(torch.nn.BatchNorm1d(stem_final_layer_channels))
+            if use_batch_norm:
+                self.cat_norms.append(torch.nn.BatchNorm1d(stem_final_layer_channels))
+            else:
+                self.cat_norms.append(torch.nn.GroupNorm(num_channels=stem_final_layer_channels, num_groups=1))
 
         self.nonlin = torch.nn.GELU()
         if dropout > 0.0:
