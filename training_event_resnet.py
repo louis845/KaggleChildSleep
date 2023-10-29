@@ -81,6 +81,8 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
         loss = ce_loss(pred_logits, labels_batch)
     elif use_iou_loss:
         loss = 0.01 * dice_loss(pred_logits, labels_batch) + focal_loss(pred_logits, labels_batch)
+    elif use_ce_iou_loss:
+        loss = ce_loss(pred_logits, labels_batch) + 0.01 * dice_loss(pred_logits, labels_batch)
     else:
         loss = focal_loss(pred_logits, labels_batch)
 
@@ -185,6 +187,8 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
             loss = ce_loss(pred_logits, labels_batch)
         elif use_iou_loss:
             loss = 0.01 * dice_loss(pred_logits, labels_batch) + focal_loss(pred_logits, labels_batch)
+        elif use_ce_iou_loss:
+            loss = ce_loss(pred_logits, labels_batch) + 0.01 * dice_loss(pred_logits, labels_batch)
         else:
             loss = focal_loss(pred_logits, labels_batch)
 
@@ -319,6 +323,7 @@ if __name__ == "__main__":
     parser.add_argument("--dropout_pos_embeddings", action="store_true", help="Whether to dropout the positional embeddings. Default False.")
     parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use cross entropy loss. Default False.")
     parser.add_argument("--use_iou_loss", action="store_true", help="Whether to use IOU loss. Default False.")
+    parser.add_argument("--use_ce_iou_loss", action="store_true", help="Whether to use a combination of cross entropy and IOU loss. Default False.")
     parser.add_argument("--use_deep_supervision", type=int, nargs="+", default=None, help="Whether to use deep supervision. Default None. If specified, must be an integer indicating the length of deep supervision training.")
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
@@ -371,6 +376,7 @@ if __name__ == "__main__":
     dropout_pos_embeddings = args.dropout_pos_embeddings
     use_ce_loss = args.use_ce_loss
     use_iou_loss = args.use_iou_loss
+    use_ce_iou_loss = args.use_ce_iou_loss
     use_deep_supervision = args.use_deep_supervision
     use_anglez_only = args.use_anglez_only
     use_enmo_only = args.use_enmo_only
@@ -431,7 +437,7 @@ if __name__ == "__main__":
     model = model.to(config.device)
 
     # initialize optimizer
-    loss_print = "Cross entropy" if use_ce_loss else ("IOU" if use_iou_loss else "Focal")
+    loss_print = "Cross entropy" if use_ce_loss else ("IOU" if use_iou_loss else ("Cross entropy + IOU" if use_ce_iou_loss else "Focal"))
     print("Loss: " + loss_print)
     print("Learning rate: " + str(learning_rate))
     print("Momentum: " + str(momentum))
@@ -500,6 +506,7 @@ if __name__ == "__main__":
         "dropout_pos_embeddings": dropout_pos_embeddings,
         "use_ce_loss": use_ce_loss,
         "use_iou_loss": use_iou_loss,
+        "use_ce_iou_loss": use_ce_iou_loss,
         "use_deep_supervision": use_deep_supervision,
         "use_anglez_only": use_anglez_only,
         "use_enmo_only": use_enmo_only,
