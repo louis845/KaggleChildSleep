@@ -84,7 +84,7 @@ class IntervalEventsSampler:
                 self.shuffle_indices = np.arange(len(self.all_segmentations_list))
         self.sample_low = 0
 
-    def sample_single(self, index: int, random_shift: int=0, flip: bool=False, expand: int=0):
+    def sample_single(self, index: int, random_shift: int=0, flip: bool=False, expand: int=0, include_all_events=False):
         # index denotes the index in self.all_segmentations_list
         # returns (accel_data, event_segmentations), where event_segmentations[0, :] is onset, and event_segmentations[1, :] is wakeup
 
@@ -130,6 +130,20 @@ class IntervalEventsSampler:
                         "onset": int(evts.iloc[0]["step"]),
                         "wakeup": int(evts.iloc[1]["step"])
                     })
+                elif include_all_events:
+                    evt_type = evts.iloc[0]["event"]
+                    assert len(evts) == 1
+                    assert evt_type in ["onset", "wakeup"]
+                    if evt_type == "onset":
+                        grouped_events.append({
+                            "onset": int(evts.iloc[0]["step"]),
+                            "wakeup": None
+                        })
+                    else:
+                        grouped_events.append({
+                            "onset": None,
+                            "wakeup": int(evts.iloc[0]["step"])
+                        })
 
         # Load acceleration data and event segmentations
         accel_data = self.naive_all_data[series_id]["accel"][:, (start - expand):(end + expand)]
@@ -153,7 +167,7 @@ class IntervalEventsSampler:
 
         return accel_data, event_segmentations
 
-    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, expand: int=0):
+    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, expand: int=0, include_all_events=False):
         assert self.shuffle_indices is not None, "shuffle_indices is None, call shuffle() first"
 
         accel_datas = []
@@ -167,7 +181,7 @@ class IntervalEventsSampler:
                 flip = np.random.randint(0, 2) == 1
             if always_flip:
                 flip = True
-            accel_data, event_segmentation = self.sample_single(self.shuffle_indices[k], random_shift=random_shift, flip=flip, expand=expand)
+            accel_data, event_segmentation = self.sample_single(self.shuffle_indices[k], random_shift=random_shift, flip=flip, expand=expand, include_all_events=include_all_events)
             accel_datas.append(accel_data)
             event_segmentations.append(event_segmentation)
 

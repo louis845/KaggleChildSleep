@@ -90,7 +90,7 @@ def training_step(record: bool):
             accel_data_batch, labels_batch, increment =\
                 training_sampler.sample(batch_size, random_shift=random_shift,
                                         random_flip=random_flip, always_flip=always_flip,
-                                        expand=expand)
+                                        expand=expand, include_all_events=include_all_events)
 
             accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
             labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
@@ -157,7 +157,7 @@ def validation_step():
     with (tqdm.tqdm(total=len(val_sampler)) as pbar):
         while val_sampler.entries_remaining() > 0:
             # load the batch
-            accel_data_batch, labels_batch, increment = val_sampler.sample(batch_size, expand=expand)
+            accel_data_batch, labels_batch, increment = val_sampler.sample(batch_size, expand=expand, include_all_events=include_all_events)
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
 
@@ -253,6 +253,9 @@ if __name__ == "__main__":
     parser.add_argument("--use_ce_iou_loss", action="store_true", help="Whether to use a combination of cross entropy and IOU loss. Default False.")
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
+    parser.add_argument("--include_all_events", action="store_true", help="Whether to include all events. Default False.")
+    parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
+    parser.add_argument("--prediction_stride", type=int, default=4320, help="Number of timesteps to stride when predicting. Default 4320.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
@@ -302,11 +305,16 @@ if __name__ == "__main__":
     use_ce_iou_loss = args.use_ce_iou_loss
     use_anglez_only = args.use_anglez_only
     use_enmo_only = args.use_enmo_only
+    include_all_events = args.include_all_events
+    prediction_length = args.prediction_length
+    prediction_stride = args.prediction_stride
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
 
     assert not (use_iou_loss and use_ce_loss), "Cannot use both IOU loss and cross entropy loss."
     assert not (use_anglez_only and use_enmo_only), "Cannot use both anglez only and enmo only."
+    if include_all_events:
+        assert expand == 0, "Cannot expand when including all events."
 
     if isinstance(hidden_channels, int):
         hidden_channels = [hidden_channels]
@@ -411,6 +419,9 @@ if __name__ == "__main__":
         "use_ce_iou_loss": use_ce_iou_loss,
         "use_anglez_only": use_anglez_only,
         "use_enmo_only": use_enmo_only,
+        "include_all_events": include_all_events,
+        "prediction_length": prediction_length,
+        "prediction_stride": prediction_stride,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
     }
@@ -451,9 +462,13 @@ if __name__ == "__main__":
     print("Expand: " + str(expand))
     print("Use anglez only: " + str(use_anglez_only))
     training_sampler = convert_to_interval_events.IntervalEventsSampler(training_entries, all_data,
-                                                                        train_or_test="train")
+                                                                        train_or_test="train",
+                                                                        prediction_length=prediction_length,
+                                                                        prediction_stride=prediction_stride)
     val_sampler = convert_to_interval_events.IntervalEventsSampler(validation_entries, all_data,
-                                                                        train_or_test="val")
+                                                                        train_or_test="val",
+                                                                        prediction_length=prediction_length,
+                                                                        prediction_stride=prediction_stride)
 
 
     # Start training loop

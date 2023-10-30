@@ -192,6 +192,7 @@ class EventConfidenceUnet(torch.nn.Module):
                                            bias=True, padding="same", padding_mode="replicate")
         self.expected_attn_input_length = expected_attn_input_length
         self.attention_bottleneck = attention_bottleneck
+        self.num_attention_blocks = attention_blocks
 
     def forward(self, x, ret_type="attn"):
         assert ret_type in ["attn"], "ret_type must be one of ['attn']"
@@ -216,9 +217,12 @@ class EventConfidenceUnet(torch.nn.Module):
             x = self.attn_bottleneck_out_norm(x)
             x = self.attn_bottleneck_out_nonlin(x)
 
-        for i in range(len(self.attention_blocks)):
-            x = self.attention_blocks[i](x)
+        if self.num_attention_blocks > 0:
+            for i in range(len(self.attention_blocks)):
+                x = self.attention_blocks[i](x)
 
-        x = self.no_contraction_head(ret, x)
+            x = self.no_contraction_head(ret, x)
+        else:
+            x = self.no_contraction_head(ret, torch.zeros_like(x))
         x = self.outconv(x)
         return x, None, None, None
