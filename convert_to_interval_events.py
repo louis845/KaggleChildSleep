@@ -7,6 +7,7 @@ import tqdm
 
 import convert_to_h5py_naive
 import convert_to_good_events
+import transform_elastic_deformation
 
 def create_regression_range(mask: np.ndarray, values: np.ndarray, event_type: int, location: int, window_radius: int):
     assert mask.shape == values.shape, "mask and values must have the same shape"
@@ -114,13 +115,19 @@ class IntervalEventsSampler:
             shift = np.random.randint(-random_shift, random_shift + 1)
             shift = max(min(shift, total_length - end - expand), -start + expand)
         start, end = start + shift, end + shift
+        events_start, events_end = start, end
 
         assert start - expand >= 0 and end + expand <= total_length, "start: {}, end: {}, total_length: {}".format(start, end, total_length)
+
+        # generate elastic deformation if necessary
+        if elastic_deformation:
+            deformation_indices = transform_elastic_deformation.generate_deformation_indices(length=end - start + expand * 2)
+            events_start, events_end = start - expand + deformation_indices[expand], start - expand + deformation_indices[expand + end - start - 1]
 
         # load events
         series_events = self.events.loc[self.events["series_id"] == series_id]
         events_contained = series_events.loc[
-            ((series_events["step"] >= start) & (series_events["step"] < end))]
+            ((series_events["step"] >= events_start) & (series_events["step"] < events_end))]
         grouped_events = []
         if len(events_contained) > 0:
             events_contained = events_contained.sort_values(by=["step"])
@@ -153,6 +160,10 @@ class IntervalEventsSampler:
         for event in grouped_events:
             onset = (int(event["onset"] - start + expand)) if event["onset"] is not None else None
             wakeup = (int(event["wakeup"] - start + expand)) if event["wakeup"] is not None else None
+            if elastic_deformation:
+                onset = transform_elastic_deformation.find_closest_index(deformation_indices, onset) if onset is not None else None
+                wakeup = transform_elastic_deformation.find_closest_index(deformation_indices, wakeup) if wakeup is not None else None
+
             if flip:
                 onset, wakeup = wakeup, onset
             if onset is not None:
@@ -161,14 +172,15 @@ class IntervalEventsSampler:
             if wakeup is not None:
                 event_segmentations[1, max(0, wakeup - event_tolerance_width):min(event_segmentations.shape[1],
                                                                                   wakeup + event_tolerance_width + 1)] = 1.0
-
+        if elastic_deformation:
+            accel_data = transform_elastic_deformation.deform_time_series(accel_data, deformation_indices)
         if flip:
             accel_data = np.flip(accel_data, axis=1)
             event_segmentations = np.flip(event_segmentations, axis=1)
 
         return accel_data, event_segmentations
 
-    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, expand: int=0, include_all_events=False):
+    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, expand: int=0, elastic_deformation=False, include_all_events=False):
         assert self.shuffle_indices is not None, "shuffle_indices is None, call shuffle() first"
 
         accel_datas = []
@@ -182,7 +194,8 @@ class IntervalEventsSampler:
                 flip = np.random.randint(0, 2) == 1
             if always_flip:
                 flip = True
-            accel_data, event_segmentation = self.sample_single(self.shuffle_indices[k], random_shift=random_shift, flip=flip, expand=expand, include_all_events=include_all_events)
+            accel_data, event_segmentation = self.sample_single(self.shuffle_indices[k], random_shift=random_shift, flip=flip, expand=expand, elastic_deformation=elastic_deformation,
+                                                                include_all_events=include_all_events)
             accel_datas.append(accel_data)
             event_segmentations.append(event_segmentation)
 
