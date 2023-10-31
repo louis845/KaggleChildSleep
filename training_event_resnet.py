@@ -313,8 +313,6 @@ if __name__ == "__main__":
 
     assert not (use_iou_loss and use_ce_loss), "Cannot use both IOU loss and cross entropy loss."
     assert not (use_anglez_only and use_enmo_only), "Cannot use both anglez only and enmo only."
-    if include_all_events:
-        assert expand == 0, "Cannot expand when including all events."
 
     if isinstance(hidden_channels, int):
         hidden_channels = [hidden_channels]

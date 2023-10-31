@@ -84,7 +84,8 @@ class IntervalEventsSampler:
                 self.shuffle_indices = np.arange(len(self.all_segmentations_list))
         self.sample_low = 0
 
-    def sample_single(self, index: int, random_shift: int=0, flip: bool=False, expand: int=0, include_all_events=False):
+    def sample_single(self, index: int, random_shift: int=0, flip: bool=False, expand: int=0,
+                      elastic_deformation=False, include_all_events=False):
         # index denotes the index in self.all_segmentations_list
         # returns (accel_data, event_segmentations), where event_segmentations[0, :] is onset, and event_segmentations[1, :] is wakeup
 
