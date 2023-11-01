@@ -201,9 +201,7 @@ class EventConfidenceUnet(torch.nn.Module):
         # generate list of downsampling methods
         downsampling_methods = [0] * self.pyramid_height
         assert T % self.input_length_multiple == 0, "T must be divisible by {}".format(self.input_length_multiple)
-
-        if ret_type != "deep":
-            assert T == self.expected_attn_input_length, "T: {}, self.expected_attn_input_length: {}".format(T, self.expected_attn_input_length)
+        assert T == self.expected_attn_input_length, "T: {}, self.expected_attn_input_length: {}".format(T, self.expected_attn_input_length)
 
         # run stem
         ret = self.stem(x, downsampling_methods)
@@ -226,3 +224,6 @@ class EventConfidenceUnet(torch.nn.Module):
             x = self.no_contraction_head(ret, torch.zeros_like(x))
         x = self.outconv(x)
         return x, None, None, None
+
+def event_confidence_inference(model: EventConfidenceUnet, time_series: np.ndarray):
+    pass
