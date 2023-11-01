@@ -57,7 +57,9 @@ def dice_loss(preds: torch.Tensor, ground_truth: torch.Tensor, eps=1e-5):
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
                             accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
     optimizer_.zero_grad()
-    pred_logits, pred_small, pred_mid, pred_large = model_(accel_data_batch, ret_type="attn")
+    pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn")
+    if predict_center_only:
+        pred_logits = pred_logits[:, :, expand:-expand]
     if use_ce_loss:
         loss = ce_loss(pred_logits, labels_batch)
     elif use_iou_loss:
@@ -92,6 +94,8 @@ def training_step(record: bool):
                                         random_flip=random_flip, always_flip=always_flip,
                                         expand=expand, elastic_deformation=use_elastic_deformation,
                                         include_all_events=include_all_events)
+            assert labels_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(labels_batch.shape)
+            assert accel_data_batch.shape[-1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(accel_data_batch.shape)
 
             accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
             labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
@@ -100,6 +104,9 @@ def training_step(record: bool):
                 accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
             elif use_enmo_only:
                 accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
+
+            if predict_center_only:
+                labels_batch_torch = labels_batch_torch[:, :, expand:-expand]
 
             # train model now
             loss, preds, small_loss, mid_loss, large_loss, num_events = single_training_step(model, optimizer,
@@ -134,7 +141,9 @@ def training_step(record: bool):
 def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tensor,
                            labels_batch: torch.Tensor):
     with torch.no_grad():
-        pred_logits, pred_small, pred_mid, pred_large = model_(accel_data_batch, ret_type="attn")
+        pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn")
+        if predict_center_only:
+            pred_logits = pred_logits[:, :, expand:-expand]
         if use_ce_loss:
             loss = ce_loss(pred_logits, labels_batch)
         elif use_iou_loss:
@@ -166,6 +175,9 @@ def validation_step():
                 accel_data_batch = accel_data_batch[:, 0:1, :]
             elif use_enmo_only:
                 accel_data_batch = accel_data_batch[:, 1:2, :]
+
+            if predict_center_only:
+                labels_batch = labels_batch[:, :, expand:-expand]
 
             # val model now
             loss, preds, small_loss, mid_loss, large_loss, num_events = single_validation_step(model, accel_data_batch, labels_batch)
@@ -258,6 +270,7 @@ if __name__ == "__main__":
     parser.add_argument("--include_all_events", action="store_true", help="Whether to include all events. Default False.")
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
     parser.add_argument("--prediction_stride", type=int, default=4320, help="Number of timesteps to stride when predicting. Default 4320.")
+    parser.add_argument("--predict_center_only", action="store_true", help="Whether to predict only the center (expanded parts omitted) of the interval. Default False.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
@@ -311,6 +324,7 @@ if __name__ == "__main__":
     include_all_events = args.include_all_events
     prediction_length = args.prediction_length
     prediction_stride = args.prediction_stride
+    predict_center_only = args.predict_center_only
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
 
@@ -424,6 +438,7 @@ if __name__ == "__main__":
         "include_all_events": include_all_events,
         "prediction_length": prediction_length,
         "prediction_stride": prediction_stride,
+        "predict_center_only": predict_center_only,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
     }
