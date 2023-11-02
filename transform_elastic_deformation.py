@@ -20,12 +20,13 @@ def deform_time_series(time_series, deformed_time_indices):
     assert time_series.shape[1] == len(deformed_time_indices)
     assert len(time_series.shape) == 2
 
-    num_features = time_series.shape[0]
+    """num_features = time_series.shape[0]
     deformed_time_series = np.zeros_like(time_series)
 
     ground_indices = np.arange(len(deformed_time_indices))
     for k in range(num_features):
-        deformed_time_series[k, :] = interp1d(ground_indices, time_series[k, :], kind="nearest")(deformed_time_indices)
+        deformed_time_series[k, :] = interp1d(ground_indices, time_series[k, :], kind="nearest")(deformed_time_indices)"""
+    deformed_time_series = time_series[:, deformed_time_indices]
     return deformed_time_series
 
 

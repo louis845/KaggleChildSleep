@@ -93,7 +93,7 @@ def training_step(record: bool):
                 training_sampler.sample(batch_size, random_shift=random_shift,
                                         random_flip=random_flip, always_flip=always_flip,
                                         expand=expand, elastic_deformation=use_elastic_deformation,
-                                        include_all_events=include_all_events)
+                                        include_all_events=include_all_events, include_events_in_extension=(predict_center_mode == "expanded"))
             assert labels_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(labels_batch.shape)
             assert accel_data_batch.shape[-1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(accel_data_batch.shape)
 
@@ -142,7 +142,7 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
                            labels_batch: torch.Tensor):
     with torch.no_grad():
         pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn")
-        if predict_center_mode == "center":
+        if (predict_center_mode == "center" or predict_center_mode == "expanded"):
             pred_logits = pred_logits[:, :, expand:-expand]
         if use_ce_loss:
             loss = ce_loss(pred_logits, labels_batch)
@@ -167,7 +167,8 @@ def validation_step():
     with (tqdm.tqdm(total=len(val_sampler)) as pbar):
         while val_sampler.entries_remaining() > 0:
             # load the batch
-            accel_data_batch, labels_batch, increment = val_sampler.sample(batch_size, expand=expand, include_all_events=include_all_events)
+            accel_data_batch, labels_batch, increment = val_sampler.sample(batch_size, expand=expand, include_all_events=include_all_events,
+                                                                           include_events_in_extension=(predict_center_mode == "expanded"))
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
 
@@ -176,7 +177,7 @@ def validation_step():
             elif use_enmo_only:
                 accel_data_batch = accel_data_batch[:, 1:2, :]
 
-            if predict_center_mode == "center":
+            if (predict_center_mode == "center" or predict_center_mode == "expanded"):
                 labels_batch = labels_batch[:, :, expand:-expand]
 
             # val model now
@@ -483,6 +484,7 @@ if __name__ == "__main__":
     print("Always flip: " + str(always_flip))
     print("Elastic deformation: " + str(use_elastic_deformation))
     print("Expand: " + str(expand))
+    print("Prediction mode:" + str(predict_center_mode))
     print("Use anglez only: " + str(use_anglez_only))
     training_sampler = convert_to_interval_events.IntervalEventsSampler(training_entries, all_data,
                                                                         train_or_test="train",

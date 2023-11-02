@@ -86,7 +86,7 @@ class IntervalEventsSampler:
         self.sample_low = 0
 
     def sample_single(self, index: int, random_shift: int=0, flip: bool=False, expand: int=0,
-                      elastic_deformation=False, include_all_events=False):
+                      elastic_deformation=False, include_all_events=False, include_events_in_extension=False):
         # index denotes the index in self.all_segmentations_list
         # returns (accel_data, event_segmentations), where event_segmentations[0, :] is onset, and event_segmentations[1, :] is wakeup
 
@@ -115,14 +115,20 @@ class IntervalEventsSampler:
             shift = np.random.randint(-random_shift, random_shift + 1)
             shift = max(min(shift, total_length - end - expand), -start + expand)
         start, end = start + shift, end + shift
-        events_start, events_end = start, end
 
         assert start - expand >= 0 and end + expand <= total_length, "start: {}, end: {}, total_length: {}".format(start, end, total_length)
 
-        # generate elastic deformation if necessary
+        # find the events that need to be included, and generate elastic deformation if necessary
+        if include_events_in_extension:
+            events_start, events_end = start - expand, end + expand
+        else:
+            events_start, events_end = start, end
         if elastic_deformation:
             deformation_indices = transform_elastic_deformation.generate_deformation_indices(length=end - start + expand * 2)
-            events_start, events_end = start - expand + deformation_indices[expand], start - expand + deformation_indices[expand + end - start - 1]
+            if include_events_in_extension:
+                events_start, events_end = start - expand + deformation_indices[0], start - expand + deformation_indices[-1]
+            else:
+                events_start, events_end = start - expand + deformation_indices[expand], start - expand + deformation_indices[expand + end - start - 1]
 
         # load events
         series_events = self.events.loc[self.events["series_id"] == series_id]
@@ -180,7 +186,8 @@ class IntervalEventsSampler:
 
         return accel_data, event_segmentations
 
-    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, expand: int=0, elastic_deformation=False, include_all_events=False):
+    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, expand: int=0, elastic_deformation=False,
+               include_all_events=False, include_events_in_extension=False):
         assert self.shuffle_indices is not None, "shuffle_indices is None, call shuffle() first"
 
         accel_datas = []
@@ -195,7 +202,7 @@ class IntervalEventsSampler:
             if always_flip:
                 flip = True
             accel_data, event_segmentation = self.sample_single(self.shuffle_indices[k], random_shift=random_shift, flip=flip, expand=expand, elastic_deformation=elastic_deformation,
-                                                                include_all_events=include_all_events)
+                                                                include_all_events=include_all_events, include_events_in_extension=include_events_in_extension)
             accel_datas.append(accel_data)
             event_segmentations.append(event_segmentation)
 
