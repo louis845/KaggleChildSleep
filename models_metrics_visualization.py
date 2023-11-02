@@ -86,8 +86,12 @@ class MetricPlotter(QMainWindow):
                 self.model_layout.addWidget(checkbox)
 
     def update_metrics(self):
+        previously_checked = []
+
         self.metrics.clear()
         for checkbox in self.metric_checkboxes:
+            if checkbox.isChecked():
+                previously_checked.append(checkbox.text())
             self.metric_layout.removeWidget(checkbox)
             checkbox.deleteLater()
 
@@ -105,6 +109,9 @@ class MetricPlotter(QMainWindow):
             checkbox = QCheckBox(metric)
             self.metric_checkboxes.append(checkbox)
             self.metric_layout.addWidget(checkbox)
+
+            if metric in previously_checked:
+                checkbox.setChecked(True)
 
     def get_metrics(self, model):
         train_metrics = pd.read_csv(os.path.join(self.data_path, model, 'train_metrics.csv'),

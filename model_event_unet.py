@@ -110,7 +110,7 @@ class EventRegressorUnet(torch.nn.Module):
 
         self.use_dropout = dropout > 0.0
 
-    def forward(self, x, ret_type="all"):
+    def forward(self, x, ret_type="deep"):
         assert ret_type in ["deep"], "ret_type must be one of ['deep']"
 
         N, C, T = x.shape
@@ -122,6 +122,9 @@ class EventRegressorUnet(torch.nn.Module):
         x = self.upconv_head(ret)
         x = self.final_conv(x)
         return x
+
+    def get_device(self) -> torch.device:
+        return next(self.parameters()).device
 
 class EventConfidenceUnet(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, kernel_size, blocks=[4, 6, 8, 8, 8, 8],
@@ -225,5 +228,99 @@ class EventConfidenceUnet(torch.nn.Module):
         x = self.outconv(x)
         return x, None, None, None
 
-def event_confidence_inference(model: EventConfidenceUnet, time_series: np.ndarray):
-    pass
+    def get_device(self) -> torch.device:
+        return next(self.parameters()).device
+
+def index_array(arr: np.ndarray, low: int, high: int):
+    # index select arr along the last axis, from low to high
+    # automatically pad with zeros if low, high are out of bounds
+    assert len(arr.shape) == 2, "arr must be a 2D array"
+    assert low < high, "low must be less than high"
+    assert not ((low < 0 and high <= 0) or (low >= arr.shape[1] and high > arr.shape[1])), "low and high must intersect with arr"
+
+    if 0 <= low < arr.shape[1] and 0 < high <= arr.shape[1]:
+        return arr[:, low:high]
+    elif low < 0 and 0 < high <= arr.shape[1]:
+        return np.concatenate([np.zeros((arr.shape[0], -low), dtype=arr.dtype), arr[:, :high]], axis=1)
+    elif 0 <= low < arr.shape[1] and high > arr.shape[1]:
+        return np.concatenate([arr[:, low:], np.zeros((arr.shape[0], high - arr.shape[1]), dtype=arr.dtype)], axis=1)
+    elif low < 0 and high > arr.shape[1]:
+        return np.concatenate([np.zeros((arr.shape[0], -low), dtype=arr.dtype), arr, np.zeros((arr.shape[0], high - arr.shape[1]), dtype=arr.dtype)], axis=1)
+
+def event_confidence_inference(model: EventConfidenceUnet, time_series: np.ndarray, batch_size=32,
+                               prediction_length=17280, expand=8640):
+    model.eval()
+
+    total_length = time_series.shape[1]
+    probas = np.zeros((2, total_length), dtype=np.float32)
+    multiplicities = np.zeros((total_length,), dtype=np.int32)
+
+    starts = []
+    for k in range(4):
+        starts.append(k * prediction_length // 4)
+    for k in range(4):
+        starts.append((total_length + k * prediction_length // 4) % prediction_length)
+
+    for start in starts:
+        event_confidence_single_inference(model, time_series, probas, multiplicities,
+                                          batch_size=batch_size,
+                                          prediction_length=prediction_length, prediction_stride=prediction_length,
+                                          expand=expand, start=start)
+    multiplicities[multiplicities == 0] = 1 # avoid division by zero. the probas will be zero anyway
+    return probas / multiplicities # auto broadcast
+
+def event_confidence_single_inference(model: EventConfidenceUnet, time_series: np.ndarray,
+                                      probas: np.ndarray, multiplicities: np.ndarray,
+                                      batch_size=32,
+                                      prediction_length=17280, prediction_stride=17280,
+                                      expand=8640, start=0):
+    model.eval()
+
+    assert len(time_series.shape) == 2, "time_series must be a 2D array"
+    assert len(probas.shape) == 2, "probas must be a 2D array"
+    assert len(multiplicities.shape) == 1, "multiplicities must be a 1D array"
+
+    assert time_series.shape[1] == probas.shape[1], "time_series and probas must have the same length"
+    assert time_series.shape[1] == multiplicities.shape[0], "time_series and multiplicities must have the same length"
+
+    assert probas.dtype == np.float32, "probas must be a float32 array"
+    assert multiplicities.dtype == np.int32, "multiplicities must be an int32 array"
+
+    total_length = time_series.shape[1]
+
+    # compute batch end points
+    batches_starts = []
+    batches_ends = []
+    while start + prediction_length <= total_length:
+        end = start + prediction_length
+
+        batches_starts.append(start)
+        batches_ends.append(end)
+
+        start += prediction_stride
+
+    # compute batch predictions
+    batches_computed = 0
+    while batches_computed < len(batches_starts):
+        batches_compute_end = min(batches_computed + batch_size, len(batches_starts))
+
+        # create torch tensor
+        batches = []
+        for i in range(batches_computed, batches_compute_end):
+            batches.append(index_array(time_series, batches_starts[i] - expand, batches_ends[i] + expand))
+        batches = np.stack(batches, axis=0)
+        batches_torch = torch.tensor(batches, dtype=torch.float32, device=model.get_device())
+
+        # run model
+        with torch.no_grad():
+            batches_out, _, _, _ = model(batches_torch)
+            batches_out = torch.sigmoid(batches_out[:, :, expand:-expand])
+            batches_out = batches_out.cpu().numpy()
+
+        # update probas
+        for i in range(batches_computed, batches_compute_end):
+            k = i - batches_computed
+            probas[:, batches_starts[i]:batches_ends[i]] += batches_out[k, :, :]
+            multiplicities[batches_starts[i]:batches_ends[i]] += 1
+
+        batches_computed = batches_compute_end

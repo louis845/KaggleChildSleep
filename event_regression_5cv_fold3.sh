@@ -1,0 +1,1 @@
+python training_resnet_regression.py --epochs 100 --device 0 --memory_limit 0.495 --loss huber --model regress_standard5cv_model_fold3 --batch_size 32 --learning_rate 5e-3 --train_data fold_3_train_5cv --val_data fold_3_val_5cv --num_extra_steps 4 --use_anglez_only --use_decay_schedule --regression_width 120 240 480 --use_standard_model

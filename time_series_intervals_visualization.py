@@ -45,10 +45,10 @@ class MatplotlibWidget(QWidget):
         self.axis.set_ylim([self.min_y, self.max_y])
         self.axis.plot(x, y1, label="anglez")
         self.axis.plot(x, y2, label="enmo")
-        self.axis.plot(x, extras["large_onset"] / 100.0, label="onset")
-        self.axis.plot(x, extras["large_wakeup"] / 100.0, label="wakeup")
-        self.axis.plot(x, extras["large_onset_kernel"] / 20.0, label="onset_kernel")
-        self.axis.plot(x, extras["large_wakeup_kernel"] / 20.0, label="wakeup_kernel")
+        #self.axis.plot(x, extras["onset"] / 100.0, label="onset")
+        #self.axis.plot(x, extras["wakeup"] / 100.0, label="wakeup")
+        self.axis.plot(x, extras["onset_kernel"], label="onset_kernel")
+        self.axis.plot(x, extras["wakeup_kernel"], label="wakeup_kernel")
 
         for event_time, event_type in events:
             color = "blue" if event_type == 1 else "red"
