@@ -58,7 +58,7 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
                             accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
     optimizer_.zero_grad()
     pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn")
-    if predict_center_only:
+    if predict_center_mode == "center":
         pred_logits = pred_logits[:, :, expand:-expand]
     if use_ce_loss:
         loss = ce_loss(pred_logits, labels_batch)
@@ -105,7 +105,7 @@ def training_step(record: bool):
             elif use_enmo_only:
                 accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
 
-            if predict_center_only:
+            if predict_center_mode == "center":
                 labels_batch_torch = labels_batch_torch[:, :, expand:-expand]
 
             # train model now
@@ -142,7 +142,7 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
                            labels_batch: torch.Tensor):
     with torch.no_grad():
         pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn")
-        if predict_center_only:
+        if predict_center_mode == "center":
             pred_logits = pred_logits[:, :, expand:-expand]
         if use_ce_loss:
             loss = ce_loss(pred_logits, labels_batch)
@@ -176,7 +176,7 @@ def validation_step():
             elif use_enmo_only:
                 accel_data_batch = accel_data_batch[:, 1:2, :]
 
-            if predict_center_only:
+            if predict_center_mode == "center":
                 labels_batch = labels_batch[:, :, expand:-expand]
 
             # val model now
@@ -270,7 +270,7 @@ if __name__ == "__main__":
     parser.add_argument("--include_all_events", action="store_true", help="Whether to include all events. Default False.")
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
     parser.add_argument("--prediction_stride", type=int, default=4320, help="Number of timesteps to stride when predicting. Default 4320.")
-    parser.add_argument("--predict_center_only", action="store_true", help="Whether to predict only the center (expanded parts omitted) of the interval. Default False.")
+    parser.add_argument("--predict_center_mode", type=str, default="all", help="Optimization target for the center (expanded parts omitted) and the expanded parts of the intervals. Default all.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
@@ -324,12 +324,17 @@ if __name__ == "__main__":
     include_all_events = args.include_all_events
     prediction_length = args.prediction_length
     prediction_stride = args.prediction_stride
-    predict_center_only = args.predict_center_only
+    predict_center_mode = args.predict_center_mode
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
 
     assert not (use_iou_loss and use_ce_loss), "Cannot use both IOU loss and cross entropy loss."
     assert not (use_anglez_only and use_enmo_only), "Cannot use both anglez only and enmo only."
+    assert predict_center_mode in ["all", "center", "expanded"], "predict_center_mode must be one of all, center, expanded."
+    # all      - predict all parts of the interval, events only happen in the center, and the expanded parts will be predicted as negative (for both training and validation)
+    # center   - predict only the center parts of the interval. No optimization and predictions will be made for the expanded parts (for both training and validation)
+    # expanded - use the entire interval (expanded parts included) for optimization, and only the center part for prediction (validation)
+
 
     if isinstance(hidden_channels, int):
         hidden_channels = [hidden_channels]
@@ -438,7 +443,7 @@ if __name__ == "__main__":
         "include_all_events": include_all_events,
         "prediction_length": prediction_length,
         "prediction_stride": prediction_stride,
-        "predict_center_only": predict_center_only,
+        "predict_center_mode": predict_center_mode,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
     }
