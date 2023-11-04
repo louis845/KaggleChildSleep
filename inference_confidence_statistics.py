@@ -3,21 +3,19 @@ import argparse
 import json
 import sys
 
-import numpy as np
 import torch
 import tqdm
 import pandas as pd
-from PySide2.QtWidgets import QApplication, QWidget, QVBoxLayout, QCheckBox, QPushButton, QGroupBox, QHBoxLayout
+from PySide2.QtWidgets import QApplication
 
 import manager_folds
-import manager_models
-import model_unet
 import model_attention_unet
 import model_event_unet
 import config
 import convert_to_npy_naive
 import training_resnet_regression
-import inference_regression_statistics_visualization
+from regression_statistics import inference_regression_statistics_visualization
+
 
 def load_all_events():
     all_events = {}

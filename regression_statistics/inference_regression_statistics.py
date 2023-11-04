@@ -3,15 +3,12 @@ import argparse
 import json
 import sys
 
-import numpy as np
 import torch
 import tqdm
 import pandas as pd
-from PySide2.QtWidgets import QApplication, QWidget, QVBoxLayout, QCheckBox, QPushButton, QGroupBox, QHBoxLayout
+from PySide2.QtWidgets import QApplication
 
 import manager_folds
-import manager_models
-import model_unet
 import model_attention_unet
 import model_event_unet
 import config
@@ -21,7 +18,7 @@ import inference_regression_statistics_visualization
 
 def load_all_events():
     all_events = {}
-    events_df = pd.read_csv("data/train_events.csv")
+    events_df = pd.read_csv("./data/train_events.csv")
     events_df = events_df.dropna()
 
     for series_id in os.listdir("data_naive"):
@@ -137,7 +134,7 @@ def obtain_statistics(model_path, entry, regression_width, is_regression=True, i
 
 
 if __name__ == "__main__":
-    FOLDER = "inference_regression_statistics"
+    FOLDER = "./regression_statistics/generated_statistics"
     if not os.path.isdir(FOLDER):
         os.mkdir(FOLDER)
 
@@ -163,7 +160,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # load options for statistics computation
-    with open("inference_regression_stats_options.json", "r") as f:
+    with open("./regression_statistics/inference_regression_stats_options.json", "r") as f:
         options = json.load(f)
 
     # initialize gpu
