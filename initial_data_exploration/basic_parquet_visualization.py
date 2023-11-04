@@ -71,8 +71,6 @@ class DataFrameViewer(QTableView):
         self.setModel(model)
 
 if __name__ == "__main__":
-    os.chdir(os.path.join(os.getcwd(), ".."))
-
     app = QApplication(sys.argv)
     dfviewer = DataFrameViewer()
     dfviewer.show_df()
