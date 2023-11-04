@@ -11,6 +11,7 @@ import tqdm
 
 import convert_to_interval_events
 import inference_regression_preds
+import inference_confidence_preds
 import kernel_utils
 
 def generate_kernel_preds(preds_array: np.ndarray):
@@ -47,12 +48,15 @@ class MatplotlibWidget(QWidget):
         self.axis.plot(x, y2, label="enmo")
         #self.axis.plot(x, extras["onset"] / 100.0, label="onset")
         #self.axis.plot(x, extras["wakeup"] / 100.0, label="wakeup")
-        self.axis.plot(x, extras["onset_kernel"], label="onset_kernel")
-        self.axis.plot(x, extras["wakeup_kernel"], label="wakeup_kernel")
+        #self.axis.plot(x, extras["onset_kernel"], label="onset_kernel")
+        #self.axis.plot(x, extras["wakeup_kernel"], label="wakeup_kernel")
+        self.axis.plot(x, extras["onset_conf"] * 10.0, label="onset_conf") # easier viewing
+        self.axis.plot(x, extras["wakeup_conf"] * 10.0, label="wakeup_conf")
 
         for event_time, event_type in events:
-            color = "blue" if event_type == 1 else "red"
-            self.axis.axvline(pd.to_datetime(event_time), color=color, alpha=0.5, linestyle="--")
+            color = "blue" if event_type in [1, 3, 4] else "red"
+            linestyle = "--" if event_type in [1, 2] else ":"
+            self.axis.axvline(pd.to_datetime(event_time), color=color, alpha=0.5, linestyle=linestyle)
 
         self.axis.set_title(title)
         self.axis.legend()
@@ -62,10 +66,11 @@ class MainWidget(QWidget):
 
     preloaded_intervals: list
 
-    def __init__(self, intervals_all_info):
+    def __init__(self):
         super(MainWidget, self).__init__(None)
         self.preloaded_intervals = None
-        self.intervals_all_info = intervals_all_info
+        self.events = pd.read_csv("data/train_events.csv")
+        self.events = self.events.dropna()
 
         self.setWindowTitle("Visualization of time series intervals and events")
         self.resize(1280, 720)
@@ -119,22 +124,42 @@ class MainWidget(QWidget):
         if self.preloaded_intervals is None:
             self.preloaded_intervals = []
         series_id = item.text()
+        series_events = self.events.loc[self.events["series_id"] == series_id]
         self.preloaded_intervals.clear()
 
         anglez, enmo, timestamp, extras = load_file(series_id)
 
-        # load every interval (night)
-        all_night_infos = self.intervals_all_info[series_id]
-        for night_info in all_night_infos:
-            start = night_info["start"]
-            end = night_info["end"]
-            interval_events = night_info["events"]
+        total_length = len(anglez)
+        stride = total_length // (total_length // 2160)
+        print(stride)
+
+        # load every interval into memory
+        k = 0
+        while k + 17280 <= total_length:
+            start = k
+            end = k + 17280
+            if total_length - (k + 17280) < stride:
+                end = total_length
+            interval_events = series_events.loc[(series_events["step"] >= start) & (series_events["step"] < end)]
 
             # load all the events into the interval
             events = []
-            for event in interval_events:
-                events.append((timestamp.iloc[event["onset"]], 1))
-                events.append((timestamp.iloc[event["wakeup"]], 2))
+            for j in range(len(interval_events)):
+                event = interval_events.iloc[j]
+                assert event["event"] in ["onset", "wakeup"]
+                step = int(event["step"])
+                if event["event"] == "onset":
+                    events.append((timestamp.iloc[step], 1))
+                    if step - 30 * 12 >= start:
+                        events.append((timestamp.iloc[step - 30 * 12], 3))
+                    if step + 30 * 12 < end:
+                        events.append((timestamp.iloc[step + 30 * 12], 4))
+                else:
+                    events.append((timestamp.iloc[step], 2))
+                    if step - 30 * 12 >= start:
+                        events.append((timestamp.iloc[step - 30 * 12], 5))
+                    if step + 30 * 12 < end:
+                        events.append((timestamp.iloc[step + 30 * 12], 6))
 
             interval_anglez = anglez.iloc[start:end]
             interval_enmo = enmo.iloc[start:end]
@@ -144,6 +169,9 @@ class MainWidget(QWidget):
                 local_extras[key] = value[start:end]
 
             self.preloaded_intervals.append((series_id, start, end, interval_anglez, interval_enmo, local_extras, interval_timestamp, events))
+
+            k += stride
+
         self.selection_slider.setValue(0)
         self.selection_slider.setMaximum(len(self.preloaded_intervals) - 1)
 
@@ -190,8 +218,12 @@ def load_file(item):
     for folder in folders:
         extras[folder] = np.load(os.path.join(inference_regression_preds.FOLDER, folder, item + ".npy"))
 
-    for folder in folders:
-        extras[folder + "_kernel"] = generate_kernel_preds(extras[folder])
+    """for folder in folders:
+        extras[folder + "_kernel"] = generate_kernel_preds(extras[folder])"""
+
+    folders2 = os.listdir(inference_confidence_preds.FOLDER)
+    for folder in folders2:
+        extras[folder + "_conf"] = np.load(os.path.join(inference_confidence_preds.FOLDER, folder, item + ".npy"))
 
     return df["anglez"], df["enmo"], df["timestamp"], extras
 
@@ -214,7 +246,6 @@ def load_extra_events(series_id: str, start, end):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    intervals_all_info = convert_to_interval_events.load_all_segmentations()
-    main_widget = MainWidget(intervals_all_info)
+    main_widget = MainWidget()
     main_widget.show()
     sys.exit(app.exec_())

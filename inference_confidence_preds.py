@@ -48,6 +48,11 @@ def inference(model_dir, validation_entries, all_data,
 
             # load the batch
             accel_data = all_data[series_id]["accel"]
+            if use_anglez_only:
+                accel_data = accel_data[0:1, :]
+            elif use_enmo_only:
+                accel_data = accel_data[1:2, :]
+
             preds = model_event_unet.event_confidence_inference(model=model, time_series=accel_data,
                                                                 batch_size=batch_size,
                                                                 prediction_length=prediction_length,
