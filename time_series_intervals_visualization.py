@@ -9,15 +9,9 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.figure import Figure
 import tqdm
 
-import inference_regression_preds
+#import inference_regression_preds
 import inference_confidence_preds
 import kernel_utils
-
-def generate_kernel_preds(preds_array: np.ndarray):
-    kernel_preds_array = np.zeros_like(preds_array)
-    for k in tqdm.tqdm(range(len(preds_array))):
-        kernel_utils.add_kernel(kernel_preds_array, k - float(preds_array[k]))
-    return kernel_preds_array
 
 
 class MatplotlibWidget(QWidget):
@@ -213,11 +207,11 @@ def load_file(item):
     filename = "./individual_train_series/" + item + ".parquet"
     df = pd.read_parquet(filename)
     extras = {}
-    folders = os.listdir(inference_regression_preds.FOLDER)
+    """folders = os.listdir(inference_regression_preds.FOLDER)
     for folder in folders:
         extras[folder] = np.load(os.path.join(inference_regression_preds.FOLDER, folder, item + ".npy"))
 
-    """for folder in folders:
+    for folder in folders:
         extras[folder + "_kernel"] = generate_kernel_preds(extras[folder])"""
 
     folders2 = os.listdir(inference_confidence_preds.FOLDER)
