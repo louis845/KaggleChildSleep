@@ -1,1 +1,0 @@
-python training_clean_data.py --device 0 --memory_limit 0.495 --model model_pseudo_fold2 --train_data fold_2_train --val_data fold_2_val --num_extra_steps 9 --hidden_channels 8 --hidden_blocks 4 6 8 8 --squeeze_excitation --use_batch_norm --dropout 0.75 --optimizer sgd
