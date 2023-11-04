@@ -12,8 +12,6 @@ import kernel_utils
 import config
 import convert_to_npy_naive
 
-from joblib import Parallel, delayed
-
 FOLDER = "./inference_regression_statistics/regression_labels"
 
 def inference(model_dir, out_folder, validation_entries, target_multiple):
@@ -48,40 +46,32 @@ def inference(model_dir, out_folder, validation_entries, target_multiple):
                     accel_data = accel_data[1:2, :]
 
                 # get predictions now
-                preds = model_event_unet.event_regression_inference(model, accel_data, target_multiple=target_multiple)
+                preds = model_event_unet.event_regression_inference(model, accel_data, target_multiple=target_multiple, return_torch_tensor=True)
 
                 # save to folder
-                np.save(os.path.join(FOLDERS_DICT["regression"], "{}_onset.npy".format(series_id)), preds[0, :])
-                np.save(os.path.join(FOLDERS_DICT["regression"], "{}_wakeup.npy".format(series_id)), preds[1, :])
+                np.save(os.path.join(FOLDERS_DICT["regression"], "{}_onset.npy".format(series_id)), preds[0, :].cpu().numpy())
+                np.save(os.path.join(FOLDERS_DICT["regression"], "{}_wakeup.npy".format(series_id)), preds[1, :].cpu().numpy())
 
                 # generate kernel predictions
-                onset_gaussian_preds = Parallel(n_jobs=-1)(delayed(kernel_utils.generate_kernel_preds_cpu)
-                                                           (preds[0, :], kernel_generating_function=kernel_utils.add_kernel, kernel_radius=ker_val) for ker_val in ker_vals)
-                for i, ker_val in enumerate(ker_vals):
-                    np.save(os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id)), onset_gaussian_preds[i])
-                del onset_gaussian_preds[:]
-                del onset_gaussian_preds
+                for ker_val in ker_vals:
+                    onset_gaussian_pred = kernel_utils.generate_kernel_preds_gpu(preds[0, :], device=preds.device,
+                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds, kernel_radius=ker_val)
+                    np.save(os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id)), onset_gaussian_pred)
 
-                onset_huber_preds = Parallel(n_jobs=-1)(delayed(kernel_utils.generate_kernel_preds_cpu)
-                                                              (preds[0, :], kernel_generating_function=kernel_utils.add_kernel_huber, kernel_radius=ker_val) for ker_val in ker_vals)
-                for i, ker_val in enumerate(ker_vals):
-                    np.save(os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id)), onset_huber_preds[i])
-                del onset_huber_preds[:]
-                del onset_huber_preds
+                for ker_val in ker_vals:
+                    onset_huber_pred = kernel_utils.generate_kernel_preds_gpu(preds[0, :], device=preds.device,
+                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds_huber, kernel_radius=ker_val)
+                    np.save(os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id)), onset_huber_pred)
 
-                wakeup_gaussian_preds = Parallel(n_jobs=-1)(delayed(kernel_utils.generate_kernel_preds_cpu)
-                                                            (preds[1, :], kernel_generating_function=kernel_utils.add_kernel, kernel_radius=ker_val) for ker_val in ker_vals)
-                for i, ker_val in enumerate(ker_vals):
-                    np.save(os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_wakeup.npy".format(series_id)), wakeup_gaussian_preds[i])
-                del wakeup_gaussian_preds[:]
-                del wakeup_gaussian_preds
+                for ker_val in ker_vals:
+                    wakeup_gaussian_pred = kernel_utils.generate_kernel_preds_gpu(preds[1, :], device=preds.device,
+                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds, kernel_radius=ker_val)
+                    np.save(os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_wakeup.npy".format(series_id)), wakeup_gaussian_pred)
 
-                wakeup_huber_preds = Parallel(n_jobs=-1)(delayed(kernel_utils.generate_kernel_preds_cpu)
-                                                              (preds[1, :], kernel_generating_function=kernel_utils.add_kernel_huber, kernel_radius=ker_val) for ker_val in ker_vals)
-                for i, ker_val in enumerate(ker_vals):
-                    np.save(os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_wakeup.npy".format(series_id)), wakeup_huber_preds[i])
-                del wakeup_huber_preds[:]
-                del wakeup_huber_preds
+                for ker_val in ker_vals:
+                    wakeup_huber_pred = kernel_utils.generate_kernel_preds_gpu(preds[1, :], device=preds.device,
+                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds_huber, kernel_radius=ker_val)
+                    np.save(os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_wakeup.npy".format(series_id)), wakeup_huber_pred)
 
                 pbar.update(1)
 

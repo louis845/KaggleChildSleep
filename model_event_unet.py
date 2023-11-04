@@ -247,7 +247,7 @@ def index_array(arr: np.ndarray, low: int, high: int):
     elif low < 0 and high > arr.shape[1]:
         return np.concatenate([np.zeros((arr.shape[0], -low), dtype=arr.dtype), arr, np.zeros((arr.shape[0], high - arr.shape[1]), dtype=arr.dtype)], axis=1)
 
-def event_regression_inference(model: EventRegressorUnet, time_series: np.ndarray, target_multiple: int=24):
+def event_regression_inference(model: EventRegressorUnet, time_series: np.ndarray, target_multiple: int=24, return_torch_tensor=False):
     # target multiple equal to 3 * (2 ** (len(blocks) - 2)) in general
     assert len(time_series.shape) == 2, "time_series must be a 2D array"
 
@@ -263,8 +263,11 @@ def event_regression_inference(model: EventRegressorUnet, time_series: np.ndarra
     # get predictions now
     preds = model(time_series_batch, ret_type="deep")
     preds = preds.squeeze(0)
-    preds = preds.cpu().numpy()
-    preds = np.pad(preds, ((0, 0), (start, end_contraction)), mode="constant")
+    if return_torch_tensor:
+        preds = torch.nn.functional.pad(preds, (start, end_contraction), mode="constant", value=0)
+    else:
+        preds = preds.cpu().numpy()
+        preds = np.pad(preds, ((0, 0), (start, end_contraction)), mode="constant")
 
     return preds
 

@@ -15,7 +15,7 @@ def gaussian_kernel(size: int, sigma: float):
 def add_kernel(probas_array: np.ndarray, location: float, kernel_radius: int=12):
     location_round = int(np.round(location))
     x = np.arange(start=-kernel_radius * 5, stop=kernel_radius * 5 + 1, step=1) + (location_round - location)
-    kernel = np.exp(-(x ** 2) / (2 * kernel_radius ** 2)) # unnormalized gaussian kernel (1 at center)
+    kernel = np.exp(-(x ** 2) / (2 * kernel_radius ** 2)) / (np.sqrt(2 * np.pi) * kernel_radius) # gaussian kernel
 
     # handle out of bounds
     paste_min, paste_max = location_round - kernel_radius * 5, location_round + kernel_radius * 5 + 1
@@ -34,7 +34,7 @@ def add_kernel_huber(probas_array: np.ndarray, location: float, kernel_radius: i
     k = (kernel_radius + 0.0) / np.sqrt(2)
     location_round = int(np.round(location))
     x = np.arange(start=-kernel_radius * 5, stop=kernel_radius * 5 + 1, step=1) + (location_round - location)
-    kernel = np.exp(-np.abs(x) / k) # unnormalized L1 kernel (1 at center)
+    kernel = np.exp(-np.abs(x) / k) / (2 * k) # L1 kernel
 
     # handle out of bounds
     paste_min, paste_max = location_round - kernel_radius * 5, location_round + kernel_radius * 5 + 1
@@ -72,3 +72,28 @@ def generate_kernel_preds_huber(preds_length: int, locations: torch.Tensor, kern
     probas_array = kernels.sum(dim=0)
 
     return probas_array
+
+def generate_kernel_preds_gpu(preds_array, device: torch.device, kernel_generating_function: typing.Callable=generate_kernel_preds,
+                              kernel_radius: int=12, max_clip=8192, batch_size=8192):
+    assert isinstance(preds_array, np.ndarray) or isinstance(preds_array, torch.Tensor), "preds_array must be a numpy array or a torch tensor"
+    if isinstance(preds_array, torch.Tensor):
+        device = preds_array.device
+
+    with torch.no_grad():
+        kernel_preds_array = np.zeros_like(preds_array)
+        if isinstance(preds_array, np.ndarray):
+            preds_clip = torch.clip(torch.tensor(preds_array, dtype=torch.float32, device=device), min=-max_clip, max=max_clip)
+        else:
+            preds_clip = torch.clip(preds_array, min=-max_clip, max=max_clip)
+
+        pred_min = 0
+        while pred_min < len(preds_array):
+            pred_max = min(pred_min + batch_size, len(preds_array))
+
+            out_min, out_max = max(0, pred_min - max_clip), min(len(preds_array), pred_max + max_clip)
+            local_preds_locations = torch.arange(pred_min - out_min, pred_max - out_min, device=device, dtype=torch.float32) - preds_clip[pred_min:pred_max] # locations within pred_min:pred_max, shifted relative to out_min:out_max
+            kernel_preds_array[out_min:out_max] += kernel_generating_function(out_max - out_min, local_preds_locations, kernel_radius=kernel_radius).cpu().numpy()
+
+            pred_min = pred_max
+
+        return kernel_preds_array
