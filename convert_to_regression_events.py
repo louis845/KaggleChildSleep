@@ -1,12 +1,5 @@
-import os
-import json
-
 import numpy as np
 import pandas as pd
-import tqdm
-
-import convert_to_h5py_naive
-import convert_to_good_events
 
 def create_regression_range(mask: np.ndarray, values: np.ndarray, event_type: int, location: int, window_radius: int):
     assert mask.shape == values.shape, "mask and values must have the same shape"

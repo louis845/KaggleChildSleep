@@ -15,7 +15,7 @@ import model_unet
 import model_attention_unet
 import model_event_unet
 import config
-import convert_to_h5py_naive
+import convert_to_npy_naive
 import training_resnet_regression
 import inference_regression_statistics_visualization
 
@@ -181,7 +181,7 @@ if __name__ == "__main__":
     assert not (use_anglez_only and use_enmo_only), "Cannot use both anglez only and enmo only."
 
     # load all data
-    all_data = convert_to_h5py_naive.load_all_data_into_dict()
+    all_data = convert_to_npy_naive.load_all_data_into_dict()
     all_events = load_all_events()
     target_multiple = 3 * (2 ** (len(hidden_blocks) - 2))
 

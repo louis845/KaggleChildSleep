@@ -9,7 +9,7 @@ import tqdm
 import manager_folds
 import model_event_unet
 import config
-import convert_to_h5py_naive
+import convert_to_npy_naive
 
 FOLDER = "regression_labels"
 
@@ -66,7 +66,7 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load(os.path.join(model_dir, "model.pt")))
 
     # load data
-    all_data = convert_to_h5py_naive.load_all_data_into_dict()
+    all_data = convert_to_npy_naive.load_all_data_into_dict()
     target_multiple = 3 * (2 ** (blocks_length - 2))
 
     # inference

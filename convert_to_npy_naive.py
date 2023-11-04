@@ -1,11 +1,9 @@
-# you should run extract_individual_series.py before this
+# "Naive" raw preprocessing+conversion into npy files for faster loading. You should run extract_individual_series.py before this
 import os
 
 import tqdm
-import h5py
 import pandas as pd
 import numpy as np
-import pyarrow.parquet as pq
 
 FOLDER = "data_naive"
 
@@ -70,4 +68,3 @@ if __name__ == "__main__":
         np.save(os.path.join(series_folder, "secs.npy"), secs)
         np.save(os.path.join(series_folder, "mins.npy"), mins)
         np.save(os.path.join(series_folder, "hours.npy"), hours)
-

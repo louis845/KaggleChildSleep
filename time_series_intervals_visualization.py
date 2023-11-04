@@ -9,7 +9,6 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.figure import Figure
 import tqdm
 
-import convert_to_interval_events
 import inference_regression_preds
 import inference_confidence_preds
 import kernel_utils

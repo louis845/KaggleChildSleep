@@ -9,7 +9,7 @@ import tqdm
 import manager_folds
 import model_event_unet
 import config
-import convert_to_h5py_naive
+import convert_to_npy_naive
 
 FOLDER = "confidence_labels"
 
@@ -139,7 +139,7 @@ if __name__ == "__main__":
     assert not (use_anglez_only and use_enmo_only), "Cannot use both anglez only and enmo only."
 
     # load data
-    all_data = convert_to_h5py_naive.load_all_data_into_dict()
+    all_data = convert_to_npy_naive.load_all_data_into_dict()
 
     # inference
     all_preds = inference(model_dir, validation_entries, all_data,

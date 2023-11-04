@@ -10,7 +10,7 @@ import manager_folds
 import manager_models
 import model_unet
 import config
-import convert_to_h5py_naive
+import convert_to_npy_naive
 
 if __name__ == "__main__":
     FOLDER = "pseudo_labels"
@@ -66,7 +66,7 @@ if __name__ == "__main__":
         model.load_state_dict(torch.load(os.path.join(previous_model_path, "model.pt")))
 
     # load data
-    all_data = convert_to_h5py_naive.load_all_data_into_dict()
+    all_data = convert_to_npy_naive.load_all_data_into_dict()
 
     # inference
     output_folder = os.path.join(FOLDER, args.load_model + "_" + args.data_to_infer)

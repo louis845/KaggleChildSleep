@@ -1,12 +1,7 @@
-import os
-import json
-
 import numpy as np
 import pandas as pd
-import tqdm
 
-import convert_to_h5py_naive
-import convert_to_good_events
+import bad_series_list
 import transform_elastic_deformation
 
 def create_regression_range(mask: np.ndarray, values: np.ndarray, event_type: int, location: int, window_radius: int):
@@ -35,7 +30,7 @@ def get_first_day_step(naive_all_data, series_id):
 
 def get_truncated_series_length(naive_all_data, series_id, events):
     series_max = len(naive_all_data[series_id]["hours"])
-    if series_id in convert_to_good_events.bad_segmentations_tail:
+    if series_id in bad_series_list.bad_segmentations_tail:
         series_events = events.loc[events["series_id"] == series_id]
         series_max = min(series_events.iloc[-1]["step"] + 8640, series_max)
     return series_max
@@ -217,113 +212,3 @@ class IntervalEventsSampler:
 
     def entries_remaining(self):
         return len(self.all_segmentations_list) - self.sample_low
-
-class RecurrentIntervalEventsSampler:
-    pass
-
-
-def load_all_segmentations(truncated=True) -> dict:
-    if truncated:
-        with open(os.path.join(FOLDER, "series_segmentations_trunc.json"), "r") as f:
-            return json.load(f)
-    else:
-        with open(os.path.join(FOLDER, "series_segmentations.json"), "r") as f:
-            return json.load(f)
-
-
-FOLDER = "data_interval_events"
-
-if __name__ == "__main__":
-    naive_all_data = convert_to_h5py_naive.load_all_data_into_dict()
-    series_ids = list(naive_all_data.keys())
-
-    events = pd.read_csv("data/train_events.csv")
-    events = events.dropna()
-
-    series_segmentations = {}
-
-    for series_id in tqdm.tqdm(series_ids):
-        series_events = events.loc[events["series_id"] == series_id]
-        series_segmentations[series_id] = []
-
-        assert series_id in naive_all_data, "series_id {} not in naive_all_data".format(series_id)
-        first_night = get_first_day_step(naive_all_data, series_id)
-        first_night_end = first_night + 17280
-
-        while first_night_end < len(naive_all_data[series_id]["hours"]):
-            night_info_dict = {
-                "series_id": series_id,
-                "start": int(first_night),
-                "end": int(first_night_end),
-                "events": []
-            }
-            events_contained = series_events.loc[
-                ((series_events["step"] >= first_night) & (series_events["step"] < first_night_end))]
-            if len(events_contained) > 0:
-                events_contained = events_contained.sort_values(by=["step"])
-                for k in events_contained["night"].unique():
-                    evts = events_contained.loc[events_contained["night"] == k]
-                    if len(evts) == 2:
-                        assert (int(evts.iloc[0]["step"]) - int(first_night)) % 12 == 0, "All events should be in terms of nearest minute"
-                        assert (int(evts.iloc[1]["step"]) - int(first_night)) % 12 == 0, "All events should be in terms of nearest minute"
-                        night_info_dict["events"].append({
-                            "onset": int(evts.iloc[0]["step"]),
-                            "wakeup": int(evts.iloc[1]["step"])
-                        })
-
-            series_segmentations[series_id].append(night_info_dict)
-            first_night += 4320
-            first_night_end = first_night + 17280
-
-
-    series_segmentations_trunc = {}
-    num_bad = 0
-    for series_id in tqdm.tqdm(series_ids):
-        series_events = events.loc[events["series_id"] == series_id]
-        series_segmentations_trunc[series_id] = []
-
-        assert series_id in naive_all_data, "series_id {} not in naive_all_data".format(series_id)
-        first_night = get_first_day_step(naive_all_data, series_id)
-        first_night_end = first_night + 17280
-
-        series_max = len(naive_all_data[series_id]["hours"])
-        if series_id in convert_to_good_events.bad_segmentations_tail:
-            num_bad += 1
-            series_max = min(series_events.iloc[-1]["step"] + 8640, series_max)
-        while first_night_end < series_max:
-            night_info_dict = {
-                "series_id": series_id,
-                "start": int(first_night),
-                "end": int(first_night_end),
-                "events": []
-            }
-            events_contained = series_events.loc[
-                ((series_events["step"] >= first_night) & (series_events["step"] < first_night_end))]
-            if len(events_contained) > 0:
-                events_contained = events_contained.sort_values(by=["step"])
-                for k in events_contained["night"].unique():
-                    evts = events_contained.loc[events_contained["night"] == k]
-                    if len(evts) == 2:
-                        assert (int(evts.iloc[0]["step"]) - int(
-                            first_night)) % 12 == 0, "All events should be in terms of nearest minute"
-                        assert (int(evts.iloc[1]["step"]) - int(
-                            first_night)) % 12 == 0, "All events should be in terms of nearest minute"
-                        night_info_dict["events"].append({
-                            "onset": int(evts.iloc[0]["step"]),
-                            "wakeup": int(evts.iloc[1]["step"])
-                        })
-
-            series_segmentations_trunc[series_id].append(night_info_dict)
-            first_night += 4320
-            first_night_end = first_night + 17280
-    print("num_bad: {}".format(num_bad))
-
-    # save series_segmentations to disk
-    if not os.path.exists(FOLDER):
-        os.mkdir(FOLDER)
-
-    with open(os.path.join(FOLDER, "series_segmentations.json"), "w") as f:
-        json.dump(series_segmentations, f, indent=4)
-
-    with open(os.path.join(FOLDER, "series_segmentations_trunc.json"), "w") as f:
-        json.dump(series_segmentations_trunc, f, indent=4)

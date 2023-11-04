@@ -19,7 +19,7 @@ import manager_models
 import metrics
 import metrics_iou
 import logging_memory_utils
-import convert_to_h5py_naive
+import convert_to_npy_naive
 import convert_to_regression_events
 import model_event_unet
 import model_unet
@@ -428,7 +428,7 @@ def print_history(metrics_history):
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn")
 
-    all_data = convert_to_h5py_naive.load_all_data_into_dict()
+    all_data = convert_to_npy_naive.load_all_data_into_dict()
 
     parser = argparse.ArgumentParser(description="Train a sleeping prediction model with only clean data.")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for. Default 50.")

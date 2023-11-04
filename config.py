@@ -1,3 +1,5 @@
+# Arguments for which GPU to use, in case of machines with multiple GPUs
+
 import argparse
 import torch
 
