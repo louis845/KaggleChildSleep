@@ -1,9 +1,8 @@
 import pandas as pd
-import tqdm
 import matplotlib.pyplot as plt
 
 if __name__ == "__main__":
-    events_df = pd.read_csv("data/train_events.csv")
+    events_df = pd.read_csv("../data/train_events.csv")
     events_df = events_df.dropna()
 
     # check time consistency

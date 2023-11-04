@@ -1,4 +1,4 @@
-# "Naive" raw preprocessing+conversion into npy files for faster loading. You should run extract_individual_series.py before this
+# "Naive" raw preprocessing+conversion into npy files for faster loading. You should run convert_to_individual_series.py before this
 import os
 
 import tqdm
@@ -26,7 +26,7 @@ def load_all_data_into_dict():
 
 if __name__ == "__main__":
     # Ensure the input directory exists
-    assert os.path.exists("individual_train_series"), "You should run extract_individual_series.py before this"
+    assert os.path.exists("individual_train_series"), "You should run convert_to_individual_series.py before this"
 
     # Load the events
     events = pd.read_csv("data/train_events.csv")

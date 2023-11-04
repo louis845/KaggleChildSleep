@@ -1,7 +1,7 @@
 import pandas as pd
 
 if __name__ == "__main__":
-    events = pd.read_csv("data/train_events.csv")
+    events = pd.read_csv("../data/train_events.csv")
 
     onset_wakeup_inconsistencies = []
 

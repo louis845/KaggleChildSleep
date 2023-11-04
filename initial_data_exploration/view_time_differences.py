@@ -13,8 +13,8 @@ def analyze_parquet_file(parquet_path):
     return diffs
 
 all_time_diffs = set()
-for file in os.listdir("individual_train_series"):
-    time_diffs = analyze_parquet_file(os.path.join("individual_train_series", file))
+for file in os.listdir("../individual_train_series"):
+    time_diffs = analyze_parquet_file(os.path.join("../individual_train_series", file))
     all_time_diffs.update(set(time_diffs.unique()))
 
 print(all_time_diffs)

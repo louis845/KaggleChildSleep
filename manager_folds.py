@@ -43,8 +43,8 @@ def parse_args(args: argparse.Namespace) -> tuple[list[str], list[str], str, str
 if __name__ == "__main__":
     from sklearn.model_selection import KFold
 
-    # you should run extract_individual_series.py before this
-    assert os.path.isdir("individual_train_series"), "You should run extract_individual_series.py before this"
+    # you should run convert_to_individual_series.py before this
+    assert os.path.isdir("individual_train_series"), "You should run convert_to_individual_series.py before this"
 
     all_series = [file.split(".")[0] for file in os.listdir("individual_train_series")]
 

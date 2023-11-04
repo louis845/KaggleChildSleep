@@ -1,4 +1,5 @@
 import sys
+import os
 from PySide2.QtWidgets import QApplication, QTableView, QFileDialog
 from PySide2.QtCore import Qt, QAbstractTableModel
 import pandas as pd
@@ -64,12 +65,14 @@ class DataFrameViewer(QTableView):
         self.setSortingEnabled(True)
 
     def show_df(self):
-        filename = QFileDialog.getOpenFileName(self, "Open File", "./")[0]
+        filename = QFileDialog.getOpenFileName(self, "Open File", "../")[0]
         df = pd.read_parquet(filename)
         model = PandasModel(df)
         self.setModel(model)
 
 if __name__ == "__main__":
+    os.chdir(os.path.join(os.getcwd(), ".."))
+
     app = QApplication(sys.argv)
     dfviewer = DataFrameViewer()
     dfviewer.show_df()

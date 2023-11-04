@@ -9,16 +9,16 @@ import seaborn as sns
 if __name__ == "__main__":
     lengths = []
 
-    for file in tqdm.tqdm(os.listdir("individual_train_series")):
+    for file in tqdm.tqdm(os.listdir("../individual_train_series")):
         series_id = file.split(".")[0]
-        series_info = pd.read_parquet(os.path.join("individual_train_series", file))
+        series_info = pd.read_parquet(os.path.join("../individual_train_series", file))
         lengths.append(len(series_info))
 
     print("Max length: {}".format(np.max(lengths)))
     print("Min length: {}".format(np.min(lengths)))
     print("Mean length: {}".format(np.mean(lengths)))
 
-    all_series_info = pd.read_parquet(os.path.join("data", "train_series.parquet"))
+    all_series_info = pd.read_parquet(os.path.join("../data", "train_series.parquet"))
     # compute the mean and variance of the anglez and enmo
     anglez_mean = all_series_info["anglez"].mean()
     anglez_std = all_series_info["anglez"].std()
