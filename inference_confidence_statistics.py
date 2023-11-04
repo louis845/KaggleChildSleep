@@ -14,7 +14,6 @@ import model_event_unet
 import config
 import convert_to_npy_naive
 import training_resnet_regression
-from regression_statistics import inference_regression_statistics_visualization
 
 
 def load_all_events():

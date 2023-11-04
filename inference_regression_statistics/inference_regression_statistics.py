@@ -134,7 +134,7 @@ def obtain_statistics(model_path, entry, regression_width, is_regression=True, i
 
 
 if __name__ == "__main__":
-    FOLDER = "./regression_statistics/generated_statistics"
+    FOLDER = "./inference_regression_statistics/generated_statistics"
     if not os.path.isdir(FOLDER):
         os.mkdir(FOLDER)
 
@@ -160,7 +160,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # load options for statistics computation
-    with open("./regression_statistics/inference_regression_stats_options.json", "r") as f:
+    with open("./inference_regression_statistics/inference_regression_stats_options.json", "r") as f:
         options = json.load(f)
 
     # initialize gpu
