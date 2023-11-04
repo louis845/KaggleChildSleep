@@ -55,22 +55,26 @@ def inference(model_dir, out_folder, validation_entries, target_multiple):
                 # generate kernel predictions
                 for ker_val in ker_vals:
                     onset_gaussian_pred = kernel_utils.generate_kernel_preds_gpu(preds[0, :], device=preds.device,
-                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds, kernel_radius=ker_val)
+                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds,
+                                                                                 kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
                     np.save(os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id)), onset_gaussian_pred)
 
                 for ker_val in ker_vals:
                     onset_huber_pred = kernel_utils.generate_kernel_preds_gpu(preds[0, :], device=preds.device,
-                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds_huber, kernel_radius=ker_val)
+                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds_huber,
+                                                                                 kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
                     np.save(os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id)), onset_huber_pred)
 
                 for ker_val in ker_vals:
                     wakeup_gaussian_pred = kernel_utils.generate_kernel_preds_gpu(preds[1, :], device=preds.device,
-                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds, kernel_radius=ker_val)
+                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds,
+                                                                                 kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
                     np.save(os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_wakeup.npy".format(series_id)), wakeup_gaussian_pred)
 
                 for ker_val in ker_vals:
                     wakeup_huber_pred = kernel_utils.generate_kernel_preds_gpu(preds[1, :], device=preds.device,
-                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds_huber, kernel_radius=ker_val)
+                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds_huber,
+                                                                                 kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
                     np.save(os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_wakeup.npy".format(series_id)), wakeup_huber_pred)
 
                 pbar.update(1)

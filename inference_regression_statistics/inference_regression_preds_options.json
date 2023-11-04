@@ -18,25 +18,5 @@
     "name": "Standard 5CV 300 Epochs",
     "models": ["regress_standard5cv_model_fold1_continue2", "regress_standard5cv_model_fold2_continue2", "regress_standard5cv_model_fold3_continue2", "regress_standard5cv_model_fold4_continue2", "regress_standard5cv_model_fold5_continue2"],
     "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"]
-  },
-  {
-    "name": "Standard (Huber Kernel)",
-    "models": ["regress_standard_model_fold1", "regress_standard_model_fold2", "regress_standard_model_fold3"],
-    "entries": ["fold_1_val", "fold_2_val", "fold_3_val"]
-  },
-  {
-    "name": "Standard 5CV (Huber Kernel)",
-    "models": ["regress_standard5cv_model_fold1", "regress_standard5cv_model_fold2", "regress_standard5cv_model_fold3", "regress_standard5cv_model_fold4", "regress_standard5cv_model_fold5"],
-    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"]
-  },
-  {
-    "name": "Standard 5CV 200 Epochs (Huber Kernel)",
-    "models": ["regress_standard5cv_model_fold1_continue", "regress_standard5cv_model_fold2_continue", "regress_standard5cv_model_fold3_continue", "regress_standard5cv_model_fold4_continue", "regress_standard5cv_model_fold5_continue"],
-    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"]
-  },
-  {
-    "name": "Standard 5CV 300 Epochs (Huber Kernel)",
-    "models": ["regress_standard5cv_model_fold1_continue2", "regress_standard5cv_model_fold2_continue2", "regress_standard5cv_model_fold3_continue2", "regress_standard5cv_model_fold4_continue2", "regress_standard5cv_model_fold5_continue2"],
-    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"]
   }
 ]

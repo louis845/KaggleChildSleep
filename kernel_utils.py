@@ -74,7 +74,7 @@ def generate_kernel_preds_huber(preds_length: int, locations: torch.Tensor, kern
     return probas_array
 
 def generate_kernel_preds_gpu(preds_array, device: torch.device, kernel_generating_function: typing.Callable=generate_kernel_preds,
-                              kernel_radius: int=12, max_clip=8192, batch_size=8192):
+                              kernel_radius: int=12, max_clip=2048, batch_size=8192):
     assert isinstance(preds_array, np.ndarray) or isinstance(preds_array, torch.Tensor), "preds_array must be a numpy array or a torch tensor"
     if isinstance(preds_array, torch.Tensor):
         device = preds_array.device
