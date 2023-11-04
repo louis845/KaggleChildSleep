@@ -82,16 +82,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("Inference script for models trained on regression events data")
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
-    manager_folds.add_argparse_arguments(parser)
     config.add_argparse_arguments(parser)
     args = parser.parse_args()
 
     # initialize gpu
     config.parse_args(args)
-
-    # get model directories
-    model_dir = os.path.join("models", args.load_model)
-    assert os.path.isdir(model_dir), "Model directory does not exist."
 
     # get data parameters
     use_anglez_only = args.use_anglez_only
@@ -118,6 +113,7 @@ if __name__ == "__main__":
         entries = option["entries"]
 
         assert len(models) == len(entries), "Number of models and entries must be the same."
+        assert all([os.path.isdir(os.path.join("models", model_name)) for model_name in models]), "All models must exist."
 
         name_formatted = name.replace(" ", "_").replace("(", "").replace(")", "")
         out_folder = os.path.join(FOLDER, name)
@@ -126,10 +122,10 @@ if __name__ == "__main__":
             with open(os.path.join(out_folder, "name.txt"), "w") as f:
                 f.write(name)
         for k in range(len(models)):
-            model = models[k]
+            model_name = models[k]
             entry = entries[k]
 
-            model_dir = os.path.join("models", model)
+            model_dir = os.path.join("models", model_name)
             validation_entries = manager_folds.load_dataset(entry)
 
             inference(model_dir, out_folder, validation_entries, target_multiple)
