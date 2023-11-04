@@ -80,10 +80,11 @@ def generate_kernel_preds_gpu(preds_array, device: torch.device, kernel_generati
         device = preds_array.device
 
     with torch.no_grad():
-        kernel_preds_array = np.zeros_like(preds_array)
         if isinstance(preds_array, np.ndarray):
+            kernel_preds_array = np.zeros_like(preds_array)
             preds_clip = torch.clip(torch.tensor(preds_array, dtype=torch.float32, device=device), min=-max_clip, max=max_clip)
         else:
+            kernel_preds_array = np.zeros(list(preds_array.shape), dtype=np.float32)
             preds_clip = torch.clip(preds_array, min=-max_clip, max=max_clip)
 
         pred_min = 0
