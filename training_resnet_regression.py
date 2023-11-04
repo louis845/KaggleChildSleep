@@ -141,7 +141,7 @@ def local_mean_ae_loss(preds: np.ndarray, event: int, width: int):
         [np.abs(np.mean(np.arange(low, high) - preds[low:high]) - event) for low, high in intervals]
     )
 
-def local_argmax_kernel_loss(preds: torch.Tensor, event: int, width: int):
+def local_argmax_kernel_loss(preds: torch.Tensor, event: int, width: int, use_L1_kernel=False):
     expanded_width = width * 3
     low = max(0, event - width)
     high = min(preds.shape[0], event + width + 1)
@@ -150,7 +150,10 @@ def local_argmax_kernel_loss(preds: torch.Tensor, event: int, width: int):
 
     locations = torch.arange(start=low_expanded, end=high_expanded, step=1, dtype=torch.float32, device=preds.device) - preds[low_expanded:high_expanded] - low
 
-    kernel_preds = kernel_utils.generate_kernel_preds(high - low, locations, kernel_radius=6).cpu().numpy()
+    if use_L1_kernel:
+        kernel_preds = kernel_utils.generate_kernel_preds_huber(high - low, locations, kernel_radius=6).cpu().numpy()
+    else:
+        kernel_preds = kernel_utils.generate_kernel_preds(high - low, locations, kernel_radius=6).cpu().numpy()
     assert kernel_preds.shape == (high - low,), "kernel_preds.shape = {}, high - low = {}".format(kernel_preds.shape, high - low)
 
     return np.abs(np.argmax(kernel_preds) + low - event)

@@ -36,3 +36,13 @@ def generate_kernel_preds(preds_length: int, locations: torch.Tensor, kernel_rad
     probas_array = kernels.sum(dim=0)
 
     return probas_array
+
+def generate_kernel_preds_huber(preds_length: int, locations: torch.Tensor, kernel_radius: int=12):
+    k = (kernel_radius + 0.0) / np.sqrt(2)
+
+    pred_locs = torch.arange(start=0, end=preds_length, step=1, dtype=torch.float32, device=locations.device)
+    x = locations.unsqueeze(-1) - pred_locs
+    kernels = torch.exp(-torch.abs(x) / k) / (2 * k)
+    probas_array = kernels.sum(dim=0)
+
+    return probas_array

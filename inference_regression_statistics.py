@@ -45,7 +45,7 @@ def load_all_events():
 
     return all_events
 
-def obtain_statistics(model_path, entry, regression_width, is_regression=True, is_standard=False):
+def obtain_statistics(model_path, entry, regression_width, is_regression=True, is_huber_regression=False, is_standard=False):
     in_channels = 1 if (use_anglez_only or use_enmo_only) else 2
     if is_standard:
         model = model_event_unet.EventRegressorUnet()
@@ -121,8 +121,8 @@ def obtain_statistics(model_path, entry, regression_width, is_regression=True, i
                         wakeup = event["wakeup"] - start
 
                         if is_regression:
-                            onset_argmax_ae = training_resnet_regression.local_argmax_kernel_loss(preds[i][0, :], onset, width)
-                            wakeup_argmax_ae = training_resnet_regression.local_argmax_kernel_loss(preds[i][1, :], wakeup, width)
+                            onset_argmax_ae = training_resnet_regression.local_argmax_kernel_loss(preds[i][0, :], onset, width, use_L1_kernel=is_huber_regression)
+                            wakeup_argmax_ae = training_resnet_regression.local_argmax_kernel_loss(preds[i][1, :], wakeup, width, use_L1_kernel=is_huber_regression)
                         else:
                             onset_argmax_ae = training_resnet_regression.local_argmax_loss(preds_np[i][0, :], onset, width)
                             wakeup_argmax_ae = training_resnet_regression.local_argmax_loss(preds_np[i][1, :], wakeup, width)
@@ -195,12 +195,15 @@ if __name__ == "__main__":
         models = options[k]["models"]
         entries = options[k]["entries"]
         is_regression = options[k]["is_regression"]
+        is_huber_regression = "is_huber_regression" in options[k]
         is_standard = options[k]["is_standard"]
         regression_width = options[k]["regression_width"]
         assert len(models) == len(entries), "Number of models and entries must be the same."
         assert isinstance(is_regression, bool), "is_regression must be a boolean."
         if is_standard:
             assert is_regression, "is_standard must be True only if is_regression is True."
+        if is_huber_regression:
+            assert is_regression, "is_huber_regression must be True only if is_regression is True."
 
         print("Computing statistics for {}".format(name))
         onset_small_aes, onset_mid_aes, onset_large_aes, wakeup_small_aes, wakeup_mid_aes, wakeup_large_aes = [], [], [], [], [], []
@@ -211,8 +214,8 @@ if __name__ == "__main__":
 
             result_onset_small_aes, result_onset_mid_aes, result_onset_large_aes,\
                 result_wakeup_small_aes, result_wakeup_mid_aes, result_wakeup_large_aes\
-                    = obtain_statistics(model_path, entry, is_regression=is_regression, is_standard=is_standard,
-                                        regression_width=regression_width)
+                    = obtain_statistics(model_path, entry, is_regression=is_regression, is_huber_regression=is_huber_regression,
+                                        is_standard=is_standard, regression_width=regression_width)
 
             onset_small_aes.extend(result_onset_small_aes)
             onset_mid_aes.extend(result_onset_mid_aes)
