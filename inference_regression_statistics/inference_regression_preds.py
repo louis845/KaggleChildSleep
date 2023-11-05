@@ -19,7 +19,7 @@ def inference(model_dir, out_folder, validation_entries, target_multiple):
     FOLDERS_DICT = {
         "regression": os.path.join(out_folder, "regression")
     }
-    ker_vals = [2,4,6,9,12,24,36,48,60,90,120,180,240,360]
+    ker_vals = [2, 4, 6, 9, 12, 24, 36, 48, 60, 90, 120, 180, 240, 360]
     for k in ker_vals:
         FOLDERS_DICT["gaussian_kernel{}".format(k)] = os.path.join(out_folder, "gaussian_kernel{}".format(k))
         FOLDERS_DICT["huber_kernel{}".format(k)] = os.path.join(out_folder, "huber_kernel{}".format(k))
@@ -46,36 +46,86 @@ def inference(model_dir, out_folder, validation_entries, target_multiple):
                     accel_data = accel_data[1:2, :]
 
                 # get predictions now
-                preds = model_event_unet.event_regression_inference(model, accel_data, target_multiple=target_multiple, return_torch_tensor=True)
+                if os.path.isfile(os.path.join(FOLDERS_DICT["regression"], "{}_onset.npy".format(series_id))):
+                    preds = torch.tensor(np.stack([
+                        np.load(os.path.join(FOLDERS_DICT["regression"], "{}_onset.npy".format(series_id))),
+                        np.load(os.path.join(FOLDERS_DICT["regression"], "{}_wakeup.npy".format(series_id)))
+                    ], axis=0), dtype=torch.float32, device=config.device)
+                else:
+                    preds = model_event_unet.event_regression_inference(model, accel_data, target_multiple=target_multiple, return_torch_tensor=True)
 
-                # save to folder
-                np.save(os.path.join(FOLDERS_DICT["regression"], "{}_onset.npy".format(series_id)), preds[0, :].cpu().numpy())
-                np.save(os.path.join(FOLDERS_DICT["regression"], "{}_wakeup.npy".format(series_id)), preds[1, :].cpu().numpy())
+                    # save to folder
+                    np.save(os.path.join(FOLDERS_DICT["regression"], "{}_onset.npy".format(series_id)), preds[0, :].cpu().numpy())
+                    np.save(os.path.join(FOLDERS_DICT["regression"], "{}_wakeup.npy".format(series_id)), preds[1, :].cpu().numpy())
 
                 # generate kernel predictions
                 for ker_val in ker_vals:
-                    onset_gaussian_pred = kernel_utils.generate_kernel_preds_gpu(preds[0, :], device=preds.device,
-                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds,
-                                                                                 kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
-                    np.save(os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id)), onset_gaussian_pred)
+                    npy_file = os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id))
+                    if os.path.isfile(npy_file):
+                        onset_gaussian_pred = np.load(npy_file)
+                    else:
+                        onset_gaussian_pred = kernel_utils.generate_kernel_preds_gpu(preds[0, :], device=preds.device,
+                                                                                     kernel_generating_function=kernel_utils.generate_kernel_preds,
+                                                                                     kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
+                        np.save(npy_file, onset_gaussian_pred)
+                    local_maximums = (onset_gaussian_pred[1:-1] > onset_gaussian_pred[0:-2]) & (onset_gaussian_pred[1:-1] > onset_gaussian_pred[2:])
+                    local_maximums = np.argwhere(local_maximums).flatten() + 1
+                    local_maximums = np.stack([
+                        local_maximums.astype(np.float32),
+                        onset_gaussian_pred[local_maximums].astype(np.float32)
+                    ], axis=0)
+                    np.save(os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_onset_locmax.npy".format(series_id)), local_maximums)
 
                 for ker_val in ker_vals:
-                    onset_huber_pred = kernel_utils.generate_kernel_preds_gpu(preds[0, :], device=preds.device,
-                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds_huber,
-                                                                                 kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
-                    np.save(os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id)), onset_huber_pred)
+                    npy_file = os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id))
+                    if os.path.isfile(npy_file):
+                        onset_huber_pred = np.load(npy_file)
+                    else:
+                        onset_huber_pred = kernel_utils.generate_kernel_preds_gpu(preds[0, :], device=preds.device,
+                                                                                     kernel_generating_function=kernel_utils.generate_kernel_preds_huber,
+                                                                                     kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
+                        np.save(npy_file, onset_huber_pred)
+                    local_maximums = (onset_huber_pred[1:-1] > onset_huber_pred[0:-2]) & (onset_huber_pred[1:-1] > onset_huber_pred[2:])
+                    local_maximums = np.argwhere(local_maximums).flatten() + 1
+                    local_maximums = np.stack([
+                        local_maximums.astype(np.float32),
+                        onset_huber_pred[local_maximums].astype(np.float32)
+                    ], axis=0)
+                    np.save(os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_onset_locmax.npy".format(series_id)), local_maximums)
 
                 for ker_val in ker_vals:
-                    wakeup_gaussian_pred = kernel_utils.generate_kernel_preds_gpu(preds[1, :], device=preds.device,
-                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds,
-                                                                                 kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
-                    np.save(os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_wakeup.npy".format(series_id)), wakeup_gaussian_pred)
+                    npy_file = os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_wakeup.npy".format(series_id))
+                    if os.path.isfile(npy_file):
+                        wakeup_gaussian_pred = np.load(npy_file)
+                    else:
+                        wakeup_gaussian_pred = kernel_utils.generate_kernel_preds_gpu(preds[1, :], device=preds.device,
+                                                                                     kernel_generating_function=kernel_utils.generate_kernel_preds,
+                                                                                     kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
+                        np.save(npy_file, wakeup_gaussian_pred)
+                    local_maximums = (wakeup_gaussian_pred[1:-1] > wakeup_gaussian_pred[0:-2]) & (wakeup_gaussian_pred[1:-1] > wakeup_gaussian_pred[2:])
+                    local_maximums = np.argwhere(local_maximums).flatten() + 1
+                    local_maximums = np.stack([
+                        local_maximums.astype(np.float32),
+                        wakeup_gaussian_pred[local_maximums].astype(np.float32)
+                    ], axis=0)
+                    np.save(os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_wakeup_locmax.npy".format(series_id)), local_maximums)
 
                 for ker_val in ker_vals:
-                    wakeup_huber_pred = kernel_utils.generate_kernel_preds_gpu(preds[1, :], device=preds.device,
-                                                                                 kernel_generating_function=kernel_utils.generate_kernel_preds_huber,
-                                                                                 kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
-                    np.save(os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_wakeup.npy".format(series_id)), wakeup_huber_pred)
+                    npy_file = os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_wakeup.npy".format(series_id))
+                    if os.path.isfile(npy_file):
+                        wakeup_huber_pred = np.load(npy_file)
+                    else:
+                        wakeup_huber_pred = kernel_utils.generate_kernel_preds_gpu(preds[1, :], device=preds.device,
+                                                                                     kernel_generating_function=kernel_utils.generate_kernel_preds_huber,
+                                                                                     kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
+                        np.save(npy_file, wakeup_huber_pred)
+                    local_maximums = (wakeup_huber_pred[1:-1] > wakeup_huber_pred[0:-2]) & (wakeup_huber_pred[1:-1] > wakeup_huber_pred[2:])
+                    local_maximums = np.argwhere(local_maximums).flatten() + 1
+                    local_maximums = np.stack([
+                        local_maximums.astype(np.float32),
+                        wakeup_huber_pred[local_maximums].astype(np.float32)
+                    ], axis=0)
+                    np.save(os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_wakeup_locmax.npy".format(series_id)), local_maximums)
 
                 pbar.update(1)
 
@@ -120,7 +170,7 @@ if __name__ == "__main__":
         assert all([os.path.isdir(os.path.join("models", model_name)) for model_name in models]), "All models must exist."
 
         name_formatted = name.replace(" ", "_").replace("(", "").replace(")", "")
-        out_folder = os.path.join(FOLDER, name)
+        out_folder = os.path.join(FOLDER, name_formatted)
         if not os.path.isdir(out_folder):
             os.mkdir(out_folder)
             with open(os.path.join(out_folder, "name.txt"), "w") as f:

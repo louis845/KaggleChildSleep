@@ -41,8 +41,8 @@ class MatplotlibWidget(QWidget):
         self.axis.plot(x, y2, label="enmo")
         #self.axis.plot(x, extras["onset"] / 100.0, label="onset")
         #self.axis.plot(x, extras["wakeup"] / 100.0, label="wakeup")
-        #self.axis.plot(x, extras["onset_kernel"], label="onset_kernel")
-        #self.axis.plot(x, extras["wakeup_kernel"], label="wakeup_kernel")
+        self.axis.plot(x, extras["onset_kernel"], label="onset_kernel")
+        self.axis.plot(x, extras["wakeup_kernel"], label="wakeup_kernel")
         self.axis.plot(x, extras["onset_conf"] * 10.0, label="onset_conf") # easier viewing
         self.axis.plot(x, extras["wakeup_conf"] * 10.0, label="wakeup_conf")
 
@@ -207,12 +207,8 @@ def load_file(item):
     filename = "./individual_train_series/" + item + ".parquet"
     df = pd.read_parquet(filename)
     extras = {}
-    """folders = os.listdir(inference_regression_preds.FOLDER)
-    for folder in folders:
-        extras[folder] = np.load(os.path.join(inference_regression_preds.FOLDER, folder, item + ".npy"))
-
-    for folder in folders:
-        extras[folder + "_kernel"] = generate_kernel_preds(extras[folder])"""
+    extras["onset_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV/huber_kernel360/{}_onset.npy".format(item))
+    extras["wakeup_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV/huber_kernel360/{}_wakeup.npy".format(item))
 
     folders2 = os.listdir(inference_confidence_preds.FOLDER)
     for folder in folders2:
