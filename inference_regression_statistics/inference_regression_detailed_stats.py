@@ -84,12 +84,22 @@ class MainWindow(QMainWindow):
 
         # Create a horizontal layout for the plots
         self.plot_layout = QHBoxLayout()
-        self.plot_layout.addWidget(self.canvas_minerr_distribution)
-        self.plot_layout.addWidget(self.toolbar_minerr_distribution)
-        self.plot_layout.addWidget(self.canvas_medianerr_distribution)
-        self.plot_layout.addWidget(self.toolbar_medianerr_distribution)
-        self.plot_layout.addWidget(self.canvas_gap_distribution)
-        self.plot_layout.addWidget(self.toolbar_gap_distribution)
+        self.minerr_widget = QWidget()
+        self.medianerr_widget = QWidget()
+        self.gap_widget = QWidget()
+        self.minerr_layout = QVBoxLayout(self.minerr_widget)
+        self.medianerr_layout = QVBoxLayout(self.medianerr_widget)
+        self.gap_layout = QVBoxLayout(self.gap_widget)
+        self.minerr_layout.addWidget(self.toolbar_minerr_distribution)
+        self.minerr_layout.addWidget(self.canvas_minerr_distribution)
+        self.medianerr_layout.addWidget(self.toolbar_medianerr_distribution)
+        self.medianerr_layout.addWidget(self.canvas_medianerr_distribution)
+        self.gap_layout.addWidget(self.toolbar_gap_distribution)
+        self.gap_layout.addWidget(self.canvas_gap_distribution)
+
+        self.plot_layout.addWidget(self.minerr_widget)
+        self.plot_layout.addWidget(self.medianerr_widget)
+        self.plot_layout.addWidget(self.gap_widget)
 
         # Add plot layout to the main layout
         self.main_layout.addLayout(self.plot_layout)
@@ -131,7 +141,7 @@ class MainWindow(QMainWindow):
         self.main_layout.addWidget(self.slider_cutoff_label)
 
         self.slider_cutoff = QSlider(Qt.Horizontal)
-        self.slider_cutoff.setMaximum(1000)
+        self.slider_cutoff.setMaximum(100)
         self.slider_cutoff.valueChanged.connect(self.update_cutoff_value)
         self.main_layout.addWidget(self.slider_cutoff)
 
@@ -154,16 +164,17 @@ class MainWindow(QMainWindow):
             event_locs = argmax_data[0, :].astype(np.int32)
             event_vals = argmax_data[1, :]
 
-            event_locs = event_locs[event_vals > self.slider_cutoff.value()] # restrict
+            event_locs = event_locs[event_vals > self.get_cutoff()] # restrict
 
-            gt_events = loaded_events[series_id_list[k]]["onsets" if self.checkbox_onset.isChecked() else "wakeup"]
+            gt_events = loaded_events[series_id_list[k]]["onsets" if self.checkbox_onset.isChecked() else "wakeups"]
 
-            if len(event_locs) == 0:
-                min_errs.extend([240] * len(gt_events))
-                median_errs.extend([240] * len(gt_events))
-            else:
-                min_errs.extend(compute_mins(event_locs, gt_events))
-                median_errs.extend(compute_medians(event_locs, gt_events))
+            if len(gt_events) > 0:
+                if len(event_locs) == 0:
+                    min_errs.extend([240] * len(gt_events))
+                    median_errs.extend([240] * len(gt_events))
+                else:
+                    min_errs.extend(compute_mins(event_locs, gt_events))
+                    median_errs.extend(compute_medians(event_locs, gt_events))
 
             if len(event_locs) > 1:
                 gaps.extend(event_locs[1:] - event_locs[:-1])
@@ -179,7 +190,10 @@ class MainWindow(QMainWindow):
 
         ax_minerr.plot(np.arange(101), np.percentile(min_errs, np.arange(101)))
         ax_medianerr.plot(np.arange(101), np.percentile(median_errs, np.arange(101)))
-        ax_gap.plot(np.arange(101), np.percentile(gaps, np.arange(101)))
+        if len(gaps) > 0:
+            ax_gap.plot(np.arange(101), np.percentile(gaps, np.arange(101)))
+        else:
+            ax_gap.text(0.5, 0.5, "No Gaps", horizontalalignment='center', verticalalignment='center', transform=ax_gap.transAxes)
 
         ax_minerr.set_title("Min error ({})".format(selected_summary_name))
         ax_medianerr.set_title("Median error ({})".format(selected_summary_name))
@@ -192,6 +206,9 @@ class MainWindow(QMainWindow):
 
     def get_kernel_width(self):
         return self.kernel_width_values[self.slider_kernel_width.value()]
+
+    def get_cutoff(self):
+        return self.slider_cutoff.value() / 10.0
 
     def get_selected_summary_name(self):
         results_summary_folder = self.folders[self.dropdown.currentText()]
@@ -210,22 +227,29 @@ class MainWindow(QMainWindow):
         self.update_plots()
 
     def update_cutoff_value(self, value):
-        self.slider_cutoff_label.setText("Cutoff: " + str(value))
+        self.slider_cutoff_label.setText("Cutoff: " + str(self.get_cutoff()))
         self.update_plots()
 
 if __name__ == "__main__":
     events = pd.read_csv("../data/train_events.csv")
     events = events.dropna()
     loaded_events = {}
-    for series_id in events["series_id"].unique():
+    all_series_ids = [filename.split(".")[0] for filename in os.listdir("../individual_train_series")]
+    for series_id in all_series_ids:
         series_events = events[events["series_id"] == series_id]
-        series_onsets = np.unique(series_events.loc[series_events["event"] == "onset"]["step"].to_numpy())
-        series_wakeups = np.unique(series_events.loc[series_events["event"] == "wakeup"]["step"].to_numpy())
+        if len(series_events) > 0:
+            series_onsets = np.unique(series_events.loc[series_events["event"] == "onset"]["step"].to_numpy())
+            series_wakeups = np.unique(series_events.loc[series_events["event"] == "wakeup"]["step"].to_numpy())
 
-        loaded_events[series_id] = {
-            "onsets": series_onsets,
-            "wakeups": series_wakeups
-        }
+            loaded_events[series_id] = {
+                "onsets": series_onsets,
+                "wakeups": series_wakeups
+            }
+        else:
+            loaded_events[series_id] = {
+                "onsets": np.array([]),
+                "wakeups": np.array([])
+            }
 
     app = QApplication(sys.argv)
     window = MainWindow()
