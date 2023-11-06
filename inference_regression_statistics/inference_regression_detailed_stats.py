@@ -6,6 +6,7 @@ from PySide2.QtGui import QFontMetrics
 from PySide2.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+from matplotlib.patches import Rectangle
 import pandas as pd
 import numpy as np
 
@@ -33,6 +34,7 @@ def compute_medians(X, Y, n=240):
     medians = []
     left_indices = np.searchsorted(X, Y - n, side="left")
     right_indices = np.searchsorted(X, Y + n, side="right")
+    numbers = right_indices - left_indices
 
     for k in range(len(Y)):
         if left_indices[k] < right_indices[k]:
@@ -42,14 +44,92 @@ def compute_medians(X, Y, n=240):
         else:
             medians.append(n)
 
-    return medians
+    return medians, numbers
 
 def compute_numbers(X, Y, n=240):
     left_indices = np.searchsorted(X, Y - n, side="left")
     right_indices = np.searchsorted(X, Y + n, side="right")
 
     return right_indices - left_indices
-    
+
+def prune(event_locs, event_vals, pruning_radius):
+    descending_order = np.argsort(event_vals)[::-1]
+    keeps = np.ones(len(event_locs), dtype=bool)
+
+    for k in range(len(event_locs)):
+        if keeps[descending_order[k]]:
+            loc = event_locs[descending_order[k]]
+            left_idx, right_idx = np.searchsorted(event_locs, [loc - pruning_radius + 1, loc + pruning_radius], side="left")
+            if right_idx - left_idx > 1:
+                keeps[left_idx:right_idx] = False
+                keeps[descending_order[k]] = True
+    return event_locs[keeps]
+
+def compute_metrics(selected_folder, is_onset, cutoff, pruning_radius):
+    files_list, series_id_list = get_argmax_files_list(selected_folder, is_onset=is_onset)
+    median_errs = []
+    min_errs = []
+    gaps = []
+    numbers = []
+    numbers_low = []
+    for k in range(len(files_list)):
+        argmax_data = np.load(files_list[k])
+        event_locs = argmax_data[0, :].astype(np.int32)
+        event_vals = argmax_data[1, :]
+
+        event_locs = event_locs[event_vals > cutoff]  # restrict
+        if (len(event_locs) > 0) and (pruning_radius > 0):
+            event_locs = prune(event_locs, event_vals[event_vals > cutoff], pruning_radius=pruning_radius)
+
+        gt_events = loaded_events[series_id_list[k]]["onsets" if is_onset else "wakeups"]
+
+        if len(gt_events) > 0:
+            if len(event_locs) == 0:
+                min_errs.extend([240] * len(gt_events))
+                median_errs.extend([240] * len(gt_events))
+            else:
+                min_errs.extend(compute_mins(event_locs, gt_events))
+                medians, series_numbers = compute_medians(event_locs, gt_events)
+                median_errs.extend(medians)
+                numbers.extend(series_numbers)
+                numbers_low.extend(compute_numbers(event_locs, gt_events, n=120))
+
+        if len(event_locs) > 1:
+            gaps.extend(event_locs[1:] - event_locs[:-1])
+
+    return min_errs, median_errs, gaps, numbers, numbers_low
+
+def plot_graph_with_labels(ax, y_huber, y_gaussian, y_important_values=[12, 36, 60]):
+    # Generate x-values
+    x = np.arange(len(y_huber))
+
+    # Plot the graphs
+    ax.plot(x, y_huber, label="Huber")
+    ax.plot(x, y_gaussian, label="Gaussian")
+
+    # Add rectangles for specific y-values
+    ticks_vals = []
+    for y_value in y_important_values:
+        # Find the corresponding x-values for each graph
+        y1_idx = np.searchsorted(y_huber, y_value)
+        if y1_idx < len(y_huber):
+            x_y1 = x[y1_idx]
+            y_y1 = y_huber[y1_idx]
+            rect_y1 = Rectangle((0, 0), x_y1, y_y1, fill=False, edgecolor="red", linestyle=":")
+            ax.add_patch(rect_y1)
+            ticks_vals.append(x_y1)
+
+        y2_idx = np.searchsorted(y_gaussian, y_value)
+        if y2_idx < len(y_gaussian):
+            x_y2 = x[y2_idx]
+            y_y2 = y_gaussian[y2_idx]
+            rect_y2 = Rectangle((0, 0), x_y2, y_y2, fill=False, edgecolor="blue", linestyle=":")
+            ax.add_patch(rect_y2)
+            ticks_vals.append(x_y2)
+
+    # Set x ticks
+    ax.set_xticks(np.unique(list(np.arange(0, 101, 20)) + ticks_vals))
+
 
 class MainWindow(QMainWindow):
     kernel_width_values = [2, 4, 6, 9, 12, 24, 36, 48, 60, 90, 120, 180, 240, 360]
@@ -70,36 +150,52 @@ class MainWindow(QMainWindow):
         # Create matplotlib plots
         self.fig_minerr_distribution = Figure()
         self.fig_medianerr_distribution = Figure()
-        self.fig_gap_distribution = Figure()
+        self.fig_lowcount_distribution = Figure()
+        self.fig_minerr_distribution_bounded = Figure()
+        self.fig_medianerr_distribution_bounded = Figure()
+        self.fig_count_distribution = Figure()
 
         # Create FigureCanvas objects
         self.canvas_minerr_distribution = FigureCanvas(self.fig_minerr_distribution)
         self.canvas_medianerr_distribution = FigureCanvas(self.fig_medianerr_distribution)
-        self.canvas_gap_distribution = FigureCanvas(self.fig_gap_distribution)
+        self.canvas_lowcount_distribution = FigureCanvas(self.fig_lowcount_distribution)
+        self.canvas_minerr_distribution_bounded = FigureCanvas(self.fig_minerr_distribution_bounded)
+        self.canvas_medianerr_distribution_bounded = FigureCanvas(self.fig_medianerr_distribution_bounded)
+        self.canvas_count_distribution = FigureCanvas(self.fig_count_distribution)
 
         # Create NavigationToolbars for each FigureCanvas
         self.toolbar_minerr_distribution = NavigationToolbar(self.canvas_minerr_distribution, self)
         self.toolbar_medianerr_distribution = NavigationToolbar(self.canvas_medianerr_distribution, self)
-        self.toolbar_gap_distribution = NavigationToolbar(self.canvas_gap_distribution, self)
+        self.toolbar_lowcount_distribution = NavigationToolbar(self.canvas_lowcount_distribution, self)
+        self.toolbar_minerr_distribution_bounded = NavigationToolbar(self.canvas_minerr_distribution_bounded, self)
+        self.toolbar_medianerr_distribution_bounded = NavigationToolbar(self.canvas_medianerr_distribution_bounded, self)
+        self.toolbar_count_distribution = NavigationToolbar(self.canvas_count_distribution, self)
 
         # Create a horizontal layout for the plots
         self.plot_layout = QHBoxLayout()
-        self.minerr_widget = QWidget()
-        self.medianerr_widget = QWidget()
-        self.gap_widget = QWidget()
-        self.minerr_layout = QVBoxLayout(self.minerr_widget)
-        self.medianerr_layout = QVBoxLayout(self.medianerr_widget)
-        self.gap_layout = QVBoxLayout(self.gap_widget)
-        self.minerr_layout.addWidget(self.toolbar_minerr_distribution)
-        self.minerr_layout.addWidget(self.canvas_minerr_distribution)
-        self.medianerr_layout.addWidget(self.toolbar_medianerr_distribution)
-        self.medianerr_layout.addWidget(self.canvas_medianerr_distribution)
-        self.gap_layout.addWidget(self.toolbar_gap_distribution)
-        self.gap_layout.addWidget(self.canvas_gap_distribution)
+        self.plot_left_widget = QWidget()
+        self.plot_center_widget = QWidget()
+        self.plot_right_widget = QWidget()
+        self.plot_left_layout = QVBoxLayout(self.plot_left_widget)
+        self.plot_center_layout = QVBoxLayout(self.plot_center_widget)
+        self.plot_right_layout = QVBoxLayout(self.plot_right_widget)
 
-        self.plot_layout.addWidget(self.minerr_widget)
-        self.plot_layout.addWidget(self.medianerr_widget)
-        self.plot_layout.addWidget(self.gap_widget)
+        self.plot_left_layout.addWidget(self.toolbar_minerr_distribution)
+        self.plot_left_layout.addWidget(self.canvas_minerr_distribution)
+        self.plot_left_layout.addWidget(self.toolbar_minerr_distribution_bounded)
+        self.plot_left_layout.addWidget(self.canvas_minerr_distribution_bounded)
+        self.plot_center_layout.addWidget(self.toolbar_medianerr_distribution)
+        self.plot_center_layout.addWidget(self.canvas_medianerr_distribution)
+        self.plot_center_layout.addWidget(self.toolbar_medianerr_distribution_bounded)
+        self.plot_center_layout.addWidget(self.canvas_medianerr_distribution_bounded)
+        self.plot_right_layout.addWidget(self.toolbar_lowcount_distribution)
+        self.plot_right_layout.addWidget(self.canvas_lowcount_distribution)
+        self.plot_right_layout.addWidget(self.toolbar_count_distribution)
+        self.plot_right_layout.addWidget(self.canvas_count_distribution)
+
+        self.plot_layout.addWidget(self.plot_left_widget)
+        self.plot_layout.addWidget(self.plot_center_widget)
+        self.plot_layout.addWidget(self.plot_right_widget)
 
         # Add plot layout to the main layout
         self.main_layout.addLayout(self.plot_layout)
@@ -121,7 +217,7 @@ class MainWindow(QMainWindow):
         self.main_layout.addLayout(self.checkbox_layout)
 
         # Create sliders
-        self.slider_kernel_width_label = QLabel("Kernel width: 0")
+        self.slider_kernel_width_label = QLabel("Kernel width: {}".format(self.kernel_width_values[0]))
         self.slider_kernel_width_label.setAlignment(Qt.AlignCenter)  # Centered the text for the slider label
         font_metrics = QFontMetrics(self.slider_kernel_width_label.font())
         self.slider_kernel_width_label.setFixedHeight(font_metrics.height())  # Set the height of the label to the height of the text
@@ -145,64 +241,84 @@ class MainWindow(QMainWindow):
         self.slider_cutoff.valueChanged.connect(self.update_cutoff_value)
         self.main_layout.addWidget(self.slider_cutoff)
 
+        self.slider_pruning_label = QLabel("Pruning: 0")
+        self.slider_pruning_label.setAlignment(Qt.AlignCenter)  # Centered the text for the slider label
+        font_metrics = QFontMetrics(self.slider_pruning_label.font())
+        self.slider_pruning_label.setFixedHeight(
+            font_metrics.height())  # Set the height of the label to the height of the text
+        self.main_layout.addWidget(self.slider_pruning_label)
+
+        self.slider_pruning = QSlider(Qt.Horizontal)
+        self.slider_pruning.setMaximum(30)
+        self.slider_pruning.valueChanged.connect(self.update_pruning_value)
+        self.main_layout.addWidget(self.slider_pruning)
+
         # Create a "Plot" button
         self.plot_button = QPushButton("Plot")
         self.plot_button.clicked.connect(self.update_plots)
         self.main_layout.addWidget(self.plot_button)
 
     def update_plots(self):
-        selected_folder = self.get_selected_folder()
         selected_summary_name = self.get_selected_summary_name()
-
-        # Load and compute the metrics
-        files_list, series_id_list = get_argmax_files_list(selected_folder, is_onset=self.checkbox_onset.isChecked())
-        median_errs = []
-        min_errs = []
-        gaps = []
-        for k in range(len(files_list)):
-            argmax_data = np.load(files_list[k])
-            event_locs = argmax_data[0, :].astype(np.int32)
-            event_vals = argmax_data[1, :]
-
-            event_locs = event_locs[event_vals > self.get_cutoff()] # restrict
-
-            gt_events = loaded_events[series_id_list[k]]["onsets" if self.checkbox_onset.isChecked() else "wakeups"]
-
-            if len(gt_events) > 0:
-                if len(event_locs) == 0:
-                    min_errs.extend([240] * len(gt_events))
-                    median_errs.extend([240] * len(gt_events))
-                else:
-                    min_errs.extend(compute_mins(event_locs, gt_events))
-                    median_errs.extend(compute_medians(event_locs, gt_events))
-
-            if len(event_locs) > 1:
-                gaps.extend(event_locs[1:] - event_locs[:-1])
+        selected_folder_huber = self.get_selected_folder(kernel_shape="huber")
+        selected_folder_gaussian = self.get_selected_folder(kernel_shape="gaussian")
+        min_errs_huber, median_errs_huber, gaps_huber, numbers_huber, numbers_huber_low =\
+            compute_metrics(selected_folder_huber, is_onset=self.checkbox_onset.isChecked(), cutoff=self.get_cutoff(),
+                            pruning_radius=self.get_pruning())
+        min_errs_gaussian, median_errs_gaussian, gaps_gaussian, numbers_gaussian, numbers_gaussian_low =\
+            compute_metrics(selected_folder_gaussian, is_onset=self.checkbox_onset.isChecked(), cutoff=self.get_cutoff(),
+                            pruning_radius=self.get_pruning())
 
         # Plot the distributions, with x-axis being quantiles (0-100), and y-axis the value of the metric at that quantile
         self.fig_minerr_distribution.clear()
         self.fig_medianerr_distribution.clear()
-        self.fig_gap_distribution.clear()
+        self.fig_lowcount_distribution.clear()
+        self.fig_minerr_distribution_bounded.clear()
+        self.fig_medianerr_distribution_bounded.clear()
+        self.fig_count_distribution.clear()
 
         ax_minerr = self.fig_minerr_distribution.add_subplot(111)
         ax_medianerr = self.fig_medianerr_distribution.add_subplot(111)
-        ax_gap = self.fig_gap_distribution.add_subplot(111)
+        ax_lowcount = self.fig_lowcount_distribution.add_subplot(111)
+        ax_minerr_bounded = self.fig_minerr_distribution_bounded.add_subplot(111)
+        ax_medianerr_bounded = self.fig_medianerr_distribution_bounded.add_subplot(111)
+        ax_count = self.fig_count_distribution.add_subplot(111)
 
-        ax_minerr.plot(np.arange(101), np.percentile(min_errs, np.arange(101)))
-        ax_medianerr.plot(np.arange(101), np.percentile(median_errs, np.arange(101)))
-        if len(gaps) > 0:
-            ax_gap.plot(np.arange(101), np.percentile(gaps, np.arange(101)))
-        else:
-            ax_gap.text(0.5, 0.5, "No Gaps", horizontalalignment='center', verticalalignment='center', transform=ax_gap.transAxes)
+        ax_minerr.plot(np.arange(101), np.percentile(min_errs_huber, np.arange(101)), label="Huber")
+        ax_minerr.plot(np.arange(101), np.percentile(min_errs_gaussian, np.arange(101)), label="Gaussian")
+        ax_medianerr.plot(np.arange(101), np.percentile(median_errs_huber, np.arange(101)), label="Huber")
+        ax_medianerr.plot(np.arange(101), np.percentile(median_errs_gaussian, np.arange(101)), label="Gaussian")
+        ax_lowcount.plot(np.arange(101), np.percentile(numbers_huber_low, np.arange(101)), label="Huber")
+        ax_lowcount.plot(np.arange(101), np.percentile(numbers_gaussian_low, np.arange(101)), label="Gaussian")
+        plot_graph_with_labels(ax_minerr_bounded, np.percentile(min_errs_huber, np.arange(101)), np.percentile(min_errs_gaussian, np.arange(101)))
+        plot_graph_with_labels(ax_medianerr_bounded, np.percentile(median_errs_huber, np.arange(101)), np.percentile(median_errs_gaussian, np.arange(101)))
+        ax_minerr_bounded.set_ylim([0, 80])
+        ax_medianerr_bounded.set_ylim([0, 80])
+        ax_minerr_bounded.set_yticks(np.arange(0, 81, 20))
+        ax_medianerr_bounded.set_yticks(np.arange(0, 81, 20))
+        ax_count.plot(np.arange(101), np.percentile(numbers_huber, np.arange(101)), label="Huber")
+        ax_count.plot(np.arange(101), np.percentile(numbers_gaussian, np.arange(101)), label="Gaussian")
 
         ax_minerr.set_title("Min error ({})".format(selected_summary_name))
         ax_medianerr.set_title("Median error ({})".format(selected_summary_name))
-        ax_gap.set_title("Gap ({})".format(selected_summary_name))
+        ax_lowcount.set_title("W=120 Neighborhood Count ({})".format(selected_summary_name))
+        ax_minerr_bounded.set_title("Min error ({})".format(selected_summary_name))
+        ax_medianerr_bounded.set_title("Median error ({})".format(selected_summary_name))
+        ax_count.set_title("W=240 Neighborhood Count ({})".format(selected_summary_name))
+
+        ax_minerr.legend()
+        ax_medianerr.legend()
+        ax_lowcount.legend()
+        ax_minerr_bounded.legend()
+        ax_medianerr_bounded.legend()
+        ax_count.legend()
 
         self.canvas_minerr_distribution.draw()
         self.canvas_medianerr_distribution.draw()
-        self.canvas_gap_distribution.draw()
-
+        self.canvas_lowcount_distribution.draw()
+        self.canvas_minerr_distribution_bounded.draw()
+        self.canvas_medianerr_distribution_bounded.draw()
+        self.canvas_count_distribution.draw()
 
     def get_kernel_width(self):
         return self.kernel_width_values[self.slider_kernel_width.value()]
@@ -210,14 +326,18 @@ class MainWindow(QMainWindow):
     def get_cutoff(self):
         return self.slider_cutoff.value() / 10.0
 
+    def get_pruning(self):
+        return self.slider_pruning.value() * 12
+
     def get_selected_summary_name(self):
         results_summary_folder = self.folders[self.dropdown.currentText()]
         with open(os.path.join(results_summary_folder, "name.txt"), "r") as f:
             return f.read().strip()
 
-    def get_selected_folder(self):
+    def get_selected_folder(self, kernel_shape=None):
         kernel_width = self.get_kernel_width()
-        kernel_shape = "huber" if self.checkbox_huber.isChecked() else "gaussian"
+        if kernel_shape is None:
+            kernel_shape = "huber" if self.checkbox_huber.isChecked() else "gaussian"
         results_summary_folder = self.folders[self.dropdown.currentText()]
 
         return os.path.join(results_summary_folder, "{}_kernel{}".format(kernel_shape, kernel_width))
@@ -228,6 +348,10 @@ class MainWindow(QMainWindow):
 
     def update_cutoff_value(self, value):
         self.slider_cutoff_label.setText("Cutoff: " + str(self.get_cutoff()))
+        self.update_plots()
+
+    def update_pruning_value(self, value):
+        self.slider_pruning_label.setText("Pruning: " + str(self.get_pruning()))
         self.update_plots()
 
 if __name__ == "__main__":

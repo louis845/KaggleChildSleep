@@ -31,7 +31,9 @@ class MatplotlibWidget(QWidget):
         self.min_y = -10.0
 
 
-    def plot_data(self, title, anglez, enmo, extras, timestamp, events):
+    def plot_data(self, title, anglez, enmo, extras, timestamp, events, start_loc):
+        end_loc = start_loc + len(anglez)
+
         self.axis.clear()
         x = pd.to_datetime(timestamp)  # Automatically parses the timestamp
         y1 = anglez / 35.52 # std computed by check_series_properties.py
@@ -41,8 +43,8 @@ class MatplotlibWidget(QWidget):
         self.axis.plot(x, y2, label="enmo")
         #self.axis.plot(x, extras["onset"] / 100.0, label="onset")
         #self.axis.plot(x, extras["wakeup"] / 100.0, label="wakeup")
-        self.axis.plot(x, extras["onset_kernel"], label="onset_kernel")
-        self.axis.plot(x, extras["wakeup_kernel"], label="wakeup_kernel")
+        self.axis.plot(x, extras["onset_kernel"] / 5.0, label="onset_kernel")
+        self.axis.plot(x, extras["wakeup_kernel"] / 5.0, label="wakeup_kernel")
         self.axis.plot(x, extras["onset_conf"] * 10.0, label="onset_conf") # easier viewing
         self.axis.plot(x, extras["wakeup_conf"] * 10.0, label="wakeup_conf")
 
@@ -50,6 +52,10 @@ class MatplotlibWidget(QWidget):
             color = "blue" if event_type in [1, 3, 4] else "red"
             linestyle = "--" if event_type in [1, 2] else ":"
             self.axis.axvline(pd.to_datetime(event_time), color=color, alpha=0.5, linestyle=linestyle)
+        for loc in extras["onset_locs"]:
+            self.axis.vlines(pd.to_datetime(timestamp.iloc[loc]), color="blue", alpha=0.3, linestyle="-", ymin=15, ymax=20)
+        for loc in extras["wakeup_locs"]:
+            self.axis.vlines(pd.to_datetime(timestamp.iloc[loc]), color="red", alpha=0.3, linestyle="-", ymin=15, ymax=20)
 
         self.axis.set_title(title)
         self.axis.legend()
@@ -124,7 +130,6 @@ class MainWidget(QWidget):
 
         total_length = len(anglez)
         stride = total_length // (total_length // 2160)
-        print(stride)
 
         # load every interval into memory
         k = 0
@@ -159,7 +164,11 @@ class MainWidget(QWidget):
             interval_timestamp = timestamp.iloc[start:end]
             local_extras = {}
             for key, value in extras.items():
-                local_extras[key] = value[start:end]
+                if "_locs" not in key:
+                    local_extras[key] = value[start:end]
+                else:
+                    local_extras[key] = value[np.searchsorted(value, start, side="left"):np.searchsorted(value, end, side="left")] - start
+                    assert np.all(local_extras[key] >= 0) and np.all(local_extras[key] < end - start)
 
             self.preloaded_intervals.append((series_id, start, end, interval_anglez, interval_enmo, local_extras, interval_timestamp, events))
 
@@ -201,14 +210,16 @@ class MainWidget(QWidget):
         selected_index = self.selection_slider.value()
         self.series_label.setText(str(selected_index))
         series_id, start, end, anglez, enmo, extras, timestamp, events = self.preloaded_intervals[selected_index]
-        self.display_widget.plot_data(series_id, anglez, enmo, extras, timestamp, events)
+        self.display_widget.plot_data(series_id, anglez, enmo, extras, timestamp, events, start)
 
 def load_file(item):
     filename = "./individual_train_series/" + item + ".parquet"
     df = pd.read_parquet(filename)
     extras = {}
-    extras["onset_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV/huber_kernel360/{}_onset.npy".format(item))
-    extras["wakeup_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV/huber_kernel360/{}_wakeup.npy".format(item))
+    extras["onset_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV/huber_kernel6/{}_onset.npy".format(item))
+    extras["wakeup_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV/huber_kernel6/{}_wakeup.npy".format(item))
+    extras["onset_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_onset_locs.npy".format(item))
+    extras["wakeup_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_wakeup_locs.npy".format(item))
 
     folders2 = os.listdir(inference_confidence_preds.FOLDER)
     for folder in folders2:
