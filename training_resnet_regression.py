@@ -63,6 +63,22 @@ def masked_huber_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: tor
                                     torch.zeros_like(mask_per_batch))
     return torch.sum(loss_per_batch)
 
+def masked_huber_sigma_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor):
+    assert preds.shape[1] == 4, "preds.shape = {}".format(preds.shape)
+    assert (preds.shape[0] == ground_truth.shape[0] and preds.shape[2] == ground_truth.shape[2]), "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
+    assert ground_truth.shape == mask.shape, "ground_truth.shape = {}, mask.shape = {}".format(ground_truth.shape, mask.shape)
+    mask_per_batch = torch.sum(mask, dim=(1, 2))
+
+    values = preds[:, :2, :]
+    assert values.shape == mask.shape, "values.shape = {}, mask.shape = {}".format(values.shape, mask.shape)
+    sigmas = preds[:, 2:, :]
+    k = sigmas / np.sqrt(2)
+    elemwise_loss = (torch.nn.functional.huber_loss(values, ground_truth, reduction="none") + 0.5) / k + torch.log(k)
+
+    loss_per_batch = torch.where(mask_per_batch > 0, torch.sum(elemwise_loss * mask, dim=(1, 2)) / (mask_per_batch + 1e-5),
+                                    torch.zeros_like(mask_per_batch))
+    return torch.sum(loss_per_batch)
+
 def masked_mse_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor):
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
                                                                                                  ground_truth.shape)
@@ -158,6 +174,20 @@ def local_argmax_kernel_loss(preds: torch.Tensor, event: int, width: int, use_L1
 
     return np.abs(np.argmax(kernel_preds) + low - event)
 
+def local_argmax_sigma_kernel_loss(preds: torch.Tensor, sigmas: torch.Tensor, event: int, width: int):
+    expanded_width = width * 3
+    low = max(0, event - width)
+    high = min(preds.shape[0], event + width + 1)
+    low_expanded = max(0, event - expanded_width)
+    high_expanded = min(preds.shape[0], event + expanded_width + 1)
+
+    locations = torch.arange(start=low_expanded, end=high_expanded, step=1, dtype=torch.float32, device=preds.device) - preds[low_expanded:high_expanded] - low
+
+    kernel_preds = kernel_utils.generate_kernel_preds_huber_sigmas(high - low, locations, sigmas=sigmas).cpu().numpy()
+    assert kernel_preds.shape == (high - low,), "kernel_preds.shape = {}, high - low = {}".format(kernel_preds.shape, high - low)
+
+    return np.abs(np.argmax(kernel_preds) + low - event)
+
 def local_argmax_loss(preds: np.ndarray, event: int, width: int):
     low = max(0, event - width)
     high = min(preds.shape[0], event + width + 1)
@@ -216,13 +246,19 @@ def single_training_step_standard(model_: torch.nn.Module, optimizer_: torch.opt
     optimizer_.zero_grad()
     preds = model_(accel_data_batch, ret_type="deep")
 
-    assert loss_type == "huber", "loss_type must be huber"
-    loss = masked_huber_loss(preds, event_regression_values[0], event_regression_masks[0])
+    assert loss_type == "huber" or loss_type == "huber_sigma", "loss_type must be huber or huber_sigma"
+    if loss_type == "huber":
+        loss = masked_huber_loss(preds, event_regression_values[0], event_regression_masks[0])
+    elif loss_type == "huber_sigma":
+        loss = masked_huber_sigma_loss(preds, event_regression_values[0], event_regression_masks[0])
     loss.backward()
     optimizer_.step()
 
     with torch.no_grad():
-        mae_loss = masked_mae_loss(preds, event_regression_values[0], event_regression_masks[0]).item()
+        if loss_type == "huber":
+            mae_loss = masked_mae_loss(preds, event_regression_values[0], event_regression_masks[0]).item()
+        else:
+            mae_loss = masked_mae_loss(preds[:, :2, :], event_regression_values[0], event_regression_masks[0]).item()
 
         num_events = torch.sum(torch.sum(event_regression_masks[0], dim=(1, 2)) > 0).item() # number of events in batch
 
@@ -315,8 +351,10 @@ def single_validation_step_standard(model_: torch.nn.Module, accel_data_batch: t
                            event_regression_masks: list[torch.Tensor]):
     with torch.no_grad():
         preds = model_(accel_data_batch, ret_type="deep")
-
-        loss = masked_mae_loss_raw(preds, event_regression_values[0], event_regression_masks[0]).item()
+        if loss_type == "huber":
+            loss = masked_mae_loss_raw(preds, event_regression_values[0], event_regression_masks[0]).item()
+        else:
+            loss = masked_mae_loss_raw(preds[:, :2, :], event_regression_values[0], event_regression_masks[0]).item()
 
         mask_num = torch.sum(event_regression_masks[0]).item()
 
@@ -364,9 +402,12 @@ def validation_step():
                         wakeup = event["wakeup"]
 
                         width = int(regression_width[0] * 1.0)
-
-                        onset_argmax_ae = local_argmax_kernel_loss(pred_torch[0, :], onset, width)
-                        wakeup_argmax_ae = local_argmax_kernel_loss(pred_torch[1, :], wakeup, width)
+                        if loss_type == "huber":
+                            onset_argmax_ae = local_argmax_kernel_loss(pred_torch[0, :], onset, width)
+                            wakeup_argmax_ae = local_argmax_kernel_loss(pred_torch[1, :], wakeup, width)
+                        else:
+                            onset_argmax_ae = local_argmax_sigma_kernel_loss(pred_torch[0, :], pred_torch[2, :], onset, width)
+                            wakeup_argmax_ae = local_argmax_sigma_kernel_loss(pred_torch[1, :], pred_torch[3, :], wakeup, width)
                         val_metrics["argmax_ae"].add(onset_argmax_ae, 1)
                         val_metrics["argmax_ae"].add(wakeup_argmax_ae, 1)
                 else:
@@ -435,7 +476,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train a sleeping prediction model with only clean data.")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for. Default 50.")
-    parser.add_argument("--loss", type=str, default="huber", help="Loss to use. Default huber. Available options: huber, mse, huber_mse, ce, focal.")
+    parser.add_argument("--loss", type=str, default="huber", help="Loss to use. Default huber. Available options: huber, mse, huber_mse, ce, focal, huber_sigma")
     parser.add_argument("--regression_width", type=int, nargs="+", default=[60, 120, 240], help="Number of regression values to predict for each event. Default [60, 120, 240].")
     parser.add_argument("--regression_kernel", type=int, default=None, help="Kernel size for the regression layers. Default None, which means usual regression is performed.")
     parser.add_argument("--learning_rate", type=float, default=5e-3, help="Learning rate to use. Default 5e-3.")
@@ -508,14 +549,16 @@ if __name__ == "__main__":
     assert not (use_anglez_only and use_enmo_only), "Cannot use both anglez only and enmo only."
     assert isinstance(regression_width, list), "Regression width must be a list."
     assert len(regression_width) == 3, "Regression width must be a list of length 3."
-    assert loss_type in ["huber", "mse", "huber_mse", "ce", "focal"], "Invalid loss type."
+    assert loss_type in ["huber", "mse", "huber_mse", "ce", "focal", "huber_sigma"], "Invalid loss type."
     if regression_kernel is not None:
         assert loss_type in ["ce", "focal"], "Must use probability loss type if using regression kernel."
     else:
         assert loss_type in ["huber", "mse", "huber_mse"], "Must use regression loss type if not using regression kernel."
     if use_standard_model:
         assert use_anglez_only, "Must use anglez only if using standard model."
-        assert loss_type == "huber", "Must use huber loss if using standard model."
+        assert loss_type == "huber" or loss_type == "huber_sigma", "Must use huber loss if using standard model."
+    if loss_type == "huber_sigma":
+        assert use_standard_model, "Must use standard model if using huber sigma loss."
 
     if isinstance(hidden_channels, int):
         hidden_channels = [hidden_channels]
@@ -545,7 +588,7 @@ if __name__ == "__main__":
     # initialize model
     in_channels = 1 if (use_anglez_only or use_enmo_only) else 2
     if use_standard_model:
-        model = model_event_unet.EventRegressorUnet()
+        model = model_event_unet.EventRegressorUnet(use_learnable_sigma=(loss_type == "huber_sigma"))
     else:
         model = model_attention_unet.Unet3fDeepSupervision(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                                 bottleneck_factor=bottleneck_factor, squeeze_excitation=False,

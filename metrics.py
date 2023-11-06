@@ -25,11 +25,13 @@ class Metrics(abc.ABC):
 class NumericalMetric(Metrics):
     def __init__(self, name: str):
         self.name = name
+        self.values = []
         self.reset()
 
     def add(self, value, batch_size: int):
         self.sum += value
         self.count += batch_size
+        self.values.append(value)
 
     def get(self):
         if self.count == 0:
@@ -38,10 +40,15 @@ class NumericalMetric(Metrics):
 
     def write_to_dict(self, x: dict):
         x[self.name] = self.get()
+        if self.count == 0:
+            x[self.name + "_median"] = -1.0
+        else:
+            x[self.name + "_median"] = np.median(self.values)
 
     def reset(self):
         self.sum = 0.0
         self.count = 0
+        self.values.clear()
 
 class BinaryMetrics(Metrics):
     def __init__(self, name: str):

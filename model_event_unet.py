@@ -82,10 +82,12 @@ class UnetAttnHead(torch.nn.Module):
 class EventRegressorUnet(torch.nn.Module):
     def __init__(self, in_channels=1, hidden_channels=[4, 4, 8, 16, 32], kernel_size=3, blocks=[2, 2, 2, 2, 3],
                  bottleneck_factor=4, squeeze_excitation=False, squeeze_excitation_bottleneck_factor=4,
-                 dropout=0.05, out_channels=2, use_batch_norm=True,
+                 dropout=0.05, out_channels=2, use_batch_norm=True, use_learnable_sigma=False,
 
                  upconv_kernel_size=5, upconv_channels_override=None):
         super(EventRegressorUnet, self).__init__()
+        if use_learnable_sigma:
+            out_channels = 4
         assert kernel_size % 2 == 1, "kernel size must be odd"
         assert isinstance(hidden_channels, list), "hidden_channels must be a list"
         assert len(hidden_channels) == len(blocks), "hidden_channels must have the same length as blocks"
@@ -109,6 +111,7 @@ class EventRegressorUnet(torch.nn.Module):
             self.final_conv = torch.nn.Conv1d(hidden_channels[-1], out_channels, kernel_size=1, bias=False, padding="same", padding_mode="replicate")
 
         self.use_dropout = dropout > 0.0
+        self.use_learnable_sigma = use_learnable_sigma
 
     def forward(self, x, ret_type="deep"):
         assert ret_type in ["deep"], "ret_type must be one of ['deep']"
@@ -121,6 +124,12 @@ class EventRegressorUnet(torch.nn.Module):
         ret = self.backbone(x, downsampling_methods)
         x = self.upconv_head(ret)
         x = self.final_conv(x)
+
+        if self.use_learnable_sigma:
+            values = x[:, :2, :]
+            sigmas_raw_vals = x[:, 2:, :]
+            sigmas = 2.0 + torch.sigmoid(sigmas_raw_vals) * 358.0
+            x = torch.cat([values, sigmas], dim=1)
         return x
 
     def get_device(self) -> torch.device:
