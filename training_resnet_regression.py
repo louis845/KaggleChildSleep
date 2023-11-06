@@ -183,7 +183,7 @@ def local_argmax_sigma_kernel_loss(preds: torch.Tensor, sigmas: torch.Tensor, ev
 
     locations = torch.arange(start=low_expanded, end=high_expanded, step=1, dtype=torch.float32, device=preds.device) - preds[low_expanded:high_expanded] - low
 
-    kernel_preds = kernel_utils.generate_kernel_preds_huber_sigmas(high - low, locations, sigmas=sigmas).cpu().numpy()
+    kernel_preds = kernel_utils.generate_kernel_preds_huber_sigmas(high - low, locations, sigmas=sigmas[low_expanded:high_expanded]).cpu().numpy()
     assert kernel_preds.shape == (high - low,), "kernel_preds.shape = {}, high - low = {}".format(kernel_preds.shape, high - low)
 
     return np.abs(np.argmax(kernel_preds) + low - event)
@@ -553,7 +553,7 @@ if __name__ == "__main__":
     if regression_kernel is not None:
         assert loss_type in ["ce", "focal"], "Must use probability loss type if using regression kernel."
     else:
-        assert loss_type in ["huber", "mse", "huber_mse"], "Must use regression loss type if not using regression kernel."
+        assert loss_type in ["huber", "mse", "huber_mse", "huber_sigma"], "Must use regression loss type if not using regression kernel."
     if use_standard_model:
         assert use_anglez_only, "Must use anglez only if using standard model."
         assert loss_type == "huber" or loss_type == "huber_sigma", "Must use huber loss if using standard model."
@@ -679,7 +679,7 @@ if __name__ == "__main__":
     if use_standard_model:
         train_metrics["mae"] = metrics.NumericalMetric("train_mae")
         val_metrics["mae"] = metrics.NumericalMetric("val_mae")
-        val_metrics["argmax_ae"] = metrics.NumericalMetric("val_argmax_ae")
+        val_metrics["argmax_ae"] = metrics.NumericalMetric("val_argmax_ae", require_median=True)
     else:
         train_metrics["mae_small"] = metrics.NumericalMetric("train_mae_small")
         train_metrics["mae_mid"] = metrics.NumericalMetric("train_mae_mid")
@@ -694,9 +694,9 @@ if __name__ == "__main__":
             val_metrics["mean_ae_small"] = metrics.NumericalMetric("val_mean_ae_small")
             val_metrics["mean_ae_mid"] = metrics.NumericalMetric("val_mean_ae_mid")
             val_metrics["mean_ae_large"] = metrics.NumericalMetric("val_mean_ae_large")
-        val_metrics["argmax_ae_small"] = metrics.NumericalMetric("val_argmax_ae_small")
-        val_metrics["argmax_ae_mid"] = metrics.NumericalMetric("val_argmax_ae_mid")
-        val_metrics["argmax_ae_large"] = metrics.NumericalMetric("val_argmax_ae_large")
+        val_metrics["argmax_ae_small"] = metrics.NumericalMetric("val_argmax_ae_small", require_median=True)
+        val_metrics["argmax_ae_mid"] = metrics.NumericalMetric("val_argmax_ae_mid", require_median=True)
+        val_metrics["argmax_ae_large"] = metrics.NumericalMetric("val_argmax_ae_large", require_median=True)
 
     # Compile
     #single_training_step_compile = torch.compile(single_training_step)
