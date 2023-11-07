@@ -105,8 +105,6 @@ if __name__ == "__main__":
     upconv_channels_override = args.upconv_channels_override
     expand = args.expand
     use_batch_norm = args.use_batch_norm
-    use_anglez_only = args.use_anglez_only
-    use_enmo_only = args.use_enmo_only
     prediction_length = args.prediction_length
     batch_size = args.batch_size
 
@@ -132,8 +130,12 @@ if __name__ == "__main__":
         use_enmo_only = input_type == "enmo"
 
         out_dir = os.path.join(FOLDER, folder_name)
+        if not os.path.isdir(out_dir):
+            os.mkdir(out_dir)
         with open(os.path.join(out_dir, "name.txt"), "w") as f:
             f.write(name)
+
+        print("Running inference on {}...".format(name))
 
         for k in range(len(models)):
             model_name = models[k]
