@@ -335,10 +335,14 @@ class MainWindow(QMainWindow):
             return f.read().strip()
 
     def get_selected_folder(self, kernel_shape=None):
+        results_summary_folder = self.folders[self.dropdown.currentText()]
+        if "kernel" in os.listdir(results_summary_folder):
+            # learnable sigmas. this means the kernel shape must be huber, and the kernel width is learnt
+            return os.path.join(results_summary_folder, "kernel")
+
         kernel_width = self.get_kernel_width()
         if kernel_shape is None:
             kernel_shape = "huber" if self.checkbox_huber.isChecked() else "gaussian"
-        results_summary_folder = self.folders[self.dropdown.currentText()]
 
         return os.path.join(results_summary_folder, "{}_kernel{}".format(kernel_shape, kernel_width))
 

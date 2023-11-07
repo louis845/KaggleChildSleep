@@ -2,16 +2,14 @@ import sys
 import os
 import pandas as pd
 import numpy as np
-from PySide2.QtWidgets import QApplication, QVBoxLayout, QFileDialog, QWidget, QHBoxLayout, QPushButton, QListWidget, QTabWidget, QListWidgetItem, QSplitter, QSlider, QLabel, QCheckBox, QComboBox
+from PySide2.QtWidgets import QApplication, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QListWidget, QSplitter, QSlider, QLabel
 from PySide2.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-import tqdm
 
 #import inference_regression_preds
-import inference_confidence_preds
-import kernel_utils
+from inference_confidence_statistics import inference_confidence_preds
 
 
 class MatplotlibWidget(QWidget):

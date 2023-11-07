@@ -117,7 +117,7 @@ if __name__ == "__main__":
     config.parse_args(args)
 
     # get model directories
-    model_dir = os.path.join("models", args.load_model)
+    model_dir = os.path.join("../models", args.load_model)
     assert os.path.isdir(model_dir), "Model directory does not exist."
 
     # get data parameters

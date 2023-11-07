@@ -135,7 +135,7 @@ def generate_kernel_preds_sigma_gpu(preds_array, sigmas_array, device: torch.dev
 
             out_min, out_max = max(0, pred_min - max_clip), min(len(preds_array), pred_max + max_clip)
             local_preds_locations = torch.arange(pred_min - out_min, pred_max - out_min, device=device, dtype=torch.float32) - preds_clip[pred_min:pred_max] # locations within pred_min:pred_max, shifted relative to out_min:out_max
-            kernel_preds_array[out_min:out_max] += generate_kernel_preds_huber_sigmas(out_max - out_min, local_preds_locations, sigmas=sigmas).cpu().numpy()
+            kernel_preds_array[out_min:out_max] += generate_kernel_preds_huber_sigmas(out_max - out_min, local_preds_locations, sigmas=sigmas[pred_min:pred_max]).cpu().numpy()
 
             pred_min = pred_max
 

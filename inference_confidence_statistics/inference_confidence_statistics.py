@@ -18,10 +18,10 @@ import training_resnet_regression
 
 def load_all_events():
     all_events = {}
-    events_df = pd.read_csv("data/train_events.csv")
+    events_df = pd.read_csv("../data/train_events.csv")
     events_df = events_df.dropna()
 
-    for series_id in os.listdir("data_naive"):
+    for series_id in os.listdir("../data_naive"):
         series_events = events_df.loc[events_df["series_id"] == series_id]
         if len(series_events) == 0:
             continue
@@ -201,7 +201,7 @@ if __name__ == "__main__":
         onset_small_aes, onset_mid_aes, onset_large_aes, wakeup_small_aes, wakeup_mid_aes, wakeup_large_aes = [], [], [], [], [], []
         for j in range(len(models)):
             model_dir = models[j]
-            model_path = os.path.join("models", model_dir, "model.pt")
+            model_path = os.path.join("../models", model_dir, "model.pt")
             entry = entries[j]
 
             result_onset_small_aes, result_onset_mid_aes, result_onset_large_aes,\

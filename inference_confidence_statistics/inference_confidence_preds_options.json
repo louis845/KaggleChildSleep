@@ -1,0 +1,21 @@
+[
+  {
+    "name": "Center Predictions (No Dropout, With Flipping)",
+    "models": ["event5fold_elastic_model_fold1_center_flip", "event5fold_elastic_model_fold2_center_flip", "event5fold_elastic_model_fold3_center_flip", "event5fold_elastic_model_fold4_center_flip", "event5fold_elastic_model_fold5_center_flip"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"]
+  },
+  {
+    "name": "Center Predictions (With Dropout, With Flipping)",
+    "models": ["event5fold_elastic_model_fold1_center_drop", "event5fold_elastic_model_fold2_center_drop", "event5fold_elastic_model_fold3_center_drop", "event5fold_elastic_model_fold4_center_drop", "event5fold_elastic_model_fold5_center_drop"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"]
+  },
+  {
+    "name": "Center Predictions (With Dropout, No Flipping)",
+    "models": ["event5fold_center_model_fold1", "event5fold_center_model_fold2", "event5fold_center_model_fold3", "event5fold_center_model_fold4", "event5fold_center_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"]
+  },
+  {
+    "name": "Expanded Predictions (With Dropout, With Flipping, anglez)",
+    "models": ["event5fold_elastic_model_fold1_expanded_drop", "event5fold_elastic_model_fold2_expanded_drop", "event5fold_elastic_model_fold3_expanded_drop", "event5fold_elastic_model_fold4_expanded_drop", "event5fold_elastic_model_fold5_expanded_drop"],
+  }
+]
