@@ -1,6 +1,6 @@
 import os
 import argparse
-import shutil
+import json
 
 import numpy as np
 import torch
@@ -11,7 +11,7 @@ import model_event_unet
 import config
 import convert_to_npy_naive
 
-FOLDER = "confidence_labels"
+FOLDER = "./inference_confidence_statistics/confidence_labels"
 
 def inference(model_dir, validation_entries, all_data,
               hidden_blocks, hidden_channels, bottleneck_factor, squeeze_excitation, kernel_size,
@@ -72,19 +72,8 @@ def inference(model_dir, validation_entries, all_data,
     return all_preds
 
 if __name__ == "__main__":
-    FOLDERS = [
-        os.path.join(FOLDER, "onset"),
-        os.path.join(FOLDER, "wakeup")
-    ]
-    FOLDERS_DICT = {
-        "onset": FOLDERS[0],
-        "wakeup": FOLDERS[1]
-    }
     if not os.path.isdir(FOLDER):
         os.mkdir(FOLDER)
-    for folder in FOLDERS:
-        if not os.path.isdir(folder):
-            os.mkdir(folder)
 
     parser = argparse.ArgumentParser("Inference script for models trained on regression events data")
     parser.add_argument("--hidden_blocks", type=int, nargs="+", default=[1, 6, 8, 23, 8], help="Number of hidden 2d blocks for ResNet backbone.")
@@ -97,28 +86,13 @@ if __name__ == "__main__":
     parser.add_argument("--upconv_channels_override", type=int, default=None, help="Number of fixed channels for the upsampling path. Default None, do not override.")
     parser.add_argument("--expand", type=int, default=0, help="Expand the intervals by this amount. Default 0.")
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
-    parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
-    parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
-    parser.add_argument("--load_model", type=str, required=True, help="The model to load.")
-    manager_folds.add_argparse_arguments(parser)
     config.add_argparse_arguments(parser)
     args = parser.parse_args()
 
-    # check entries
-    training_entries, validation_entries, train_dset_name, val_dset_name = manager_folds.parse_args(args)
-    assert type(training_entries) == list
-    assert type(validation_entries) == list
-    print("Training dataset: {}".format(train_dset_name))
-    print("Validation dataset: {}".format(val_dset_name))
-
     # initialize gpu
     config.parse_args(args)
-
-    # get model directories
-    model_dir = os.path.join("../models", args.load_model)
-    assert os.path.isdir(model_dir), "Model directory does not exist."
 
     # get data parameters
     hidden_blocks = args.hidden_blocks
@@ -136,19 +110,43 @@ if __name__ == "__main__":
     prediction_length = args.prediction_length
     batch_size = args.batch_size
 
-    assert not (use_anglez_only and use_enmo_only), "Cannot use both anglez only and enmo only."
-
     # load data
     all_data = convert_to_npy_naive.load_all_data_into_dict()
 
-    # inference
-    all_preds = inference(model_dir, validation_entries, all_data,
-                            hidden_blocks, hidden_channels, bottleneck_factor, squeeze_excitation, kernel_size,
-                            attention_blocks, attention_bottleneck, upconv_channels_override,
-                            expand, use_batch_norm, use_anglez_only, use_enmo_only,
-                            prediction_length, batch_size)
+    # load options
+    with open(os.path.join("./inference_confidence_statistics", "inference_confidence_preds_options.json"), "r") as f:
+        options = json.load(f)
 
-    for series_id in tqdm.tqdm(validation_entries):
-        preds = all_preds[series_id]
-        np.save(os.path.join(FOLDERS_DICT["onset"], "{}.npy".format(series_id)), preds["onset"])
-        np.save(os.path.join(FOLDERS_DICT["wakeup"], "{}.npy".format(series_id)), preds["wakeup"])
+    # inference
+    for option in options:
+        name = option["name"]
+        folder_name = option["folder_name"]
+        models = option["models"]
+        entries = option["entries"]
+        input_type = option["input_type"]
+
+        assert len(models) == len(entries), "Number of models and entries must be the same."
+        assert input_type in ["anglez", "enmo", "both"], "Input type must be one of 'anglez', 'enmo', or 'both'."
+
+        use_anglez_only = input_type == "anglez"
+        use_enmo_only = input_type == "enmo"
+
+        out_dir = os.path.join(FOLDER, folder_name)
+        with open(os.path.join(out_dir, "name.txt"), "w") as f:
+            f.write(name)
+
+        for k in range(len(models)):
+            model_name = models[k]
+            validation_entries = manager_folds.load_dataset(entries[k])
+            model_dir = os.path.join("./models", model_name)
+
+            all_preds = inference(model_dir, validation_entries, all_data,
+                                    hidden_blocks, hidden_channels, bottleneck_factor, squeeze_excitation, kernel_size,
+                                    attention_blocks, attention_bottleneck, upconv_channels_override,
+                                    expand, use_batch_norm, use_anglez_only, use_enmo_only,
+                                    prediction_length, batch_size)
+
+            for series_id in tqdm.tqdm(validation_entries):
+                preds = all_preds[series_id]
+                np.save(os.path.join(out_dir, "{}_onset.npy".format(series_id)), preds["onset"])
+                np.save(os.path.join(out_dir, "{}_wakeup.npy".format(series_id)), preds["wakeup"])
