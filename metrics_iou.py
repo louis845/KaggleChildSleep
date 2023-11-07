@@ -153,3 +153,26 @@ def compute_iou_metrics_events(preds: np.ndarray, events: list[int], proba_thres
     false_count = len(preds) - events_size_count
 
     return tp, fp, false_count
+
+def compute_tpr_fpr_metrics(preds: np.ndarray, events: list[int], p_threshold=0.1, tolerance_radius=45 * 12 - 1):
+    assert len(preds.shape) == 1, "preds must be a 1D array"
+    assert isinstance(events, list), "events must be a list"
+
+    if len(events) == 0:
+        return 1.0, np.sum(preds > p_threshold) / len(preds)
+
+    preds_thresh = preds > p_threshold
+    background_regions = np.ones_like(preds, dtype=bool)
+
+    tp = 0
+    for event in events:
+        low = max(0, event - tolerance_radius)
+        high = min(len(preds), event + tolerance_radius + 1)
+        if np.any(preds_thresh[low:high]):
+            tp += 1
+        background_regions[low:high] = False
+
+    fp = np.sum(preds_thresh & background_regions)
+
+    tpr, fpr = tp / len(events), fp / np.sum(background_regions)
+    return tpr, fpr
