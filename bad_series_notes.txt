@@ -1,0 +1,13 @@
+13b4d6a01d27 - many omitted labels, and out of the present labels, quality is quite low
+4feda0596965 - very noisy bad labels, and some omitted labels. interesting to see whether the noise comes from shift in time due to preprocessing
+60d31b0bec3b - very noisy bad labels, and some omitted labels. some labels are shifted back and forth by exactly 30 mins
+e4500e7e19e1 - bad labels, with watch taken off in the tail, and not much labels
+f56824b503a0 - mostly noisy labels, and the wearer removed the watch at the end
+
+3a9a9dc2cbd9 - only one label, but probably correct. the label is preceded by removal of watch, making predictions hard
+4ac356361be9 - mostly good labels, but the noise is due to many bouts of wakeup between the sleeps, making predictions hard (due to intepretation)
+7476c0bd18d2 - clean labels, but with 2 labels only, and one challenging label. subsequently the wearer probably only wears the watch during sleep
+854206f602d0 - 2 labels only, one clean, one noisy. the noisy one gets shifted by exactly 1hr. for subsequent times, the wearer removed the watch
+
+cf13ed7e457a - repeating time series data in the end. seem to have clean labels
+# need to find way to detect and remove repeating time series data

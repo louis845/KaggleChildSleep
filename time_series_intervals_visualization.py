@@ -8,9 +8,6 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 
-#import inference_regression_preds
-from inference_confidence_statistics import inference_confidence_preds
-
 
 class MatplotlibWidget(QWidget):
     def __init__(self, parent=None):
@@ -41,8 +38,8 @@ class MatplotlibWidget(QWidget):
         self.axis.plot(x, y2, label="enmo")
         #self.axis.plot(x, extras["onset"] / 100.0, label="onset")
         #self.axis.plot(x, extras["wakeup"] / 100.0, label="wakeup")
-        self.axis.plot(x, extras["onset_kernel"] / 5.0, label="onset_kernel")
-        self.axis.plot(x, extras["wakeup_kernel"] / 5.0, label="wakeup_kernel")
+        #self.axis.plot(x, extras["onset_kernel"] / 5.0, label="onset_kernel")
+        #self.axis.plot(x, extras["wakeup_kernel"] / 5.0, label="wakeup_kernel")
         self.axis.plot(x, extras["onset_conf"] * 10.0, label="onset_conf") # easier viewing
         self.axis.plot(x, extras["wakeup_conf"] * 10.0, label="wakeup_conf")
 
@@ -219,9 +216,9 @@ def load_file(item):
     extras["onset_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_onset_locs.npy".format(item))
     extras["wakeup_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_wakeup_locs.npy".format(item))
 
-    folders2 = os.listdir(inference_confidence_preds.FOLDER)
-    for folder in folders2:
-        extras[folder + "_conf"] = np.load(os.path.join(inference_confidence_preds.FOLDER, folder, item + ".npy"))
+    confidence_pred_folder = "./inference_confidence_statistics/confidence_labels/event5fold_expanded_anglez"
+    extras["onset_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_onset.npy"))
+    extras["wakeup_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_wakeup.npy"))
 
     return df["anglez"], df["enmo"], df["timestamp"], extras
 
