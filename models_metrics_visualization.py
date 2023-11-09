@@ -154,8 +154,8 @@ class MetricPlotter(QMainWindow):
                 self.plot_layout.addWidget(canvas)
 
                 if "accuracy" in metric or "precision" in metric or "recall" in metric:
-                    ax.set_ylim(0.75, 0.95)
-                    ax.set_yticks(np.arange(0.75, 0.95, 0.05))
+                    ax.set_ylim(0.75, 1.0)
+                    ax.set_yticks(np.arange(0.75, 1.0, 0.05))
 
                 for model, df in data.items():
                     epochs = np.arange(max_epochs)

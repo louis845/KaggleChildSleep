@@ -12,6 +12,7 @@ from PySide2.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, Q
 from PySide2.QtCore import Qt
 
 import convert_to_npy_naive
+import convert_to_seriesid_events
 import metrics_iou
 
 class MainWindow(QMainWindow):
@@ -201,31 +202,16 @@ class MainWindow(QMainWindow):
         print()
         print()
 
-
-
 if __name__ == '__main__':
+    all_data = convert_to_npy_naive.load_all_data_into_dict()
+
     all_series_ids = [x.split(".")[0] for x in os.listdir("./individual_train_series")]
     all_series_ids = np.array(all_series_ids, dtype="object")
 
-    all_data = convert_to_npy_naive.load_all_data_into_dict()
-    events = pd.read_csv("./data/train_events.csv")
-    events = events.dropna()
-    per_seriesid_events = {}
-    for series_id in all_series_ids:
-        per_seriesid_events[series_id] = {
-            "onset": [], "wakeup": []
-        }
-        series_events = events.loc[events["series_id"] == series_id]
-        onsets = series_events.loc[series_events["event"] == "onset"]["step"]
-        wakeups = series_events.loc[series_events["event"] == "wakeup"]["step"]
-        if len(onsets) > 0:
-            per_seriesid_events[series_id]["onset"].extend(onsets.to_numpy(np.int32))
-        if len(wakeups) > 0:
-            per_seriesid_events[series_id]["wakeup"].extend(wakeups.to_numpy(np.int32))
+    per_seriesid_events = convert_to_seriesid_events.get_events_per_seriesid()
 
     with open("./inference_confidence_statistics/inference_confidence_preds_options.json") as f:
         metrics_data = json.load(f)
-
 
     app = QApplication([])
     win = MainWindow(data=metrics_data)

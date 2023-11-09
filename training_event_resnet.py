@@ -11,17 +11,20 @@ import pandas as pd
 import numpy as np
 import tqdm
 import torch
-import h5py
+import matplotlib.pyplot as plt
 
 import bad_series_list
 import config
 import manager_folds
 import manager_models
 import metrics
+import metrics_ap
 import metrics_iou
 import logging_memory_utils
 import convert_to_npy_naive
 import convert_to_interval_events
+import convert_to_pred_events
+import convert_to_seriesid_events
 import model_unet
 import model_event_unet
 
@@ -226,6 +229,98 @@ def validation_step():
     for key in current_metrics:
         val_history[key].append(current_metrics[key])
 
+def plot_single_precision_recall_curve(ax, precisions, recalls, ap, title):
+    ax.plot(recalls, precisions)
+    ax.set_title(title)
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.text(0.5, 0.5, "AP: {:.4f}".format(ap), horizontalalignment="center", verticalalignment="center")
+
+def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
+    ap30_onset_metric = metrics_ap.EventMetrics(name="", tolerance=12 * 30)
+    ap10_onset_metric = metrics_ap.EventMetrics(name="", tolerance=10 * 30)
+    ap5_onset_metric = metrics_ap.EventMetrics(name="", tolerance=5 * 30)
+    ap30_wakeup_metric = metrics_ap.EventMetrics(name="", tolerance=12 * 30)
+    ap10_wakeup_metric = metrics_ap.EventMetrics(name="", tolerance=10 * 30)
+    ap5_wakeup_metric = metrics_ap.EventMetrics(name="", tolerance=5 * 30)
+
+    with torch.no_grad():
+        for series_id in tqdm.tqdm(validation_entries):
+            # load the batch
+            accel_data = all_data[series_id]["accel"]
+            if use_anglez_only:
+                accel_data = accel_data[0:1, :]
+            elif use_enmo_only:
+                accel_data = accel_data[1:2, :]
+
+            proba_preds = model_event_unet.event_confidence_inference(model=model, time_series=accel_data,
+                                                                    batch_size=batch_size * 5,
+                                                                    prediction_length=prediction_length,
+                                                                    expand=expand)
+            onset_IOU_probas = iou_score_converter.convert(proba_preds[0, :])
+            wakeup_IOU_probas = iou_score_converter.convert(proba_preds[1, :])
+
+            # load the regression predictions
+            preds_locs = predicted_events[series_id]
+            preds_locs_onset = preds_locs["onset"]
+            preds_locs_wakeup = preds_locs["wakeup"]
+
+            # restrict
+            onset_IOU_probas = onset_IOU_probas[preds_locs_onset]
+            wakeup_IOU_probas = wakeup_IOU_probas[preds_locs_wakeup]
+
+            # get the ground truth
+            gt_onset_locs = gt_events[series_id]["onset"]
+            gt_wakeup_locs = gt_events[series_id]["wakeup"]
+
+            # add info
+            ap30_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
+            ap10_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
+            ap5_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
+            ap30_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
+            ap10_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
+            ap5_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
+
+    # compute average precision
+    ctime = time.time()
+    ap30_onset_precision, ap30_onset_recall, ap30_onset_average_precision = ap30_onset_metric.get()
+    ap10_onset_precision, ap10_onset_recall, ap10_onset_average_precision = ap10_onset_metric.get()
+    ap5_onset_precision, ap5_onset_recall, ap5_onset_average_precision = ap5_onset_metric.get()
+    ap30_wakeup_precision, ap30_wakeup_recall, ap30_wakeup_average_precision = ap30_wakeup_metric.get()
+    ap10_wakeup_precision, ap10_wakeup_recall, ap10_wakeup_average_precision = ap10_wakeup_metric.get()
+    ap5_wakeup_precision, ap5_wakeup_recall, ap5_wakeup_average_precision = ap5_wakeup_metric.get()
+    print("AP computation time: {:.2f} seconds".format(time.time() - ctime))
+
+    # write to dict
+    ctime = time.time()
+    val_history["val_onset_ap30"].append(ap30_onset_average_precision)
+    val_history["val_onset_ap10"].append(ap10_onset_average_precision)
+    val_history["val_onset_ap5"].append(ap5_onset_average_precision)
+    val_history["val_wakeup_ap30"].append(ap30_wakeup_average_precision)
+    val_history["val_wakeup_ap10"].append(ap10_wakeup_average_precision)
+    val_history["val_wakeup_ap5"].append(ap5_wakeup_average_precision)
+
+    # draw the precision-recall curve using matplotlib onto file "epoch{}_AP.png".format(epoch) inside the ap_log_dir
+    # the image should contain 6 curves, one for each of the 6 average precisions computed above, in a (height: 2, width: 3) grid
+    # the title of each subplot should be Onset AP30, Onset AP10, Onset AP5, Wakeup AP30, Wakeup AP10, Wakeup AP5
+    # the x-axis should be recall, and the y-axis should be precision, with limits [0, 1] for both axes
+    # there should be a text in the center "AP: {:.4f}".format(ap30_onset_average_precision) for example
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+    fig.suptitle("Epoch {}".format(epoch))
+    plot_single_precision_recall_curve(axes[0, 0], ap30_onset_precision, ap30_onset_recall, ap30_onset_average_precision, "Onset AP30")
+    plot_single_precision_recall_curve(axes[0, 1], ap10_onset_precision, ap10_onset_recall, ap10_onset_average_precision, "Onset AP10")
+    plot_single_precision_recall_curve(axes[0, 2], ap5_onset_precision, ap5_onset_recall, ap5_onset_average_precision, "Onset AP5")
+    plot_single_precision_recall_curve(axes[1, 0], ap30_wakeup_precision, ap30_wakeup_recall, ap30_wakeup_average_precision, "Wakeup AP30")
+    plot_single_precision_recall_curve(axes[1, 1], ap10_wakeup_precision, ap10_wakeup_recall, ap10_wakeup_average_precision, "Wakeup AP10")
+    plot_single_precision_recall_curve(axes[1, 2], ap5_wakeup_precision, ap5_wakeup_recall, ap5_wakeup_average_precision, "Wakeup AP5")
+    plt.subplots_adjust(wspace=0.3, hspace=0.5)
+    fig.savefig(os.path.join(ap_log_dir, "epoch{}_AP.png".format(epoch)))
+    plt.close(fig)
+
+    print("Plotting time: {:.2f} seconds".format(time.time() - ctime))
+
 def print_history(metrics_history):
     for key in metrics_history:
         print("{}      {}".format(key, metrics_history[key][-1]))
@@ -273,6 +368,7 @@ if __name__ == "__main__":
     parser.add_argument("--predict_center_mode", type=str, default="all", help="Optimization target for the center (expanded parts omitted) and the expanded parts of the intervals. Default all.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
+    parser.add_argument("--log_average_precision", action="store_true", help="Whether to log the average precision. Default False.")
     manager_folds.add_argparse_arguments(parser)
     manager_models.add_argparse_arguments(parser)
     config.add_argparse_arguments(parser)
@@ -329,6 +425,7 @@ if __name__ == "__main__":
     predict_center_mode = args.predict_center_mode
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
+    log_average_precision = args.log_average_precision
 
     assert not (use_iou_loss and use_ce_loss), "Cannot use both IOU loss and cross entropy loss."
     assert not (use_anglez_only and use_enmo_only), "Cannot use both anglez only and enmo only."
@@ -338,7 +435,18 @@ if __name__ == "__main__":
     # expanded - use the entire interval (expanded parts included) for optimization, and only the center part for prediction (validation)
     if exclude_bad_series_from_training:
         training_entries = [series_id for series_id in training_entries if series_id not in bad_series_list.noisy_bad_segmentations]
-
+    if log_average_precision:
+        assert os.path.isdir("./inference_regression_statistics/regression_preds/"), "Must generate regression predictions first. See inference_regression_statistics folder."
+        per_series_id_events = convert_to_seriesid_events.get_events_per_seriesid()
+        regression_predicted_events = convert_to_pred_events.load_all_pred_events_into_dict()
+        iou_score_converter = model_event_unet.ProbasIOUScoreConverter(intersection_width=30 * 12, union_width=60 * 12, device=config.device)
+        ap_log_dir = os.path.join(model_dir, "ap_log")
+        os.mkdir(ap_log_dir)
+    else:
+        per_series_id_events = None
+        regression_predicted_events = None
+        iou_score_converter = None
+        ap_log_dir = None
 
     if isinstance(hidden_channels, int):
         hidden_channels = [hidden_channels]
@@ -451,6 +559,7 @@ if __name__ == "__main__":
         "predict_center_mode": predict_center_mode,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
+        "log_average_precision": log_average_precision,
     }
 
     # Save the model config
@@ -527,6 +636,9 @@ if __name__ == "__main__":
             model.eval()
             with torch.no_grad():
                 validation_step()
+                if log_average_precision:
+                    validation_ap(epoch=epoch, ap_log_dir=ap_log_dir, predicted_events=regression_predicted_events,
+                                  gt_events=per_series_id_events)
 
             print()
             print_history(train_history)

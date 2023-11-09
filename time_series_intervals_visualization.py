@@ -42,6 +42,8 @@ class MatplotlibWidget(QWidget):
         #self.axis.plot(x, extras["wakeup_kernel"] / 5.0, label="wakeup_kernel")
         self.axis.plot(x, extras["onset_conf"] * 10.0, label="onset_conf") # easier viewing
         self.axis.plot(x, extras["wakeup_conf"] * 10.0, label="wakeup_conf")
+        self.axis.plot(x, extras["onset_IOU_conf"] * 10.0, label="onset_IOU_conf")  # easier viewing
+        self.axis.plot(x, extras["wakeup_IOU_conf"] * 10.0, label="wakeup_IOU_conf")
 
         for event_time, event_type in events:
             color = "blue" if event_type in [1, 3, 4] else "red"
@@ -219,6 +221,8 @@ def load_file(item):
     confidence_pred_folder = "./inference_confidence_statistics/confidence_labels/event5fold_expanded_anglez"
     extras["onset_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_onset.npy"))
     extras["wakeup_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_wakeup.npy"))
+    extras["onset_IOU_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_IOU_onset.npy"))
+    extras["wakeup_IOU_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_IOU_wakeup.npy"))
 
     return df["anglez"], df["enmo"], df["timestamp"], extras
 

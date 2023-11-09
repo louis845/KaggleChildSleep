@@ -88,6 +88,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
+    parser.add_argument("--IOU_intersection_width", type=int, default=30 * 12, help="Intersection width for IOU score. Default 30 * 12.")
+    parser.add_argument("--IOU_union_width", type=int, default=60 * 12, help="Union width for IOU score. Default 60 * 12.")
     config.add_argparse_arguments(parser)
     args = parser.parse_args()
 
@@ -107,6 +109,8 @@ if __name__ == "__main__":
     use_batch_norm = args.use_batch_norm
     prediction_length = args.prediction_length
     batch_size = args.batch_size
+    IOU_intersection_width = args.IOU_intersection_width
+    IOU_union_width = args.IOU_union_width
 
     # load data
     all_data = convert_to_npy_naive.load_all_data_into_dict()
@@ -114,6 +118,8 @@ if __name__ == "__main__":
     # load options
     with open(os.path.join("./inference_confidence_statistics", "inference_confidence_preds_options.json"), "r") as f:
         options = json.load(f)
+
+    iou_score_converter = model_event_unet.ProbasIOUScoreConverter(intersection_width=IOU_intersection_width, union_width=IOU_union_width, device=config.device)
 
     # inference
     for option in options:
@@ -152,3 +158,5 @@ if __name__ == "__main__":
                 preds = all_preds[series_id]
                 np.save(os.path.join(out_dir, "{}_onset.npy".format(series_id)), preds["onset"])
                 np.save(os.path.join(out_dir, "{}_wakeup.npy".format(series_id)), preds["wakeup"])
+                np.save(os.path.join(out_dir, "{}_IOU_onset.npy".format(series_id)), iou_score_converter.convert(preds["onset"]))
+                np.save(os.path.join(out_dir, "{}_IOU_wakeup.npy".format(series_id)), iou_score_converter.convert(preds["wakeup"]))

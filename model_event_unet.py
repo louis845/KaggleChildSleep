@@ -357,3 +357,58 @@ def event_confidence_single_inference(model: EventConfidenceUnet, time_series: n
             multiplicities[batches_starts[i]:batches_ends[i]] += 1
 
         batches_computed = batches_compute_end
+
+class ProbasIOUScoreConverter:
+    def __init__(self, intersection_width: int, union_width: int, device: torch.device):
+        """
+        Class for converting probas to IOU probas scores.
+        :param intersection_width: The width for the intersection
+        :param union_width: The width for the union
+        """
+        assert union_width > intersection_width, "union_width must be greater than intersection_width"
+
+        self.intersection_width = intersection_width
+        self.union_width = union_width
+        self.device = device
+
+        self.conv_intersection = torch.nn.Conv1d(1, 1, kernel_size=1 + 2 * (intersection_width - 1),
+                                                 bias=False, padding="same", padding_mode="zeros")
+        self.conv_union = torch.nn.Conv1d(1, 1, kernel_size=1 + 2 * (union_width - 1),
+                                          bias=False, padding="same", padding_mode="zeros")
+        # initialize weights
+        with torch.no_grad():
+            self.conv_intersection.weight.copy_(
+                torch.ones_like(self.conv_intersection.weight, dtype=torch.float32, device="cpu")
+            )
+
+            width_difference = union_width - intersection_width
+            union_weight = torch.ones_like(self.conv_union.weight, dtype=torch.float32, device="cpu")
+            assert union_weight.shape[:2] == (1, 1)
+            union_weight[:, :, width_difference:-width_difference] = 0.0
+            self.conv_union.weight.copy_(union_weight)
+
+            self.conv_intersection.to(self.device)
+            self.conv_union.to(self.device)
+
+    def convert(self, probas: np.ndarray):
+        """
+        Convert probas to IOU probas scores.
+        :param probas: The probas to convert
+        :return: The converted probas
+        """
+        assert len(probas.shape) == 1, "probas must be a 1D array"
+
+        with torch.no_grad():
+            probas_torch = torch.tensor(probas, dtype=torch.float32, device=self.device).unsqueeze(0).unsqueeze(0)
+
+            intersection = self.conv_intersection(probas_torch)
+            union = self.conv_union(probas_torch)
+
+            intersection = intersection.squeeze(0).squeeze(0).cpu().numpy()
+            union = union.squeeze(0).squeeze(0).cpu().numpy()
+
+        intersection_high = np.clip(np.arange(len(probas)) + self.intersection_width, a_max=len(probas), a_min=0)
+        intersection_low = np.clip(np.arange(len(probas)) - self.intersection_width + 1, a_max=len(probas), a_min=0)
+        union = union + (intersection_high - intersection_low)
+
+        return intersection / (union + 1e-5)
