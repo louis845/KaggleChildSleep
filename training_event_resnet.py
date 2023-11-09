@@ -13,6 +13,7 @@ import tqdm
 import torch
 import h5py
 
+import bad_series_list
 import config
 import manager_folds
 import manager_models
@@ -21,9 +22,7 @@ import metrics_iou
 import logging_memory_utils
 import convert_to_npy_naive
 import convert_to_interval_events
-import convert_to_good_events
 import model_unet
-import model_attention_unet
 import model_event_unet
 
 # same as training_clean_data.py, but with 3 factor downsampling at the first layer
@@ -268,6 +267,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
     parser.add_argument("--include_all_events", action="store_true", help="Whether to include all events. Default False.")
+    parser.add_argument("--exclude_bad_series_from_training", action="store_true", help="Whether to exclude bad series from training. Default False.")
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
     parser.add_argument("--prediction_stride", type=int, default=4320, help="Number of timesteps to stride when predicting. Default 4320.")
     parser.add_argument("--predict_center_mode", type=str, default="all", help="Optimization target for the center (expanded parts omitted) and the expanded parts of the intervals. Default all.")
@@ -284,6 +284,7 @@ if __name__ == "__main__":
     assert type(validation_entries) == list
     print("Training dataset: {}".format(train_dset_name))
     print("Validation dataset: {}".format(val_dset_name))
+    validation_entries = [series_id for series_id in validation_entries if series_id not in bad_series_list.noisy_bad_segmentations] # exclude
 
     # initialize gpu
     config.parse_args(args)
@@ -322,6 +323,7 @@ if __name__ == "__main__":
     use_anglez_only = args.use_anglez_only
     use_enmo_only = args.use_enmo_only
     include_all_events = args.include_all_events
+    exclude_bad_series_from_training = args.exclude_bad_series_from_training
     prediction_length = args.prediction_length
     prediction_stride = args.prediction_stride
     predict_center_mode = args.predict_center_mode
@@ -334,6 +336,8 @@ if __name__ == "__main__":
     # all      - predict all parts of the interval, events only happen in the center, and the expanded parts will be predicted as negative (for both training and validation)
     # center   - predict only the center parts of the interval. No optimization and predictions will be made for the expanded parts (for both training and validation)
     # expanded - use the entire interval (expanded parts included) for optimization, and only the center part for prediction (validation)
+    if exclude_bad_series_from_training:
+        training_entries = [series_id for series_id in training_entries if series_id not in bad_series_list.noisy_bad_segmentations]
 
 
     if isinstance(hidden_channels, int):
@@ -441,6 +445,7 @@ if __name__ == "__main__":
         "use_anglez_only": use_anglez_only,
         "use_enmo_only": use_enmo_only,
         "include_all_events": include_all_events,
+        "exclude_bad_series_from_training": exclude_bad_series_from_training,
         "prediction_length": prediction_length,
         "prediction_stride": prediction_stride,
         "predict_center_mode": predict_center_mode,
