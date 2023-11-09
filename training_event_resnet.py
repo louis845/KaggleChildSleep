@@ -239,12 +239,9 @@ def plot_single_precision_recall_curve(ax, precisions, recalls, ap, title):
     ax.text(0.5, 0.5, "AP: {:.4f}".format(ap), horizontalalignment="center", verticalalignment="center")
 
 def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
-    ap30_onset_metric = metrics_ap.EventMetrics(name="", tolerance=12 * 30)
-    ap10_onset_metric = metrics_ap.EventMetrics(name="", tolerance=10 * 30)
-    ap5_onset_metric = metrics_ap.EventMetrics(name="", tolerance=5 * 30)
-    ap30_wakeup_metric = metrics_ap.EventMetrics(name="", tolerance=12 * 30)
-    ap10_wakeup_metric = metrics_ap.EventMetrics(name="", tolerance=10 * 30)
-    ap5_wakeup_metric = metrics_ap.EventMetrics(name="", tolerance=5 * 30)
+    tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30]
+    ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance) for tolerance in tolerances]
+    ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance) for tolerance in tolerances]
 
     with torch.no_grad():
         for series_id in tqdm.tqdm(validation_entries):
@@ -276,48 +273,49 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
             gt_wakeup_locs = gt_events[series_id]["wakeup"]
 
             # add info
-            ap30_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
-            ap10_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
-            ap5_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
-            ap30_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
-            ap10_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
-            ap5_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
+            for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+                ap_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
+                ap_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
 
     # compute average precision
     ctime = time.time()
-    ap30_onset_precision, ap30_onset_recall, ap30_onset_average_precision = ap30_onset_metric.get()
-    ap10_onset_precision, ap10_onset_recall, ap10_onset_average_precision = ap10_onset_metric.get()
-    ap5_onset_precision, ap5_onset_recall, ap5_onset_average_precision = ap5_onset_metric.get()
-    ap30_wakeup_precision, ap30_wakeup_recall, ap30_wakeup_average_precision = ap30_wakeup_metric.get()
-    ap10_wakeup_precision, ap10_wakeup_recall, ap10_wakeup_average_precision = ap10_wakeup_metric.get()
-    ap5_wakeup_precision, ap5_wakeup_recall, ap5_wakeup_average_precision = ap5_wakeup_metric.get()
+    ap_onset_precisions, ap_onset_recalls, ap_onset_average_precisions = [], [], []
+    ap_wakeup_precisions, ap_wakeup_recalls, ap_wakeup_average_precisions = [], [], []
+    for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+        ap_onset_precision, ap_onset_recall, ap_onset_average_precision = ap_onset_metric.get()
+        ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision = ap_wakeup_metric.get()
+        ap_onset_precisions.append(ap_onset_precision)
+        ap_onset_recalls.append(ap_onset_recall)
+        ap_onset_average_precisions.append(ap_onset_average_precision)
+        ap_wakeup_precisions.append(ap_wakeup_precision)
+        ap_wakeup_recalls.append(ap_wakeup_recall)
+        ap_wakeup_average_precisions.append(ap_wakeup_average_precision)
     print("AP computation time: {:.2f} seconds".format(time.time() - ctime))
 
     # write to dict
     ctime = time.time()
-    val_history["val_onset_ap30"].append(ap30_onset_average_precision)
-    val_history["val_onset_ap10"].append(ap10_onset_average_precision)
-    val_history["val_onset_ap5"].append(ap5_onset_average_precision)
-    val_history["val_wakeup_ap30"].append(ap30_wakeup_average_precision)
-    val_history["val_wakeup_ap10"].append(ap10_wakeup_average_precision)
-    val_history["val_wakeup_ap5"].append(ap5_wakeup_average_precision)
+    for k in range(len(tolerances)):
+        val_history["val_onset_ap{}".format(tolerances[k])].append(ap_onset_average_precisions[k])
+        val_history["val_wakeup_ap{}".format(tolerances[k])].append(ap_wakeup_average_precisions[k])
+    val_history["val_onset_mAP"].append(np.mean(ap_onset_average_precisions))
+    val_history["val_wakeup_mAP"].append(np.mean(ap_wakeup_average_precisions))
 
     # draw the precision-recall curve using matplotlib onto file "epoch{}_AP.png".format(epoch) inside the ap_log_dir
-    # the image should contain 6 curves, one for each of the 6 average precisions computed above, in a (height: 2, width: 3) grid
-    # the title of each subplot should be Onset AP30, Onset AP10, Onset AP5, Wakeup AP30, Wakeup AP10, Wakeup AP5
+    # the image should contain 20 curves, one for each of the 6 average precisions computed above, in a (height: 4, width: 5) grid
+    # the title of each subplot should be Onset AP{} or Wakeup AP{} where {} is the tolerance
+    # the top 2x5 subplots should be for onset, and the bottom 2x5 subplots should be for wakeup
     # the x-axis should be recall, and the y-axis should be precision, with limits [0, 1] for both axes
-    # there should be a text in the center "AP: {:.4f}".format(ap30_onset_average_precision) for example
-    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
-    fig.suptitle("Epoch {}".format(epoch))
-    plot_single_precision_recall_curve(axes[0, 0], ap30_onset_precision, ap30_onset_recall, ap30_onset_average_precision, "Onset AP30")
-    plot_single_precision_recall_curve(axes[0, 1], ap10_onset_precision, ap10_onset_recall, ap10_onset_average_precision, "Onset AP10")
-    plot_single_precision_recall_curve(axes[0, 2], ap5_onset_precision, ap5_onset_recall, ap5_onset_average_precision, "Onset AP5")
-    plot_single_precision_recall_curve(axes[1, 0], ap30_wakeup_precision, ap30_wakeup_recall, ap30_wakeup_average_precision, "Wakeup AP30")
-    plot_single_precision_recall_curve(axes[1, 1], ap10_wakeup_precision, ap10_wakeup_recall, ap10_wakeup_average_precision, "Wakeup AP10")
-    plot_single_precision_recall_curve(axes[1, 2], ap5_wakeup_precision, ap5_wakeup_recall, ap5_wakeup_average_precision, "Wakeup AP5")
-    plt.subplots_adjust(wspace=0.3, hspace=0.5)
-    fig.savefig(os.path.join(ap_log_dir, "epoch{}_AP.png".format(epoch)))
-    plt.close(fig)
+    # there should be a text in the center "AP: {:.4f}".format(ap_onset_average_precisions[k]) for example
+    fig, axes=  plt.subplots(4, 5, figsize=(20, 16))
+    fig.suptitle("Epoch {} (Onset mAP: {}, Wakeup mAP: {})".format(epoch, np.mean(ap_onset_average_precisions), np.mean(ap_wakeup_average_precisions)))
+    for k in range(len(tolerances)):
+        ax = axes[k // 5, k % 5]
+        plot_single_precision_recall_curve(ax, ap_onset_precisions[k], ap_onset_recalls[k], ap_onset_average_precisions[k], "Onset AP{}".format(tolerances[k]))
+        ax = axes[(k + 10) // 5, (k + 10) % 5]
+        plot_single_precision_recall_curve(ax, ap_wakeup_precisions[k], ap_wakeup_recalls[k], ap_wakeup_average_precisions[k], "Wakeup AP{}".format(tolerances[k]))
+    plt.subplots_adjust(wspace=0.3, hspace=0.3)
+    plt.savefig(os.path.join(ap_log_dir, "epoch{}_AP.png".format(epoch)))
+    plt.close()
 
     print("Plotting time: {:.2f} seconds".format(time.time() - ctime))
 
