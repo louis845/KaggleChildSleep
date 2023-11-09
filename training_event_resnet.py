@@ -238,10 +238,10 @@ def plot_single_precision_recall_curve(ax, precisions, recalls, ap, title):
     ax.set_ylim(0, 1)
     ax.text(0.5, 0.5, "AP: {:.4f}".format(ap), horizontalalignment="center", verticalalignment="center")
 
+validation_AP_tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30][::-1]
 def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
-    tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30]
-    ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance) for tolerance in tolerances]
-    ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance) for tolerance in tolerances]
+    ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+    ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
 
     with torch.no_grad():
         for series_id in tqdm.tqdm(validation_entries):
@@ -294,25 +294,20 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
 
     # write to dict
     ctime = time.time()
-    for k in range(len(tolerances)):
-        val_history["val_onset_ap{}".format(tolerances[k])].append(ap_onset_average_precisions[k])
-        val_history["val_wakeup_ap{}".format(tolerances[k])].append(ap_wakeup_average_precisions[k])
+    for k in range(len(validation_AP_tolerances)):
+        val_history["val_onset_ap{}".format(validation_AP_tolerances[k])].append(ap_onset_average_precisions[k])
+        val_history["val_wakeup_ap{}".format(validation_AP_tolerances[k])].append(ap_wakeup_average_precisions[k])
     val_history["val_onset_mAP"].append(np.mean(ap_onset_average_precisions))
     val_history["val_wakeup_mAP"].append(np.mean(ap_wakeup_average_precisions))
 
     # draw the precision-recall curve using matplotlib onto file "epoch{}_AP.png".format(epoch) inside the ap_log_dir
-    # the image should contain 20 curves, one for each of the 6 average precisions computed above, in a (height: 4, width: 5) grid
-    # the title of each subplot should be Onset AP{} or Wakeup AP{} where {} is the tolerance
-    # the top 2x5 subplots should be for onset, and the bottom 2x5 subplots should be for wakeup
-    # the x-axis should be recall, and the y-axis should be precision, with limits [0, 1] for both axes
-    # there should be a text in the center "AP: {:.4f}".format(ap_onset_average_precisions[k]) for example
     fig, axes=  plt.subplots(4, 5, figsize=(20, 16))
     fig.suptitle("Epoch {} (Onset mAP: {}, Wakeup mAP: {})".format(epoch, np.mean(ap_onset_average_precisions), np.mean(ap_wakeup_average_precisions)))
-    for k in range(len(tolerances)):
+    for k in range(len(validation_AP_tolerances)):
         ax = axes[k // 5, k % 5]
-        plot_single_precision_recall_curve(ax, ap_onset_precisions[k], ap_onset_recalls[k], ap_onset_average_precisions[k], "Onset AP{}".format(tolerances[k]))
+        plot_single_precision_recall_curve(ax, ap_onset_precisions[k], ap_onset_recalls[k], ap_onset_average_precisions[k], "Onset AP{}".format(validation_AP_tolerances[k]))
         ax = axes[(k + 10) // 5, (k + 10) % 5]
-        plot_single_precision_recall_curve(ax, ap_wakeup_precisions[k], ap_wakeup_recalls[k], ap_wakeup_average_precisions[k], "Wakeup AP{}".format(tolerances[k]))
+        plot_single_precision_recall_curve(ax, ap_wakeup_precisions[k], ap_wakeup_recalls[k], ap_wakeup_average_precisions[k], "Wakeup AP{}".format(validation_AP_tolerances[k]))
     plt.subplots_adjust(wspace=0.3, hspace=0.3)
     plt.savefig(os.path.join(ap_log_dir, "epoch{}_AP.png".format(epoch)))
     plt.close()
