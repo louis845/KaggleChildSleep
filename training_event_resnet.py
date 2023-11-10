@@ -106,6 +106,11 @@ def training_step(record: bool):
                 accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
             elif use_enmo_only:
                 accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
+            elif mix_anglez_enmo:
+                if np.random.rand() < 0.5:
+                    accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
+                else:
+                    accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
 
             if predict_center_mode == "center":
                 labels_batch_torch = labels_batch_torch[:, :, expand:-expand]
@@ -178,6 +183,8 @@ def validation_step():
                 accel_data_batch = accel_data_batch[:, 0:1, :]
             elif use_enmo_only:
                 accel_data_batch = accel_data_batch[:, 1:2, :]
+            elif mix_anglez_enmo:
+                accel_data_batch = accel_data_batch[:, 0:1, :]
 
             if (predict_center_mode == "center" or predict_center_mode == "expanded"):
                 labels_batch = labels_batch[:, :, expand:-expand]
@@ -251,6 +258,8 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
                 accel_data = accel_data[0:1, :]
             elif use_enmo_only:
                 accel_data = accel_data[1:2, :]
+            elif mix_anglez_enmo:
+                accel_data = accel_data[0:1, :]
 
             proba_preds = model_event_unet.event_confidence_inference(model=model, time_series=accel_data,
                                                                     batch_size=batch_size * 5,
@@ -355,6 +364,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_ce_iou_loss", action="store_true", help="Whether to use a combination of cross entropy and IOU loss. Default False.")
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
+    parser.add_argument("--mix_anglez_enmo", action="store_true", help="Whether to mix anglez and enmo. Default False.")
     parser.add_argument("--include_all_events", action="store_true", help="Whether to include all events. Default False.")
     parser.add_argument("--exclude_bad_series_from_training", action="store_true", help="Whether to exclude bad series from training. Default False.")
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
@@ -413,6 +423,7 @@ if __name__ == "__main__":
     use_ce_iou_loss = args.use_ce_iou_loss
     use_anglez_only = args.use_anglez_only
     use_enmo_only = args.use_enmo_only
+    mix_anglez_enmo = args.mix_anglez_enmo
     include_all_events = args.include_all_events
     exclude_bad_series_from_training = args.exclude_bad_series_from_training
     prediction_length = args.prediction_length
@@ -423,7 +434,7 @@ if __name__ == "__main__":
     log_average_precision = args.log_average_precision
 
     assert not (use_iou_loss and use_ce_loss), "Cannot use both IOU loss and cross entropy loss."
-    assert not (use_anglez_only and use_enmo_only), "Cannot use both anglez only and enmo only."
+    assert sum([use_anglez_only, use_enmo_only, mix_anglez_enmo]) <= 1, "Cannot use more than one of anglez only, enmo only, and mix anglez and enmo."
     assert predict_center_mode in ["all", "center", "expanded"], "predict_center_mode must be one of all, center, expanded."
     # all      - predict all parts of the interval, events only happen in the center, and the expanded parts will be predicted as negative (for both training and validation)
     # center   - predict only the center parts of the interval. No optimization and predictions will be made for the expanded parts (for both training and validation)
@@ -466,7 +477,7 @@ if __name__ == "__main__":
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
-    in_channels = 1 if (use_anglez_only or use_enmo_only) else 2
+    in_channels = 1 if (use_anglez_only or use_enmo_only or mix_anglez_enmo) else 2
     model = model_event_unet.EventConfidenceUnet(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                             bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
                             squeeze_excitation_bottleneck_factor=4,
@@ -549,6 +560,7 @@ if __name__ == "__main__":
         "use_ce_iou_loss": use_ce_iou_loss,
         "use_anglez_only": use_anglez_only,
         "use_enmo_only": use_enmo_only,
+        "mix_anglez_enmo": mix_anglez_enmo,
         "include_all_events": include_all_events,
         "exclude_bad_series_from_training": exclude_bad_series_from_training,
         "prediction_length": prediction_length,
@@ -596,6 +608,8 @@ if __name__ == "__main__":
     print("Expand: " + str(expand))
     print("Prediction mode:" + str(predict_center_mode))
     print("Use anglez only: " + str(use_anglez_only))
+    print("Use enmo only: " + str(use_enmo_only))
+    print("Mix anglez and enmo: " + str(mix_anglez_enmo))
     training_sampler = convert_to_interval_events.IntervalEventsSampler(training_entries, all_data,
                                                                         train_or_test="train",
                                                                         prediction_length=prediction_length,
