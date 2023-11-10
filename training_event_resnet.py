@@ -340,6 +340,7 @@ if __name__ == "__main__":
     parser.add_argument("--kernel_size", type=int, default=11, help="Kernel size for the first layer. Default 11.")
     parser.add_argument("--attention_blocks", type=int, default=4, help="Number of attention blocks to use. Default 4.")
     parser.add_argument("--attention_bottleneck", type=int, default=None, help="The bottleneck factor of the attention module. Default None.")
+    parser.add_argument("--attention_mode", type=str, default="learned", help="Attention mode. Default 'learned'. Must be 'learned', 'length' or 'pairwise_length'.")
     parser.add_argument("--upconv_channels_override", type=int, default=None, help="Number of fixed channels for the upsampling path. Default None, do not override.")
     parser.add_argument("--random_shift", type=int, default=0, help="Randomly shift the intervals by at most this amount. Default 0.")
     parser.add_argument("--random_flip", action="store_true", help="Randomly flip the intervals. Default False.")
@@ -397,6 +398,7 @@ if __name__ == "__main__":
     kernel_size = args.kernel_size
     attention_blocks = args.attention_blocks
     attention_bottleneck = args.attention_bottleneck
+    attention_mode = args.attention_mode
     upconv_channels_override = args.upconv_channels_override
     random_shift = args.random_shift
     random_flip = args.random_flip
@@ -459,6 +461,7 @@ if __name__ == "__main__":
     print("Hidden blocks: " + str(hidden_blocks))
     print("Kernel size: " + str(kernel_size))
     print("Attention bottleneck: " + str(attention_bottleneck))
+    print("Attention mode: " + str(attention_mode))
     print("Upconv channels: " + str(upconv_channels_override))
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
@@ -470,7 +473,7 @@ if __name__ == "__main__":
                             dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
                             use_batch_norm=use_batch_norm, attn_out_channels=2, attention_bottleneck=attention_bottleneck,
                             expected_attn_input_length=17280 + (2 * expand), attention_blocks=attention_blocks,
-                            upconv_channels_override=upconv_channels_override)
+                            upconv_channels_override=upconv_channels_override, attention_mode=attention_mode)
     model = model.to(config.device)
 
     # initialize optimizer
@@ -531,6 +534,7 @@ if __name__ == "__main__":
         "kernel_size": kernel_size,
         "attention_blocks": attention_blocks,
         "attention_bottleneck": attention_bottleneck,
+        "attention_mode": attention_mode,
         "upconv_channels_override": upconv_channels_override,
         "random_shift": random_shift,
         "random_flip": random_flip,

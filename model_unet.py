@@ -317,3 +317,88 @@ class ResNetBackbone(torch.nn.Module):
             ret.append(x)
 
         return ret
+
+class UnetHead(torch.nn.Module):
+    def __init__(self, pyramid_height, hidden_channels, kernel_size,
+                 use_batch_norm: bool, dropout: float, initial_downsample_3f: bool):
+        super(UnetHead, self).__init__()
+        assert isinstance(hidden_channels, list), "hidden_channels must be a list"
+        for channel in hidden_channels:
+            assert isinstance(channel, int), "hidden_channels must be a list of ints"
+
+        self.pyramid_height = pyramid_height
+
+        self.upsample_conv = torch.nn.ModuleList()
+        self.upsample_norms = torch.nn.ModuleList()
+        for k in range(self.pyramid_height - 1):
+            if hidden_channels[k] % 4 == 0:
+                num_groups = hidden_channels[k] // 4
+                self.upsample_conv.append(torch.nn.Conv1d(hidden_channels[k + 1], hidden_channels[k],
+                                                          kernel_size=kernel_size, groups=num_groups, bias=False,
+                                                          padding="same", padding_mode="replicate"))
+            else:
+                self.upsample_conv.append(torch.nn.Conv1d(hidden_channels[k + 1], hidden_channels[k],
+                                                          kernel_size=1, bias=False, padding="same",
+                                                          padding_mode="replicate"))
+            if use_batch_norm:
+                self.upsample_norms.append(
+                    torch.nn.BatchNorm1d(hidden_channels[k], momentum=BATCH_NORM_MOMENTUM, affine=True))
+            else:
+                self.upsample_norms.append(torch.nn.InstanceNorm1d(hidden_channels[k]))
+
+        self.cat_conv = torch.nn.ModuleList()
+        self.cat_norms = torch.nn.ModuleList()
+        for k in range(self.pyramid_height - 1):
+            self.cat_conv.append(torch.nn.Conv1d(hidden_channels[k] * 2, hidden_channels[k],
+                                                 kernel_size=1, bias=False, padding="same", padding_mode="replicate"))
+            if use_batch_norm:
+                self.cat_norms.append(
+                    torch.nn.BatchNorm1d(hidden_channels[k], momentum=BATCH_NORM_MOMENTUM, affine=True))
+            else:
+                self.cat_norms.append(torch.nn.InstanceNorm1d(hidden_channels[k]))
+
+        self.nonlin = torch.nn.GELU()
+        if dropout > 0.0:
+            self.dropout = torch.nn.Dropout1d(dropout)
+
+        self.use_dropout = dropout > 0.0
+        self.initial_downsample_3f = initial_downsample_3f
+
+    def forward(self, ret, downsampling_methods):
+        x = ret[-1]
+        for i in range(self.pyramid_height - 1):
+            # upsample
+            if (i == self.pyramid_height - 2) and self.initial_downsample_3f:
+                x = self.upsample_3f(x)
+            else:
+                x = self.upsample(x, downsampling_methods[-(i + 1)])
+            # convolve and normalize
+            x = self.upsample_norms[-(i + 1)](self.upsample_conv[-(i + 1)](x))
+            x = self.nonlin(x)
+            if (i < 2) and self.use_dropout:
+                x = self.dropout(x)
+            # concatenate
+            assert x.shape == ret[-(i + 2)].shape
+            x = torch.cat([
+                x,
+                ret[-(i + 2)]
+            ], dim=1)
+            # convolve and normalize
+            x = self.cat_norms[-(i + 1)](self.cat_conv[-(i + 1)](x))
+            x = self.nonlin(x)
+            if (i < 2) and self.use_dropout:
+                x = self.dropout(x)
+        return x
+
+    def upsample(self, x, downsampling_method):
+        if downsampling_method == 0:
+            return torch.nn.functional.interpolate(x, size=(x.shape[-1] * 2,), mode="linear")
+        elif downsampling_method == 1:
+            return torch.nn.functional.interpolate(x, size=(x.shape[-1] * 2,), mode="linear")[..., 1:]
+        elif downsampling_method == 2:
+            return torch.nn.functional.interpolate(x, size=(x.shape[-1] * 2,), mode="linear")[..., :-1]
+        else:
+            raise ValueError("downsampling method not supported")
+
+    def upsample_3f(self, x):
+        return torch.nn.functional.interpolate(x, size=(x.shape[-1] * 3,), mode="linear")

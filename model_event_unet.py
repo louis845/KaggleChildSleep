@@ -144,7 +144,8 @@ class EventConfidenceUnet(torch.nn.Module):
                  attention_key_query_channels=64, attention_blocks=4,
                  expected_attn_input_length=17280, dropout_pos_embeddings=False,
                  attn_out_channels=1, attention_bottleneck=None,
-                 upconv_channels_override=None):
+                 upconv_channels_override=None,
+                 attention_mode="learned"):
         super(EventConfidenceUnet, self).__init__()
         assert kernel_size % 2 == 1, "kernel size must be odd"
         assert len(blocks) >= 6, "blocks must have at least 6 elements"
@@ -182,7 +183,7 @@ class EventConfidenceUnet(torch.nn.Module):
                                                        key_query_channels=attention_key_query_channels,
                                                        heads=attention_heads,
                                                        dropout=dropout,
-                                                       learned_embeddings=True,
+                                                       attention_mode=attention_mode,
                                                        input_length=expected_attn_input_length // (3 * (2 ** (len(blocks) - 2))),
                                                        dropout_pos_embeddings=dropout_pos_embeddings)
             )
@@ -273,10 +274,20 @@ def event_regression_inference(model: EventRegressorUnet, time_series: np.ndarra
     preds = model(time_series_batch, ret_type="deep")
     preds = preds.squeeze(0)
     if return_torch_tensor:
-        preds = torch.nn.functional.pad(preds, (start, end_contraction), mode="constant", value=0)
+        if model.use_learnable_sigma: # we pad the sigmas by the maximum value
+            preds_locs = torch.nn.functional.pad(preds[:2, :], (start, end_contraction), mode="constant", value=0)
+            preds_sigmas = torch.nn.functional.pad(preds[2:, :], (start, end_contraction), mode="constant", value=360)
+            preds = torch.cat([preds_locs, preds_sigmas], dim=0)
+        else:
+            preds = torch.nn.functional.pad(preds, (start, end_contraction), mode="constant", value=0)
     else:
         preds = preds.cpu().numpy()
-        preds = np.pad(preds, ((0, 0), (start, end_contraction)), mode="constant")
+        if model.use_learnable_sigma: # we pad the sigmas by the maximum value
+            preds_locs = np.pad(preds[:2, :], ((0, 0), (start, end_contraction)), mode="constant")
+            preds_sigmas = np.pad(preds[2:, :], ((0, 0), (start, end_contraction)), mode="constant", constant_values=360)
+            preds = np.concatenate([preds_locs, preds_sigmas], axis=0)
+        else:
+            preds = np.pad(preds, ((0, 0), (start, end_contraction)), mode="constant")
 
     return preds
 

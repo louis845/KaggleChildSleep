@@ -38,10 +38,10 @@ class MatplotlibWidget(QWidget):
         self.axis.plot(x, y2, label="enmo")
         #self.axis.plot(x, extras["onset"] / 100.0, label="onset")
         #self.axis.plot(x, extras["wakeup"] / 100.0, label="wakeup")
-        #self.axis.plot(x, extras["onset_kernel"] / 5.0, label="onset_kernel")
-        #self.axis.plot(x, extras["wakeup_kernel"] / 5.0, label="wakeup_kernel")
-        self.axis.plot(x, extras["onset_conf"] * 10.0, label="onset_conf") # easier viewing
-        self.axis.plot(x, extras["wakeup_conf"] * 10.0, label="wakeup_conf")
+        #self.axis.plot(x, extras["onset_kernel"], label="onset_kernel")
+        #self.axis.plot(x, extras["wakeup_kernel"], label="wakeup_kernel")
+        #self.axis.plot(x, extras["onset_conf"] * 10.0, label="onset_conf") # easier viewing
+        #self.axis.plot(x, extras["wakeup_conf"] * 10.0, label="wakeup_conf")
         self.axis.plot(x, extras["onset_IOU_conf"] * 10.0, label="onset_IOU_conf")  # easier viewing
         self.axis.plot(x, extras["wakeup_IOU_conf"] * 10.0, label="wakeup_IOU_conf")
 
@@ -213,8 +213,8 @@ def load_file(item):
     filename = "./individual_train_series/" + item + ".parquet"
     df = pd.read_parquet(filename)
     extras = {}
-    extras["onset_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV/huber_kernel6/{}_onset.npy".format(item))
-    extras["wakeup_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV/huber_kernel6/{}_wakeup.npy".format(item))
+    extras["onset_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV_Sigmas/kernel/{}_onset.npy".format(item))
+    extras["wakeup_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV_Sigmas/kernel/{}_wakeup.npy".format(item))
     extras["onset_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_onset_locs.npy".format(item))
     extras["wakeup_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_wakeup_locs.npy".format(item))
 
