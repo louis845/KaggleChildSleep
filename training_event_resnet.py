@@ -93,8 +93,8 @@ def training_step(record: bool):
         while training_sampler.entries_remaining() > 0:
             accel_data_batch, labels_batch, increment =\
                 training_sampler.sample(batch_size, random_shift=random_shift,
-                                        random_flip=random_flip, always_flip=always_flip,
-                                        expand=expand, elastic_deformation=use_elastic_deformation,
+                                        random_flip=random_flip, random_vflip=flip_value, always_flip=always_flip,
+                                        expand=expand, elastic_deformation=use_elastic_deformation, v_elastic_deformation=use_velastic_deformation,
                                         include_all_events=include_all_events, include_events_in_extension=(predict_center_mode == "expanded"))
             assert labels_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(labels_batch.shape)
             assert accel_data_batch.shape[-1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(accel_data_batch.shape)
@@ -103,13 +103,7 @@ def training_step(record: bool):
             labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
 
             if use_anglez_only:
-                if flip_value:
-                    if np.random.rand() < 0.5:
-                        accel_data_batch_torch = -accel_data_batch_torch[:, 0:1, :]
-                    else:
-                        accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
-                else:
-                    accel_data_batch_torch = -accel_data_batch_torch[:, 0:1, :]
+                accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
             elif use_enmo_only:
                 accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
             elif mix_anglez_enmo:
@@ -366,6 +360,7 @@ if __name__ == "__main__":
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
     parser.add_argument("--dropout_pos_embeddings", action="store_true", help="Whether to dropout the positional embeddings. Default False.")
     parser.add_argument("--use_elastic_deformation", action="store_true", help="Whether to use elastic deformation. Default False.")
+    parser.add_argument("--use_velastic_deformation", action="store_true", help="Whether to use velastic deformation (only available for anglez). Default False.")
     parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use cross entropy loss. Default False.")
     parser.add_argument("--use_iou_loss", action="store_true", help="Whether to use IOU loss. Default False.")
     parser.add_argument("--use_ce_iou_loss", action="store_true", help="Whether to use a combination of cross entropy and IOU loss. Default False.")
@@ -426,6 +421,7 @@ if __name__ == "__main__":
     dropout = args.dropout
     dropout_pos_embeddings = args.dropout_pos_embeddings
     use_elastic_deformation = args.use_elastic_deformation
+    use_velastic_deformation = args.use_velastic_deformation
     use_ce_loss = args.use_ce_loss
     use_iou_loss = args.use_iou_loss
     use_ce_iou_loss = args.use_ce_iou_loss
@@ -564,6 +560,7 @@ if __name__ == "__main__":
         "dropout": dropout,
         "dropout_pos_embeddings": dropout_pos_embeddings,
         "use_elastic_deformation": use_elastic_deformation,
+        "use_velastic_deformation": use_velastic_deformation,
         "use_ce_loss": use_ce_loss,
         "use_iou_loss": use_iou_loss,
         "use_ce_iou_loss": use_ce_iou_loss,

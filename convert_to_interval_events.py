@@ -80,9 +80,10 @@ class IntervalEventsSampler:
                 self.shuffle_indices = np.arange(len(self.all_segmentations_list))
         self.sample_low = 0
 
-    def sample_single(self, index: int, random_shift: int=0, flip: bool=False, expand: int=0,
-                      elastic_deformation=False, include_all_events=False, include_events_in_extension=False):
+    def sample_single(self, index: int, random_shift: int=0, flip: bool=False, vflip=False, expand: int=0,
+                      elastic_deformation=False, v_elastic_deformation=False, include_all_events=False, include_events_in_extension=False):
         # index denotes the index in self.all_segmentations_list
+        # vflip and v_elastic_deformation is applied to anglez only, not to enmo
         # returns (accel_data, event_segmentations), where event_segmentations[0, :] is onset, and event_segmentations[1, :] is wakeup
 
         assert expand % 12 == 0, "expand must be a multiple of 12"
@@ -178,11 +179,16 @@ class IntervalEventsSampler:
         if flip:
             accel_data = np.flip(accel_data, axis=1)
             event_segmentations = np.flip(event_segmentations, axis=1)
+        if vflip:
+            # flip anglez only
+            accel_data[0, :] = -accel_data[0, :]
+        if v_elastic_deformation:
+            accel_data[0, :] = transform_elastic_deformation.deform_v_time_series(accel_data[0, :])
 
         return accel_data, event_segmentations
 
-    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, expand: int=0, elastic_deformation=False,
-               include_all_events=False, include_events_in_extension=False):
+    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, random_vflip=False, expand: int=0, elastic_deformation=False,
+               v_elastic_deformation=False, include_all_events=False, include_events_in_extension=False):
         assert self.shuffle_indices is not None, "shuffle_indices is None, call shuffle() first"
 
         accel_datas = []
@@ -191,13 +197,16 @@ class IntervalEventsSampler:
         increment = min(batch_size, len(self.all_segmentations_list) - self.sample_low)
 
         for k in range(self.sample_low, self.sample_low + increment):
-            flip = False
+            flip, vflip = False
             if random_flip:
                 flip = np.random.randint(0, 2) == 1
             if always_flip:
                 flip = True
-            accel_data, event_segmentation = self.sample_single(self.shuffle_indices[k], random_shift=random_shift, flip=flip, expand=expand, elastic_deformation=elastic_deformation,
-                                                                include_all_events=include_all_events, include_events_in_extension=include_events_in_extension)
+            if random_vflip:
+                vflip = np.random.randint(0, 2) == 1
+
+            accel_data, event_segmentation = self.sample_single(self.shuffle_indices[k], random_shift=random_shift, flip=flip, vflip=vflip, expand=expand, elastic_deformation=elastic_deformation,
+                                                                v_elastic_deformation=v_elastic_deformation, include_all_events=include_all_events, include_events_in_extension=include_events_in_extension)
             accel_datas.append(accel_data)
             event_segmentations.append(event_segmentation)
 
