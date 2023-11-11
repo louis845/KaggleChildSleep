@@ -99,10 +99,9 @@ if __name__ == "__main__":
 
         preloaded_intervals: list
 
-        def __init__(self, intervals_all_info):
+        def __init__(self):
             super(MainWidget, self).__init__(None)
             self.preloaded_intervals = None
-            self.intervals_all_info = intervals_all_info
 
             self.setWindowTitle("Visualization of time series intervals and events")
             self.resize(1280, 720)
@@ -162,28 +161,51 @@ if __name__ == "__main__":
             if self.preloaded_intervals is None:
                 self.preloaded_intervals = []
             series_id = item.text()
+            series_events = self.events.loc[self.events["series_id"] == series_id]
             self.preloaded_intervals.clear()
 
             anglez, enmo, timestamp = load_file(series_id)
 
-            # load every interval (night)
-            all_night_infos = self.intervals_all_info[series_id]
-            for night_info in all_night_infos:
-                start = night_info["start"]
-                end = night_info["end"]
-                interval_events = night_info["events"]
+            total_length = len(anglez)
+            stride = total_length // (total_length // 2160)
+
+            # load every interval into memory
+            k = 0
+            while k + 17280 <= total_length:
+                start = k
+                end = k + 17280
+                if total_length - (k + 17280) < stride:
+                    end = total_length
+                interval_events = series_events.loc[(series_events["step"] >= start) & (series_events["step"] < end)]
 
                 # load all the events into the interval
                 events = []
-                for event in interval_events:
-                    events.append((timestamp.iloc[event["onset"]], event["onset"], 1))
-                    events.append((timestamp.iloc[event["wakeup"]], event["wakeup"], 2))
+                for j in range(len(interval_events)):
+                    event = interval_events.iloc[j]
+                    assert event["event"] in ["onset", "wakeup"]
+                    step = int(event["step"])
+                    if event["event"] == "onset":
+                        events.append((timestamp.iloc[step], 1))
+                        if step - 30 * 12 >= start:
+                            events.append((timestamp.iloc[step - 30 * 12], 3))
+                        if step + 30 * 12 < end:
+                            events.append((timestamp.iloc[step + 30 * 12], 4))
+                    else:
+                        events.append((timestamp.iloc[step], 2))
+                        if step - 30 * 12 >= start:
+                            events.append((timestamp.iloc[step - 30 * 12], 5))
+                        if step + 30 * 12 < end:
+                            events.append((timestamp.iloc[step + 30 * 12], 6))
 
                 interval_anglez = anglez.iloc[start:end]
                 interval_enmo = enmo.iloc[start:end]
                 interval_timestamp = timestamp.iloc[start:end]
 
-                self.preloaded_intervals.append((series_id, start, end, interval_anglez, interval_enmo, interval_timestamp, events))
+                self.preloaded_intervals.append(
+                    (series_id, start, end, interval_anglez, interval_enmo, interval_timestamp, events))
+
+                k += stride
+
             self.selection_slider.setValue(0)
             self.selection_slider.setMaximum(len(self.preloaded_intervals) - 1)
 
@@ -248,7 +270,6 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
 
-    intervals_all_info = convert_to_interval_events.load_all_segmentations()
-    main_widget = MainWidget(intervals_all_info)
+    main_widget = MainWidget()
     main_widget.show()
     sys.exit(app.exec_())
