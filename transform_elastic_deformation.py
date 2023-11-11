@@ -187,17 +187,9 @@ if __name__ == "__main__":
                     assert event["event"] in ["onset", "wakeup"]
                     step = int(event["step"])
                     if event["event"] == "onset":
-                        events.append((timestamp.iloc[step], 1))
-                        if step - 30 * 12 >= start:
-                            events.append((timestamp.iloc[step - 30 * 12], 3))
-                        if step + 30 * 12 < end:
-                            events.append((timestamp.iloc[step + 30 * 12], 4))
+                        events.append((timestamp.iloc[step], step, 1))
                     else:
-                        events.append((timestamp.iloc[step], 2))
-                        if step - 30 * 12 >= start:
-                            events.append((timestamp.iloc[step - 30 * 12], 5))
-                        if step + 30 * 12 < end:
-                            events.append((timestamp.iloc[step + 30 * 12], 6))
+                        events.append((timestamp.iloc[step], step, 2))
 
                 interval_anglez = anglez.iloc[start:end]
                 interval_enmo = enmo.iloc[start:end]
