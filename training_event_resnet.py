@@ -359,6 +359,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
     parser.add_argument("--dropout_pos_embeddings", action="store_true", help="Whether to dropout the positional embeddings. Default False.")
+    parser.add_argument("--attn_dropout", type=float, default=0.0, help="Attention dropout rate. Default 0.0.")
     parser.add_argument("--use_elastic_deformation", action="store_true", help="Whether to use elastic deformation. Default False.")
     parser.add_argument("--use_velastic_deformation", action="store_true", help="Whether to use velastic deformation (only available for anglez). Default False.")
     parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use cross entropy loss. Default False.")
@@ -420,6 +421,7 @@ if __name__ == "__main__":
     use_batch_norm = args.use_batch_norm
     dropout = args.dropout
     dropout_pos_embeddings = args.dropout_pos_embeddings
+    attn_dropout = args.attn_dropout
     use_elastic_deformation = args.use_elastic_deformation
     use_velastic_deformation = args.use_velastic_deformation
     use_ce_loss = args.use_ce_loss
@@ -469,6 +471,7 @@ if __name__ == "__main__":
     print("Epochs: " + str(epochs))
     print("Dropout: " + str(dropout))
     print("Dropout pos embeddings: " + str(dropout_pos_embeddings))
+    print("Attention dropout: " + str(attn_dropout))
     print("Batch norm: " + str(use_batch_norm))
     print("Squeeze excitation: " + str(squeeze_excitation))
     print("Bottleneck factor: " + str(bottleneck_factor))
@@ -488,7 +491,8 @@ if __name__ == "__main__":
                             dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
                             use_batch_norm=use_batch_norm, attn_out_channels=2, attention_bottleneck=attention_bottleneck,
                             expected_attn_input_length=17280 + (2 * expand), attention_blocks=attention_blocks,
-                            upconv_channels_override=upconv_channels_override, attention_mode=attention_mode)
+                            upconv_channels_override=upconv_channels_override, attention_mode=attention_mode,
+                            attention_dropout=attn_dropout)
     model = model.to(config.device)
 
     # initialize optimizer
@@ -559,6 +563,7 @@ if __name__ == "__main__":
         "use_batch_norm": use_batch_norm,
         "dropout": dropout,
         "dropout_pos_embeddings": dropout_pos_embeddings,
+        "attn_dropout": attn_dropout,
         "use_elastic_deformation": use_elastic_deformation,
         "use_velastic_deformation": use_velastic_deformation,
         "use_ce_loss": use_ce_loss,

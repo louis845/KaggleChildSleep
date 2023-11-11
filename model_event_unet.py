@@ -144,7 +144,7 @@ class EventConfidenceUnet(torch.nn.Module):
                  attention_key_query_channels=64, attention_blocks=4,
                  expected_attn_input_length=17280, dropout_pos_embeddings=False,
                  attn_out_channels=1, attention_bottleneck=None,
-                 upconv_channels_override=None,
+                 upconv_channels_override=None, attention_dropout=0.0,
                  attention_mode="learned"):
         super(EventConfidenceUnet, self).__init__()
         assert kernel_size % 2 == 1, "kernel size must be odd"
@@ -185,7 +185,8 @@ class EventConfidenceUnet(torch.nn.Module):
                                                        dropout=dropout,
                                                        attention_mode=attention_mode,
                                                        input_length=expected_attn_input_length // (3 * (2 ** (len(blocks) - 2))),
-                                                       dropout_pos_embeddings=dropout_pos_embeddings)
+                                                       dropout_pos_embeddings=dropout_pos_embeddings,
+                                                       attn_dropout=attention_dropout)
             )
         """self.no_contraction_head = UnetAttnHead(self.pyramid_height + 1, hidden_channels + [hidden_channels[-1]],
                                                 kernel_size=1, use_batch_norm=True, dropout=dropout)

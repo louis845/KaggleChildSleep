@@ -25,7 +25,7 @@ class SymmetricLinear(torch.nn.Module):
 
 class PairwiseLengthAttn1D(torch.nn.Module):
     # assumes the input is (N, C, T)
-    def __init__(self, in_channels, out_channels, key_query_channels, input_length, heads=8, num_mix=1, use_pairwise_attention=False):
+    def __init__(self, in_channels, out_channels, key_query_channels, input_length, heads=8, num_mix=1, dropout=0.0):
         super(PairwiseLengthAttn1D, self).__init__()
         assert out_channels % heads == 0, "out_channels must be divisible by heads"
         assert key_query_channels % heads == 0, "key_query_channels must be divisible by heads"
@@ -37,7 +37,8 @@ class PairwiseLengthAttn1D(torch.nn.Module):
         self.input_length = input_length
         self.heads = heads
         self.num_mix = num_mix
-        self.use_pairwise_attention = use_pairwise_attention
+        self.dropout = dropout
+        self.use_dropout = dropout > 0.0
 
         self.proj_q = torch.nn.Conv1d(in_channels, key_query_channels, kernel_size=1, bias=False)
         self.proj_k = torch.nn.Conv1d(in_channels, key_query_channels, kernel_size=1, bias=False)
@@ -49,7 +50,9 @@ class PairwiseLengthAttn1D(torch.nn.Module):
 
 
         self.mix1 = torch.nn.ModuleList()
+        self.mix1_norm = torch.nn.ModuleList()
         self.mix2 = torch.nn.ModuleList()
+        self.mix2_norm = torch.nn.ModuleList()
 
         for k in range(num_mix):
             mix1_module = SymmetricLinear(input_length * 2, input_length * 2, num_groups=input_length)
@@ -59,7 +62,14 @@ class PairwiseLengthAttn1D(torch.nn.Module):
                 mix2_module = SymmetricLinear(input_length * 2, input_length * 2, num_groups=input_length)
             self.mix1.append(mix1_module)
             self.mix2.append(mix2_module)
+
+            self.mix1_norm.append(torch.nn.LayerNorm([input_length, input_length * 2]))
+            if k != num_mix - 1:
+                self.mix2_norm.append(torch.nn.LayerNorm([input_length, input_length * 2]))
         self.mix_nonlin = torch.nn.GELU()
+
+        if self.use_dropout:
+            self.dropout_layer = torch.nn.Dropout(dropout)
 
     def forward(self, x):
         N, C, T = x.shape
@@ -81,24 +91,31 @@ class PairwiseLengthAttn1D(torch.nn.Module):
         for k in range(self.num_mix):
             pairwise_info = pairwise_info.view(N, self.heads, T, T * 2) # (N, H, T, T, 2) -> (N, H, T, T * 2)
             pairwise_info = self.mix1[k](pairwise_info)
+            pairwise_info = self.mix1_norm[k](pairwise_info)
 
             # swap the T
             # (N, H, T, T * 2) -> (N, H, T, T, 2) -> (N, H, T, T, 2)
             pairwise_info = pairwise_info.view(N, self.heads, T, T, 2).permute(0, 1, 3, 2, 4).contiguous()
             pairwise_info = self.mix_nonlin(pairwise_info).view(N, self.heads, T, T * 2) # (N, H, T, T, 2) -> (N, H, T, T * 2)
+            if self.use_dropout:
+                pairwise_info = self.dropout_layer(pairwise_info)
             pairwise_info = self.mix2[k](pairwise_info)
             if k != self.num_mix - 1:
+                pairwise_info = self.mix2_norm[k](pairwise_info)
+
                 # swap back the T
                 pairwise_info = pairwise_info.view(N, self.heads, T, T, 2).permute(0, 1, 3, 2, 4).contiguous()
                 pairwise_info = self.mix_nonlin(pairwise_info)
+                if self.use_dropout:
+                    pairwise_info = self.dropout_layer(pairwise_info)
             else:
                 # swap back the T
                 pairwise_info = pairwise_info.permute(0, 1, 3, 2).contiguous()
 
-        if self.use_pairwise_attention:
-            pairwise_info = pairwise_info.view(N, self.heads, T * T)
-            attn = torch.nn.functional.softmax(pairwise_info, dim=-1) # (N, H, T * T)
-            attn = attn.view(N, self.heads, T, T) # (N, H, T * T) -> (N, H, T, T)
+        if self.use_dropout and self.training:
+            dropout_mask = np.where(np.random.rand(N, self.heads, T, T) < self.dropout, -np.inf, 0.0)
+            dropout_mask = torch.tensor(dropout_mask, dtype=torch.float32, device=pairwise_info.device)
+            attn = torch.nn.functional.softmax(pairwise_info + dropout_mask, dim=-1)  # (N, H, T, T)
         else:
             attn = torch.nn.functional.softmax(pairwise_info, dim=-1) # (N, H, T, T)
         out = torch.matmul(attn, value) # (N, H, T, T) * (N, H, T, C) -> (N, H, T, C)
@@ -109,7 +126,7 @@ class PairwiseLengthAttn1D(torch.nn.Module):
 
 class MultiHeadAttn1D(torch.nn.Module):
     # assumes the input is (N, C, T)
-    def __init__(self, in_channels, out_channels, key_query_channels, heads=8):
+    def __init__(self, in_channels, out_channels, key_query_channels, heads=8, dropout=0.0):
         super(MultiHeadAttn1D, self).__init__()
         assert out_channels % heads == 0, "out_channels must be divisible by heads"
         assert key_query_channels % heads == 0, "key_query_channels must be divisible by heads"
@@ -118,6 +135,7 @@ class MultiHeadAttn1D(torch.nn.Module):
         self.out_channels = out_channels
         self.key_query_channels = key_query_channels
         self.heads = heads
+        self.dropout = dropout
 
         self.proj_q = torch.nn.Conv1d(in_channels, key_query_channels, kernel_size=1, bias=False)
         self.proj_k = torch.nn.Conv1d(in_channels, key_query_channels, kernel_size=1, bias=False)
@@ -137,7 +155,12 @@ class MultiHeadAttn1D(torch.nn.Module):
         query = query.permute(0, 1, 3, 2) # (N, H, C, T) -> (N, H, T, C)
         value = value.permute(0, 1, 3, 2) # (N, H, C, T) -> (N, H, T, C)
         scaled_dot = torch.matmul(query, key) / np.sqrt(self.key_query_channels // self.heads) # (N, H, T, C) * (N, H, C, T) -> (N, H, T, T)
-        attn = torch.nn.functional.softmax(scaled_dot, dim=-1) # (N, H, T, T)
+        if (self.dropout > 0.0) and self.training:
+            dropout_mask = np.where(np.random.rand(N, self.heads, T, T) < self.dropout, -np.inf, 0.0)
+            dropout_mask = torch.tensor(dropout_mask, dtype=torch.float32, device=scaled_dot.device)
+            attn = torch.nn.functional.softmax(scaled_dot + dropout_mask, dim=-1) # (N, H, T, T)
+        else:
+            attn = torch.nn.functional.softmax(scaled_dot, dim=-1) # (N, H, T, T)
         out = torch.matmul(attn, value) # (N, H, T, T) * (N, H, T, C) -> (N, H, T, C)
 
         out = out.permute(0, 1, 3, 2) # (N, H, T, C) -> (N, H, C, T)
@@ -147,19 +170,18 @@ class MultiHeadAttn1D(torch.nn.Module):
 class AttentionBlock1DWithPositionalEncoding(torch.nn.Module):
     def __init__(self, channels, hidden_channels, key_query_channels,
                  heads=8, dropout=0.0, attention_mode="learned", input_length=1000,
-                 dropout_pos_embeddings=False):
+                 dropout_pos_embeddings=False, attn_dropout=0.0):
         super(AttentionBlock1DWithPositionalEncoding, self).__init__()
         assert channels % 2 == 0, "channels must be divisible by 2"
-        assert attention_mode in ["learned", "length", "pairwise_length"], "attention_mode must be one of ['learned', 'length', 'pairwise_length']"
+        assert attention_mode in ["learned", "length"], "attention_mode must be one of ['learned', 'length']"
         if dropout_pos_embeddings:
             assert attention_mode == "learned", "dropout_pos_embeddings can only be True if attention_mode is 'learned'"
         self.input_length = input_length
 
         if attention_mode == "learned":
-            self.multihead_attn = MultiHeadAttn1D(channels + (channels // 2), hidden_channels, key_query_channels, heads)
+            self.multihead_attn = MultiHeadAttn1D(channels + (channels // 2), hidden_channels, key_query_channels, heads, dropout=attn_dropout)
         else:
-            self.length_attn = PairwiseLengthAttn1D(channels, hidden_channels, key_query_channels, input_length,
-                                                    heads, use_pairwise_attention=attention_mode == "pairwise_length")
+            self.length_attn = PairwiseLengthAttn1D(channels, hidden_channels, key_query_channels, input_length, heads, dropout=attn_dropout)
         self.layer_norm1 = torch.nn.GroupNorm(num_channels=hidden_channels, num_groups=1)
         self.nonlin1 = torch.nn.GELU()
 
