@@ -27,14 +27,19 @@ def deform_time_series(time_series, deformed_time_indices):
     deformed_time_series = time_series[:, deformed_time_indices]
     return deformed_time_series
 
-def deform_v_time_series(time_series):
+def deform_v_time_series(time_series, deform_scale=True):
     #z_deformation = np.random.randint(-90, 91, size=91 + 90) + np.random.rand(91 + 90)
     z_deformation = (np.random.randint(-30, 31, size=31 + 30) + np.random.rand(31 + 30)) * 3
     z_deformation = np.sort(z_deformation) / 35.52
     #ground = np.arange(start=-90, stop=91, dtype=np.float32) / 35.5195
     ground = np.arange(start=-30, stop=31, dtype=np.float32) * 3 / 35.5195
 
-    return interp1d(ground, z_deformation, kind="cubic")(time_series)
+    time_series = interp1d(ground, z_deformation, kind="cubic")(time_series)
+    if deform_scale:
+        scale = 1.0 + 0.01 * np.random.rand() * np.sin((0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=time_series.shape[1]) + np.random.rand() * 2 * np.pi)
+        time_series = time_series * scale
+
+    return time_series
 
 def find_closest_index(x, val):
     idx = np.searchsorted(x, val, side="left")
