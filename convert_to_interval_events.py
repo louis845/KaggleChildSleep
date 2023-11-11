@@ -157,6 +157,8 @@ class IntervalEventsSampler:
 
         # Load acceleration data and event segmentations
         accel_data = self.naive_all_data[series_id]["accel"][:, (start - expand):(end + expand)]
+        if (vflip or v_elastic_deformation) and (not elastic_deformation):
+            accel_data = accel_data.copy()
         event_segmentations = np.zeros((2, end - start + 2 * expand), dtype=np.float32)
         event_tolerance_width = 30 * 12 - 1
         for event in grouped_events:

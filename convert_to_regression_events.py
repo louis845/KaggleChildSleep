@@ -155,12 +155,14 @@ class IntervalRegressionSampler:
         accel_data = self.naive_all_data[series_id]["accel"][:, start:end]
 
         # Apply elastic deformation if needed
+        elastic_deformed = False
         if elastic_deformation:
             if np.random.rand() < 0.5:
                 deformation_indices = transform_elastic_deformation.generate_deformation_indices(length=end - start)
                 onset = transform_elastic_deformation.find_closest_index(deformation_indices, onset)
                 wakeup = transform_elastic_deformation.find_closest_index(deformation_indices, wakeup)
-                transform_elastic_deformation.deform_time_series(accel_data, deformation_indices)
+                accel_data = transform_elastic_deformation.deform_time_series(accel_data, deformation_indices)
+                elastic_deformed = True
 
         # Load event regression data
         event_regression_values = [np.zeros((2, end - start), dtype=np.float32) for _ in self.event_regressions]
@@ -179,8 +181,14 @@ class IntervalRegressionSampler:
 
         # Apply vflip and v-elastic deformation if needed
         if vflip:
+            if not elastic_deformed:
+                accel_data = accel_data.copy()
+                elastic_deformed = True
             accel_data[0, :] = -accel_data[0, :]
         if v_elastic_deformation:
+            if not elastic_deformed:
+                accel_data = accel_data.copy()
+                elastic_deformed = True
             accel_data[0, :] = transform_elastic_deformation.deform_v_time_series(accel_data[0, :])
 
         return accel_data, event_regression_values, event_regression_mask
