@@ -276,7 +276,8 @@ def training_step(record: bool):
     with tqdm.tqdm(total=len(training_sampler)) as pbar:
         while training_sampler.entries_remaining() > 0:
             accel_data_batch, event_regression_values, event_regression_masks, increment =\
-                training_sampler.sample(batch_size, target_length=target_length)
+                training_sampler.sample(batch_size, target_length=target_length, elastic_deformation=use_elastic_deformation,
+                                        v_elastic_deformation=use_velastic_deformation, random_vflip=flip_value)
 
             accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
             event_regression_values_torch = [torch.tensor(event_regression_values[k], dtype=torch.float32, device=config.device)
@@ -495,10 +496,13 @@ if __name__ == "__main__":
     parser.add_argument("--disable_deep_upconv_contraction", action="store_true", help="Whether to disable the deep upconv contraction. Default False.")
     parser.add_argument("--deep_upconv_kernel", type=int, default=5, help="Kernel size for the deep upconv layers. Default 5.")
     parser.add_argument("--deep_upconv_channels_override", type=int, default=None, help="Override the number of channels for the deep upconv layers. Default None.")
+    parser.add_argument("--flip_value", action="store_true", help="Whether to flip the value of the intervals. Default False.")
     parser.add_argument("--expand", type=int, default=360, help="Expand the intervals by this amount. Default 360.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
+    parser.add_argument("--use_elastic_deformation", action="store_true", help="Whether to use elastic deformation. Default False.")
+    parser.add_argument("--use_velastic_deformation", action="store_true", help="Whether to use velastic deformation (only available for anglez). Default False.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     manager_folds.add_argparse_arguments(parser)
@@ -539,10 +543,13 @@ if __name__ == "__main__":
     disable_deep_upconv_contraction = args.disable_deep_upconv_contraction
     deep_upconv_kernel = args.deep_upconv_kernel
     deep_upconv_channels_override = args.deep_upconv_channels_override
+    flip_value = args.flip_value
     expand = args.expand
     dropout = args.dropout
     use_anglez_only = args.use_anglez_only
     use_enmo_only = args.use_enmo_only
+    use_elastic_deformation = args.use_elastic_deformation
+    use_velastic_deformation = args.use_velastic_deformation
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
 
@@ -659,10 +666,13 @@ if __name__ == "__main__":
         "disable_deep_upconv_contraction": disable_deep_upconv_contraction,
         "deep_upconv_kernel": deep_upconv_kernel,
         "deep_upconv_channels_override": deep_upconv_channels_override,
+        "flip_value": flip_value,
         "expand": expand,
         "dropout": dropout,
         "use_anglez_only": use_anglez_only,
         "use_enmo_only": use_enmo_only,
+        "use_elastic_deformation": use_elastic_deformation,
+        "use_velastic_deformation": use_velastic_deformation,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
     }

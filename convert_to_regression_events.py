@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 
+import transform_elastic_deformation
+
 def create_regression_range(mask: np.ndarray, values: np.ndarray, event_type: int, location: int, window_radius: int):
     assert mask.shape == values.shape, "mask and values must have the same shape"
     assert event_type in [0, 1], "event_type must be 0 or 1"
@@ -120,7 +122,7 @@ class IntervalRegressionSampler:
                 self.shuffle_indices = np.arange(len(self.series_ids))
         self.sample_low = 0
 
-    def sample_single(self, index: int, target_length: int):
+    def sample_single(self, index: int, target_length: int, elastic_deformation=False, vflip=False, v_elastic_deformation=False):
         assert target_length >= self.max_length, "target_length must be at least {}".format(self.max_length)
 
         event_info = self.event_regression_samples[index]
@@ -152,6 +154,14 @@ class IntervalRegressionSampler:
         # Load acceleration data and event segmentations
         accel_data = self.naive_all_data[series_id]["accel"][:, start:end]
 
+        # Apply elastic deformation if needed
+        if elastic_deformation:
+            if np.random.rand() < 0.5:
+                deformation_indices = transform_elastic_deformation.generate_deformation_indices(length=end - start)
+                onset = transform_elastic_deformation.find_closest_index(deformation_indices, onset)
+                wakeup = transform_elastic_deformation.find_closest_index(deformation_indices, wakeup)
+                transform_elastic_deformation.deform_time_series(accel_data, deformation_indices)
+
         # Load event regression data
         event_regression_values = [np.zeros((2, end - start), dtype=np.float32) for _ in self.event_regressions]
         event_regression_mask = [np.zeros((2, end - start), dtype=np.float32) for _ in self.event_regressions]
@@ -167,9 +177,15 @@ class IntervalRegressionSampler:
                 create_regression_range(event_regression_mask[k], event_regression_values[k], event_type=0, location=onset, window_radius=regression_range)
                 create_regression_range(event_regression_mask[k], event_regression_values[k], event_type=1, location=wakeup, window_radius=regression_range)
 
+        # Apply vflip and v-elastic deformation if needed
+        if vflip:
+            accel_data[0, :] = -accel_data[0, :]
+        if v_elastic_deformation:
+            accel_data[0, :] = transform_elastic_deformation.deform_v_time_series(accel_data[0, :])
+
         return accel_data, event_regression_values, event_regression_mask
 
-    def sample(self, batch_size: int, target_length: int):
+    def sample(self, batch_size: int, target_length: int, elastic_deformation: bool = False, random_vflip: bool = False, v_elastic_deformation: bool = False):
         assert self.train_or_test == "train", "sample() can only be called on train data"
         assert self.shuffle_indices is not None, "shuffle_indices is None, call shuffle() first"
 
@@ -180,8 +196,10 @@ class IntervalRegressionSampler:
         increment = min(batch_size, len(self.event_regression_samples) - self.sample_low)
 
         for k in range(self.sample_low, self.sample_low + increment):
+            vflip = random_vflip and np.random.rand() < 0.5
             accel_data, event_regression_value, event_regression_mask =\
-                self.sample_single(self.shuffle_indices[k], target_length)
+                self.sample_single(self.shuffle_indices[k], target_length, elastic_deformation=elastic_deformation, vflip=vflip,
+                                   v_elastic_deformation=v_elastic_deformation)
             accel_datas.append(accel_data)
             for k in range(len(self.event_regressions)):
                 event_regression_values[k].append(event_regression_value[k])
