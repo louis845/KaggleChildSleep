@@ -273,10 +273,10 @@ class MainWindow(QMainWindow):
         selected_folder_gaussian = self.get_selected_folder(kernel_shape="gaussian")
         min_errs_huber, median_errs_huber, gaps_huber, numbers_huber, numbers_huber_low =\
             compute_metrics(selected_folder_huber, is_onset=self.checkbox_onset.isChecked(), cutoff=self.get_cutoff(),
-                            pruning_radius=self.get_pruning())
+                            pruning_radius=self.get_pruning(), align_predictions=self.checkbox_aligned.isChecked())
         min_errs_gaussian, median_errs_gaussian, gaps_gaussian, numbers_gaussian, numbers_gaussian_low =\
             compute_metrics(selected_folder_gaussian, is_onset=self.checkbox_onset.isChecked(), cutoff=self.get_cutoff(),
-                            pruning_radius=self.get_pruning())
+                            pruning_radius=self.get_pruning(), align_predictions=self.checkbox_aligned.isChecked())
 
         # Plot the distributions, with x-axis being quantiles (0-100), and y-axis the value of the metric at that quantile
         self.fig_minerr_distribution.clear()
