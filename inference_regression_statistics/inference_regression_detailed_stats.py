@@ -10,11 +10,15 @@ from matplotlib.patches import Rectangle
 import pandas as pd
 import numpy as np
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # add root folder to sys.path
+import postprocessing
+
 def get_argmax_files_list(folder, is_onset):
     keyword = "onset" if is_onset else "wakeup"
     files_list = [os.path.join(folder, filename) for filename in os.listdir(folder) if (keyword in filename and "locmax" in filename)]
+    kernel_vals_list = [os.path.join(folder, filename) for filename in os.listdir(folder) if (keyword in filename and "locmax" not in filename)]
     series_id_list = [filename.split("_")[0] for filename in os.listdir(folder) if (keyword in filename and "locmax" in filename)]
-    return files_list, series_id_list
+    return files_list, kernel_vals_list, series_id_list
 
 def find_closest_indices(X, Y):
     # X should be sorted, and X, Y should be 1D arrays
@@ -65,8 +69,8 @@ def prune(event_locs, event_vals, pruning_radius):
                 keeps[descending_order[k]] = True
     return event_locs[keeps]
 
-def compute_metrics(selected_folder, is_onset, cutoff, pruning_radius):
-    files_list, series_id_list = get_argmax_files_list(selected_folder, is_onset=is_onset)
+def compute_metrics(selected_folder, is_onset, cutoff, pruning_radius, align_predictions: bool):
+    files_list, kernel_vals_file_list, series_id_list = get_argmax_files_list(selected_folder, is_onset=is_onset)
     median_errs = []
     min_errs = []
     gaps = []
@@ -78,8 +82,13 @@ def compute_metrics(selected_folder, is_onset, cutoff, pruning_radius):
         event_vals = argmax_data[1, :]
 
         event_locs = event_locs[event_vals > cutoff]  # restrict
-        if (len(event_locs) > 0) and (pruning_radius > 0):
+        if (len(event_locs) > 0) and (pruning_radius > 0): # prune if needed
             event_locs = prune(event_locs, event_vals[event_vals > cutoff], pruning_radius=pruning_radius)
+        if (len(event_locs) > 0) and align_predictions:
+            all_kernel_values = np.load(kernel_vals_file_list[k])
+            seconds_values = np.load("../data_naive/{}/secs.npy".format(series_id_list[k]))
+            event_locs = postprocessing.align_predictions(event_locs, all_kernel_values, first_zero=
+                                                          postprocessing.compute_first_zero(seconds_values))
 
         gt_events = loaded_events[series_id_list[k]]["onsets" if is_onset else "wakeups"]
 
@@ -207,10 +216,10 @@ class MainWindow(QMainWindow):
 
         # Create checkboxes
         self.checkbox_layout = QHBoxLayout()
-        self.checkbox_huber = QCheckBox("Use Huber Kernel (otherwise Gaussian kernel)")
+        self.checkbox_aligned = QCheckBox("Use Aligned Predictions")
         self.checkbox_onset = QCheckBox("Use Onset (otherwise Wakeup)")
         self.checkbox_layout.addStretch(1)
-        self.checkbox_layout.addWidget(self.checkbox_huber)
+        self.checkbox_layout.addWidget(self.checkbox_aligned)
         self.checkbox_layout.addStretch(1)
         self.checkbox_layout.addWidget(self.checkbox_onset)
         self.checkbox_layout.addStretch(1)
@@ -334,15 +343,13 @@ class MainWindow(QMainWindow):
         with open(os.path.join(results_summary_folder, "name.txt"), "r") as f:
             return f.read().strip()
 
-    def get_selected_folder(self, kernel_shape=None):
+    def get_selected_folder(self, kernel_shape):
         results_summary_folder = self.folders[self.dropdown.currentText()]
         if "kernel" in os.listdir(results_summary_folder):
             # learnable sigmas. this means the kernel shape must be huber, and the kernel width is learnt
             return os.path.join(results_summary_folder, "kernel")
 
         kernel_width = self.get_kernel_width()
-        if kernel_shape is None:
-            kernel_shape = "huber" if self.checkbox_huber.isChecked() else "gaussian"
 
         return os.path.join(results_summary_folder, "{}_kernel{}".format(kernel_shape, kernel_width))
 

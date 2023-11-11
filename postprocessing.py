@@ -9,18 +9,33 @@ def index_out_of_bounds(arr, indices):
 def compute_first_zero(series_secs):
     return np.argwhere(series_secs == 0).flatten()[0]
 
-def align_predictions(preds_locs, first_zero):
+def align_predictions(preds_locs, preds_local_kernel, first_zero):
     align_mod6 = (first_zero + 3) % 6
 
     # align predictions
     moddiff = np.mod(align_mod6 - preds_locs, 6)
-    choice_locs = moddiff == 0
-    not_choice_locs = np.logical_not(choice_locs)
+    choice_locs = moddiff == 3
+    increase_locs = (1 <= moddiff) & (moddiff <= 2)
+    decrease_locs = (4 <= moddiff) & (moddiff <= 5)
+    increase_preds_locs = preds_locs + moddiff
+    decrease_preds_locs = increase_preds_locs - 6
 
-    preds_locs1 = preds_locs[not_choice_locs] + moddiff[not_choice_locs]
-    preds_locs2 = preds_locs1 - 6
-    out_of_bounds = preds_locs1 >= len()
+    # get kernel values at aligned locations
+    increase_preds_kernel_val = index_out_of_bounds(preds_local_kernel, increase_preds_locs)
+    decrease_preds_kernel_val = index_out_of_bounds(preds_local_kernel, decrease_preds_locs)
 
+    if np.any(choice_locs):
+        # choose the one with the higher kernel value. this also handles out of bounds
+        preds_locs[choice_locs] = np.where(increase_preds_kernel_val[choice_locs] > decrease_preds_kernel_val[choice_locs],
+                                           increase_preds_kernel_val[choice_locs], decrease_preds_kernel_val[choice_locs])
+    if np.any(increase_locs) or np.any(decrease_locs):
+        increase_oob = increase_preds_kernel_val == -1
+        decrease_oob = decrease_preds_kernel_val == -1
+        increase_locs2 = (increase_locs | decrease_oob) & (~increase_oob)
+        decrease_locs2 = (decrease_locs | increase_oob) & (~decrease_oob)
+
+        preds_locs[increase_locs2] = increase_preds_locs[increase_locs2]
+        preds_locs[decrease_locs2] = decrease_preds_locs[decrease_locs2]
 
     return preds_locs
 
