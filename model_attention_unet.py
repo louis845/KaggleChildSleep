@@ -113,8 +113,7 @@ class PairwiseLengthAttn1D(torch.nn.Module):
                 pairwise_info = pairwise_info.permute(0, 1, 3, 2).contiguous()
 
         if self.use_dropout and self.training:
-            dropout_mask = np.where(np.random.rand(N, self.heads, T, T) < self.dropout, -np.inf, 0.0)
-            dropout_mask = torch.tensor(dropout_mask, dtype=torch.float32, device=pairwise_info.device)
+            dropout_mask = torch.where(torch.rand(N, self.heads, T, T, device=x.device) < self.dropout, -np.inf, 0.0)
             attn = torch.nn.functional.softmax(pairwise_info + dropout_mask, dim=-1)  # (N, H, T, T)
         else:
             attn = torch.nn.functional.softmax(pairwise_info, dim=-1) # (N, H, T, T)
@@ -156,8 +155,7 @@ class MultiHeadAttn1D(torch.nn.Module):
         value = value.permute(0, 1, 3, 2) # (N, H, C, T) -> (N, H, T, C)
         scaled_dot = torch.matmul(query, key) / np.sqrt(self.key_query_channels // self.heads) # (N, H, T, C) * (N, H, C, T) -> (N, H, T, T)
         if (self.dropout > 0.0) and self.training:
-            dropout_mask = np.where(np.random.rand(N, self.heads, T, T) < self.dropout, -np.inf, 0.0)
-            dropout_mask = torch.tensor(dropout_mask, dtype=torch.float32, device=scaled_dot.device)
+            dropout_mask = torch.where(torch.rand(N, self.heads, T, T, device=x.device) < self.dropout, -np.inf, 0.0)
             attn = torch.nn.functional.softmax(scaled_dot + dropout_mask, dim=-1) # (N, H, T, T)
         else:
             attn = torch.nn.functional.softmax(scaled_dot, dim=-1) # (N, H, T, T)
