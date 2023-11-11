@@ -156,5 +156,35 @@
     "regression_width": [120, 120, 120],
     "is_huber_regression": true,
     "is_sigma_regression": true
+  },
+  {
+    "name": "Standard 5CV (Huber Sigma Kernel VElastic)",
+    "models": ["regress_standard5cv_sigma_velastic_model_fold1", "regress_standard5cv_sigma_velastic_model_fold2", "regress_standard5cv_sigma_velastic_model_fold3", "regress_standard5cv_sigma_velastic_model_fold4", "regress_standard5cv_sigma_velastic_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "is_regression": true,
+    "is_standard": true,
+    "regression_width": [120, 120, 120],
+    "is_huber_regression": true,
+    "is_sigma_regression": true
+  },
+  {
+    "name": "Standard 5CV (Huber Sigma Kernel Elastic)",
+    "models": ["regress_standard5cv_sigma_elastic_model_fold1", "regress_standard5cv_sigma_elastic_model_fold2", "regress_standard5cv_sigma_elastic_model_fold3", "regress_standard5cv_sigma_elastic_model_fold4", "regress_standard5cv_sigma_elastic_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "is_regression": true,
+    "is_standard": true,
+    "regression_width": [120, 120, 120],
+    "is_huber_regression": true,
+    "is_sigma_regression": true
+  },
+  {
+    "name": "Standard 5CV (Huber Sigma Kernel 2Elastic)",
+    "models": ["regress_standard5cv_sigma_2elastic_model_fold1", "regress_standard5cv_sigma_2elastic_model_fold2", "regress_standard5cv_sigma_2elastic_model_fold3", "regress_standard5cv_sigma_2elastic_model_fold4", "regress_standard5cv_sigma_2elastic_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "is_regression": true,
+    "is_standard": true,
+    "regression_width": [120, 120, 120],
+    "is_huber_regression": true,
+    "is_sigma_regression": true
   }
 ]
