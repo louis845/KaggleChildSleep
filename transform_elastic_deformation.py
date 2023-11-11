@@ -102,6 +102,8 @@ if __name__ == "__main__":
         def __init__(self):
             super(MainWidget, self).__init__(None)
             self.preloaded_intervals = None
+            self.events = pd.read_csv("data/train_events.csv")
+            self.events = self.events.dropna()
 
             self.setWindowTitle("Visualization of time series intervals and events")
             self.resize(1280, 720)
