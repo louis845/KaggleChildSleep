@@ -29,6 +29,12 @@ def deform_time_series(time_series, deformed_time_indices):
     deformed_time_series = time_series[:, deformed_time_indices]
     return deformed_time_series
 
+def deform_v_time_series(time_series):
+    z_deformation = np.random.randint(-90, 91, size=91 + 90) + np.random.rand(91 + 90)
+    z_deformation = np.sort(z_deformation)
+    ground = np.arange(start=-90, stop=91, dtype=np.float32) / 35.0
+
+    return interp1d(ground, z_deformation, kind="cubic")(time_series)
 
 def find_closest_index(x, val):
     idx = np.searchsorted(x, val, side="left")
@@ -63,12 +69,13 @@ if __name__ == "__main__":
             y2 = enmo.to_numpy(dtype=np.float32) / 0.1018 # std computed by check_series_properties.py
 
             if deform:
-                deformed_time_indices = generate_deformation_indices(len(x))
-                #deformed_time_indices = np.clip(deformed_time_indices, 0, len(x) - 1)
+                #deformed_time_indices = generate_deformation_indices(len(x))
+                deformed_time_indices = np.arange(len(x))
 
                 deformed_y = deform_time_series(np.stack([y1, y2], axis=0), deformed_time_indices)
 
                 y1 = deformed_y[0, :]
+                y1 = deform_v_time_series(y1)
                 y2 = deformed_y[1, :]
 
             self.axis.set_ylim([self.min_y, self.max_y])
