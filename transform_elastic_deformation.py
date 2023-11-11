@@ -9,8 +9,6 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.figure import Figure
 from scipy.interpolate import interp1d
 
-import convert_to_interval_events
-
 def generate_deformation_indices(length):
     deformed_time_indices = np.random.randint(0, length, size=length)
     deformed_time_indices = np.sort(deformed_time_indices)
@@ -30,9 +28,11 @@ def deform_time_series(time_series, deformed_time_indices):
     return deformed_time_series
 
 def deform_v_time_series(time_series):
-    z_deformation = np.random.randint(-90, 91, size=91 + 90) + np.random.rand(91 + 90)
-    z_deformation = np.sort(z_deformation)
-    ground = np.arange(start=-90, stop=91, dtype=np.float32) / 35.0
+    #z_deformation = np.random.randint(-90, 91, size=91 + 90) + np.random.rand(91 + 90)
+    z_deformation = (np.random.randint(-30, 31, size=31 + 30) + np.random.rand(31 + 30)) * 3
+    z_deformation = np.sort(z_deformation) / 35.52
+    #ground = np.arange(start=-90, stop=91, dtype=np.float32) / 35.5195
+    ground = np.arange(start=-30, stop=31, dtype=np.float32) * 3 / 35.5195
 
     return interp1d(ground, z_deformation, kind="cubic")(time_series)
 
@@ -69,8 +69,7 @@ if __name__ == "__main__":
             y2 = enmo.to_numpy(dtype=np.float32) / 0.1018 # std computed by check_series_properties.py
 
             if deform:
-                #deformed_time_indices = generate_deformation_indices(len(x))
-                deformed_time_indices = np.arange(len(x))
+                deformed_time_indices = generate_deformation_indices(len(x))
 
                 deformed_y = deform_time_series(np.stack([y1, y2], axis=0), deformed_time_indices)
 
