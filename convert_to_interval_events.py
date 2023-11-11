@@ -197,7 +197,7 @@ class IntervalEventsSampler:
         increment = min(batch_size, len(self.all_segmentations_list) - self.sample_low)
 
         for k in range(self.sample_low, self.sample_low + increment):
-            flip, vflip = False
+            flip, vflip = False, False
             if random_flip:
                 flip = np.random.randint(0, 2) == 1
             if always_flip:
