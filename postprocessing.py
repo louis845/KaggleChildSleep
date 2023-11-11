@@ -27,7 +27,7 @@ def align_predictions(preds_locs, preds_local_kernel, first_zero):
     if np.any(choice_locs):
         # choose the one with the higher kernel value. this also handles out of bounds
         preds_locs[choice_locs] = np.where(increase_preds_kernel_val[choice_locs] > decrease_preds_kernel_val[choice_locs],
-                                           increase_preds_kernel_val[choice_locs], decrease_preds_kernel_val[choice_locs])
+                                           increase_preds_locs[choice_locs], decrease_preds_locs[choice_locs])
     if np.any(increase_locs) or np.any(decrease_locs):
         increase_oob = increase_preds_kernel_val == -1
         decrease_oob = decrease_preds_kernel_val == -1
@@ -37,7 +37,7 @@ def align_predictions(preds_locs, preds_local_kernel, first_zero):
         preds_locs[increase_locs2] = increase_preds_locs[increase_locs2]
         preds_locs[decrease_locs2] = decrease_preds_locs[decrease_locs2]
 
-    return preds_locs
+    return np.unique(preds_locs)
 
 def align_and_augment_predictions(preds_locs, preds_local_kernel, preds_probas, series_secs):
     total_length = len(series_secs)

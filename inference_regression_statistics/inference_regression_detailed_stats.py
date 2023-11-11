@@ -89,6 +89,7 @@ def compute_metrics(selected_folder, is_onset, cutoff, pruning_radius, align_pre
             seconds_values = np.load("../data_naive/{}/secs.npy".format(series_id_list[k]))
             event_locs = postprocessing.align_predictions(event_locs, all_kernel_values, first_zero=
                                                           postprocessing.compute_first_zero(seconds_values))
+            assert np.all(event_locs[1:] - event_locs[:-1] > 0), "event_locs must be strictly increasing"
 
         gt_events = loaded_events[series_id_list[k]]["onsets" if is_onset else "wakeups"]
 
