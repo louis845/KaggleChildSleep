@@ -103,7 +103,13 @@ def training_step(record: bool):
             labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
 
             if use_anglez_only:
-                accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
+                if flip_value:
+                    if np.random.rand() < 0.5:
+                        accel_data_batch_torch = -accel_data_batch_torch[:, 0:1, :]
+                    else:
+                        accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
+                else:
+                    accel_data_batch_torch = -accel_data_batch_torch[:, 0:1, :]
             elif use_enmo_only:
                 accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
             elif mix_anglez_enmo:
@@ -354,6 +360,7 @@ if __name__ == "__main__":
     parser.add_argument("--random_shift", type=int, default=0, help="Randomly shift the intervals by at most this amount. Default 0.")
     parser.add_argument("--random_flip", action="store_true", help="Randomly flip the intervals. Default False.")
     parser.add_argument("--always_flip", action="store_true", help="Always flip the intervals. Default False.")
+    parser.add_argument("--flip_value", action="store_true", help="Whether to flip the value of the intervals. Default False.")
     parser.add_argument("--expand", type=int, default=0, help="Expand the intervals by this amount. Default 0.")
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
@@ -413,6 +420,7 @@ if __name__ == "__main__":
     random_shift = args.random_shift
     random_flip = args.random_flip
     always_flip = args.always_flip
+    flip_value = args.flip_value
     expand = args.expand
     use_batch_norm = args.use_batch_norm
     dropout = args.dropout
@@ -550,6 +558,7 @@ if __name__ == "__main__":
         "random_shift": random_shift,
         "random_flip": random_flip,
         "always_flip": always_flip,
+        "flip_value": flip_value,
         "expand": expand,
         "use_batch_norm": use_batch_norm,
         "dropout": dropout,
