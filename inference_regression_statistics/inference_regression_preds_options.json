@@ -24,5 +24,23 @@
     "models": ["regress_standard5cv_sigma_model_fold1", "regress_standard5cv_sigma_model_fold2", "regress_standard5cv_sigma_model_fold3", "regress_standard5cv_sigma_model_fold4", "regress_standard5cv_sigma_model_fold5"],
     "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
     "use_sigmas": true
+  },
+  {
+    "name": "Standard 5CV Sigmas VElastic",
+    "models": ["regress_standard5cv_sigma_velastic_model_fold1", "regress_standard5cv_sigma_velastic_model_fold2", "regress_standard5cv_sigma_velastic_model_fold3", "regress_standard5cv_sigma_velastic_model_fold4", "regress_standard5cv_sigma_velastic_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "use_sigmas": true
+  },
+  {
+    "name": "Standard 5CV Sigmas Elastic",
+    "models": ["regress_standard5cv_sigma_elastic_model_fold1", "regress_standard5cv_sigma_elastic_model_fold2", "regress_standard5cv_sigma_elastic_model_fold3", "regress_standard5cv_sigma_elastic_model_fold4", "regress_standard5cv_sigma_elastic_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "use_sigmas": true
+  },
+  {
+    "name": "Standard 5CV Sigmas 2Elastic",
+    "models": ["regress_standard5cv_sigma_2elastic_model_fold1", "regress_standard5cv_sigma_2elastic_model_fold2", "regress_standard5cv_sigma_2elastic_model_fold3", "regress_standard5cv_sigma_2elastic_model_fold4", "regress_standard5cv_sigma_2elastic_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "use_sigmas": true
   }
 ]
