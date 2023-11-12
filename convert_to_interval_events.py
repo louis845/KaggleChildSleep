@@ -81,7 +81,8 @@ class IntervalEventsSampler:
         self.sample_low = 0
 
     def sample_single(self, index: int, random_shift: int=0, flip: bool=False, vflip=False, expand: int=0,
-                      elastic_deformation=False, v_elastic_deformation=False, include_all_events=False, include_events_in_extension=False):
+                      elastic_deformation=False, v_elastic_deformation=False, include_all_events=False, include_events_in_extension=False,
+                      randomly_augment_time=False):
         # index denotes the index in self.all_segmentations_list
         # vflip and v_elastic_deformation is applied to anglez only, not to enmo
         # returns (accel_data, event_segmentations), where event_segmentations[0, :] is onset, and event_segmentations[1, :] is wakeup
@@ -187,7 +188,17 @@ class IntervalEventsSampler:
         if v_elastic_deformation:
             accel_data[0, :] = transform_elastic_deformation.deform_v_time_series(accel_data[0, :])
 
-        return accel_data, event_segmentations
+        hour = self.naive_all_data[series_id]["hours"][start - expand]
+        minute = self.naive_all_data[series_id]["mins"][start - expand]
+        second = self.naive_all_data[series_id]["secs"][start - expand]
+        time = (hour * 3600 + minute * 60 + second) // 5
+        if randomly_augment_time:
+            time += np.random.randint(-360, 361)
+            if time < 0:
+                time += 17280
+            time = time % 17280
+
+        return accel_data, event_segmentations, time
 
     def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, random_vflip=False, expand: int=0, elastic_deformation=False,
                v_elastic_deformation=False, include_all_events=False, include_events_in_extension=False):
@@ -195,6 +206,7 @@ class IntervalEventsSampler:
 
         accel_datas = []
         event_segmentations = []
+        times = []
 
         increment = min(batch_size, len(self.all_segmentations_list) - self.sample_low)
 
@@ -207,16 +219,18 @@ class IntervalEventsSampler:
             if random_vflip:
                 vflip = np.random.randint(0, 2) == 1
 
-            accel_data, event_segmentation = self.sample_single(self.shuffle_indices[k], random_shift=random_shift, flip=flip, vflip=vflip, expand=expand, elastic_deformation=elastic_deformation,
-                                                                v_elastic_deformation=v_elastic_deformation, include_all_events=include_all_events, include_events_in_extension=include_events_in_extension)
+            accel_data, event_segmentation, time = self.sample_single(self.shuffle_indices[k], random_shift=random_shift, flip=flip, vflip=vflip, expand=expand, elastic_deformation=elastic_deformation,
+                                                                      v_elastic_deformation=v_elastic_deformation, include_all_events=include_all_events, include_events_in_extension=include_events_in_extension,
+                                                                      randomly_augment_time=self.train_or_test == "train")
             accel_datas.append(accel_data)
             event_segmentations.append(event_segmentation)
+            times.append(time)
 
         self.sample_low += increment
         accel_datas = np.stack(accel_datas, axis=0)
         event_segmentations = np.stack(event_segmentations, axis=0)
 
-        return accel_datas, event_segmentations, increment
+        return accel_datas, event_segmentations, times, increment
 
     def __len__(self):
         return len(self.all_segmentations_list)

@@ -25,7 +25,7 @@ class SymmetricLinear(torch.nn.Module):
 
 class PairwiseLengthAttn1D(torch.nn.Module):
     # assumes the input is (N, C, T)
-    def __init__(self, in_channels, out_channels, key_query_channels, input_length, heads=8, num_mix=1, dropout=0.0):
+    def __init__(self, in_channels, out_channels, key_query_channels, input_length, heads=8, num_mix=1, dropout=0.0, use_time_input=False):
         super(PairwiseLengthAttn1D, self).__init__()
         assert out_channels % heads == 0, "out_channels must be divisible by heads"
         assert key_query_channels % heads == 0, "key_query_channels must be divisible by heads"
@@ -39,9 +39,11 @@ class PairwiseLengthAttn1D(torch.nn.Module):
         self.num_mix = num_mix
         self.dropout = dropout
         self.use_dropout = dropout > 0.0
+        self.use_time_input = use_time_input
 
-        self.proj_q = torch.nn.Conv1d(in_channels, key_query_channels, kernel_size=1, bias=False)
-        self.proj_k = torch.nn.Conv1d(in_channels, key_query_channels, kernel_size=1, bias=False)
+        qk_in_channels = (in_channels + in_channels // 2) if use_time_input else in_channels
+        self.proj_q = torch.nn.Conv1d(qk_in_channels, key_query_channels, kernel_size=1, bias=False)
+        self.proj_k = torch.nn.Conv1d(qk_in_channels, key_query_channels, kernel_size=1, bias=False)
         self.proj_v = torch.nn.Conv1d(in_channels, out_channels, kernel_size=1, bias=False)
 
         self.register_buffer("pairwise_distance", (torch.abs(torch.arange(input_length, dtype=torch.float32) -
@@ -71,12 +73,21 @@ class PairwiseLengthAttn1D(torch.nn.Module):
         if self.use_dropout:
             self.dropout_layer = torch.nn.Dropout(dropout)
 
-    def forward(self, x):
+    def forward(self, x, time_tensor=None):
+        if self.use_time_input:
+            assert time_tensor is not None, "time_tensor must be provided if use_time_input is True"
+        else:
+            assert time_tensor is None, "time_tensor must be None if use_time_input is False"
+
         N, C, T = x.shape
         assert T == self.input_length, "T must be equal to self.input_length"
 
-        query = self.proj_q(x)
-        key = self.proj_k(x)
+        if self.use_time_input:
+            query = self.proj_q(torch.cat([x, time_tensor], dim=1))
+            key = self.proj_k(torch.cat([x, time_tensor], dim=1))
+        else:
+            query = self.proj_q(x)
+            key = self.proj_k(x)
         value = self.proj_v(x)
 
         query = query.reshape(N, self.heads, self.key_query_channels // self.heads, T)
@@ -168,7 +179,7 @@ class MultiHeadAttn1D(torch.nn.Module):
 class AttentionBlock1DWithPositionalEncoding(torch.nn.Module):
     def __init__(self, channels, hidden_channels, key_query_channels,
                  heads=8, dropout=0.0, attention_mode="learned", input_length=1000,
-                 dropout_pos_embeddings=False, attn_dropout=0.0):
+                 dropout_pos_embeddings=False, attn_dropout=0.0, use_time_input=False):
         super(AttentionBlock1DWithPositionalEncoding, self).__init__()
         assert channels % 2 == 0, "channels must be divisible by 2"
         assert attention_mode in ["learned", "length"], "attention_mode must be one of ['learned', 'length']"
@@ -179,7 +190,7 @@ class AttentionBlock1DWithPositionalEncoding(torch.nn.Module):
         if attention_mode == "learned":
             self.multihead_attn = MultiHeadAttn1D(channels + (channels // 2), hidden_channels, key_query_channels, heads, dropout=attn_dropout)
         else:
-            self.length_attn = PairwiseLengthAttn1D(channels, hidden_channels, key_query_channels, input_length, heads, dropout=attn_dropout)
+            self.length_attn = PairwiseLengthAttn1D(channels, hidden_channels, key_query_channels, input_length, heads, dropout=attn_dropout, use_time_input=use_time_input)
         self.layer_norm1 = torch.nn.GroupNorm(num_channels=hidden_channels, num_groups=1)
         self.nonlin1 = torch.nn.GELU()
 
@@ -190,27 +201,36 @@ class AttentionBlock1DWithPositionalEncoding(torch.nn.Module):
         self.dropout = torch.nn.Dropout(dropout)
 
         self.attention_mode = attention_mode
-        if attention_mode == "learned":
+        if (attention_mode == "learned" and not use_time_input):
             self.positional_embedding = torch.nn.Parameter(torch.randn((1, channels // 2, input_length)))
 
         self.dropout_pos_embeddings = dropout_pos_embeddings
+        self.use_time_input = use_time_input
 
-    def forward(self, x):
+    def forward(self, x, time_tensor=None):
+        if self.use_time_input:
+            assert time_tensor is not None, "time_tensor must be provided if use_time_input is True"
+        else:
+            assert time_tensor is None, "time_tensor must be None if use_time_input is False"
+
         assert x.shape[-1] == self.input_length, "x.shape: {}, self.input_length: {}".format(x.shape, self.input_length)
         x_init = x
         if self.attention_mode == "learned":
-            positional_embedding = self.positional_embedding.expand(x.shape[0], -1, -1)
+            if not self.use_time_input:
+                positional_embedding = self.positional_embedding.expand(x.shape[0], -1, -1)
 
-            if self.training and self.dropout_pos_embeddings:
-                positional_embedding_mean = torch.mean(positional_embedding, dim=-1, keepdim=True)
-                #lam = torch.rand((positional_embedding.shape[0], 1, 1), device=positional_embedding.device, dtype=torch.float32)
-                lam = np.random.beta(0.3, 0.3, size=(positional_embedding.shape[0], 1, 1))
-                lam = torch.tensor(lam, device=positional_embedding.device, dtype=torch.float32)
-                positional_embedding = lam * positional_embedding + (1.0 - lam) * positional_embedding_mean
+                if self.training and self.dropout_pos_embeddings:
+                    positional_embedding_mean = torch.mean(positional_embedding, dim=-1, keepdim=True)
+                    #lam = torch.rand((positional_embedding.shape[0], 1, 1), device=positional_embedding.device, dtype=torch.float32)
+                    lam = np.random.beta(0.3, 0.3, size=(positional_embedding.shape[0], 1, 1))
+                    lam = torch.tensor(lam, device=positional_embedding.device, dtype=torch.float32)
+                    positional_embedding = lam * positional_embedding + (1.0 - lam) * positional_embedding_mean
+            else:
+                positional_embedding = time_tensor
 
             x = self.multihead_attn(torch.cat([x, positional_embedding], dim=1))
         else:
-            x = self.length_attn(x)
+            x = self.length_attn(x, time_tensor)
 
         x = self.layer_norm1(x)
         x = self.nonlin1(x)

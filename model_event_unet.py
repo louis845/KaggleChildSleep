@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 from model_unet import *
 from model_attention_unet import *
@@ -145,7 +147,10 @@ class EventConfidenceUnet(torch.nn.Module):
                  expected_attn_input_length=17280, dropout_pos_embeddings=False,
                  attn_out_channels=1, attention_bottleneck=None,
                  upconv_channels_override=None, attention_dropout=0.0,
-                 attention_mode="learned"):
+                 attention_mode="learned",
+
+                 use_time_input=False # other settings
+                 ):
         super(EventConfidenceUnet, self).__init__()
         assert kernel_size % 2 == 1, "kernel size must be odd"
         assert len(blocks) >= 6, "blocks must have at least 6 elements"
@@ -184,9 +189,10 @@ class EventConfidenceUnet(torch.nn.Module):
                                                        heads=attention_heads,
                                                        dropout=dropout,
                                                        attention_mode=attention_mode,
-                                                       input_length=expected_attn_input_length // (3 * (2 ** (len(blocks) - 2))),
+                                                       input_length=expected_attn_input_length // self.input_length_multiple,
                                                        dropout_pos_embeddings=dropout_pos_embeddings,
-                                                       attn_dropout=attention_dropout)
+                                                       attn_dropout=attention_dropout,
+                                                       use_time_input=use_time_input)
             )
         """self.no_contraction_head = UnetAttnHead(self.pyramid_height + 1, hidden_channels + [hidden_channels[-1]],
                                                 kernel_size=1, use_batch_norm=True, dropout=dropout)
@@ -207,9 +213,22 @@ class EventConfidenceUnet(torch.nn.Module):
         self.expected_attn_input_length = expected_attn_input_length
         self.attention_bottleneck = attention_bottleneck
         self.num_attention_blocks = attention_blocks
+        self.use_time_input = use_time_input
+        self.stem_final_layer_channels = stem_final_layer_channels
 
-    def forward(self, x, ret_type="attn"):
+        if use_time_input:
+            self.period_length = 17280
+
+    def forward(self, x, ret_type="attn", time: Optional[np.ndarray]=None):
         assert ret_type in ["attn"], "ret_type must be one of ['attn']"
+        if self.use_time_input:
+            assert time is not None, "time must be provided if use_time_input is True"
+            assert isinstance(time, np.ndarray), "time must be a numpy array"
+            assert time.dtype == np.int32, "time must be a int32 array"
+            assert len(time.shape) == 1, "time must be a 1D array"
+            assert time.shape[0] == x.shape[0], "time must have the same length as x.shape[0]"
+        else:
+            assert time is None, "time must be None if use_time_input is False"
 
         N, C, T = x.shape
         # generate list of downsampling methods
@@ -230,8 +249,18 @@ class EventConfidenceUnet(torch.nn.Module):
             x = self.attn_bottleneck_out_nonlin(x)
 
         if self.num_attention_blocks > 0:
+            time_tensor = None
+            if self.use_time_input:
+                with torch.no_grad():
+                    time_tensor = 2 * np.pi * torch.tensor(time, dtype=torch.float32, device=self.get_device()).unsqueeze(-1).unsqueeze(-1) / self.period_length
+                    length_time_tensor = 2 * np.pi * torch.arange(self.expected_attn_input_length // self.input_length_multiple, dtype=torch.float32).unsqueeze(0).unsqueeze(0)\
+                                         / (self.period_length // self.input_length_multiple)
+                    channel_time_tensor = 2 * np.pi * torch.arange(self.stem_final_layer_channels // 2, dtype=torch.float32).unsqueeze(0).unsqueeze(-1)\
+                                          / (self.stem_final_layer_channels // 2)
+                    time_tensor = torch.sin(time_tensor + length_time_tensor + channel_time_tensor)
+
             for i in range(len(self.attention_blocks)):
-                x = self.attention_blocks[i](x)
+                x = self.attention_blocks[i](x, time_tensor)
 
             x = self.no_contraction_head(ret, x)
         else:
@@ -293,7 +322,17 @@ def event_regression_inference(model: EventRegressorUnet, time_series: np.ndarra
     return preds
 
 def event_confidence_inference(model: EventConfidenceUnet, time_series: np.ndarray, batch_size=32,
-                               prediction_length=17280, expand=8640):
+                               prediction_length=17280, expand=8640, times: Optional[dict[str, np.ndarray]]=None):
+    if model.use_time_input:
+        assert times is not None, "times must be provided if model uses time input"
+        assert "hours" in times and "mins" in times and "secs" in times, "times must contain hours, mins, secs"
+        for key in ["hours", "mins", "secs"]:
+            assert isinstance(times[key], np.ndarray), f"times[{key}] must be a numpy array"
+            assert len(times[key].shape) == 1, f"times[{key}] must be a 1D array"
+            assert len(times[key]) == time_series.shape[1], f"times[{key}] must have the same length as time_series"
+    else:
+        assert times is None, "times must not be provided if model does not use time input"
+
     model.eval()
 
     total_length = time_series.shape[1]
@@ -310,7 +349,7 @@ def event_confidence_inference(model: EventConfidenceUnet, time_series: np.ndarr
         event_confidence_single_inference(model, time_series, probas, multiplicities,
                                           batch_size=batch_size,
                                           prediction_length=prediction_length, prediction_stride=prediction_length,
-                                          expand=expand, start=start)
+                                          expand=expand, start=start, times=times)
     multiplicities[multiplicities == 0] = 1 # avoid division by zero. the probas will be zero anyway
     return probas / multiplicities # auto broadcast
 
@@ -318,7 +357,7 @@ def event_confidence_single_inference(model: EventConfidenceUnet, time_series: n
                                       probas: np.ndarray, multiplicities: np.ndarray,
                                       batch_size=32,
                                       prediction_length=17280, prediction_stride=17280,
-                                      expand=8640, start=0):
+                                      expand=8640, start=0, times=None):
     model.eval()
 
     assert len(time_series.shape) == 2, "time_series must be a 2D array"
@@ -353,12 +392,27 @@ def event_confidence_single_inference(model: EventConfidenceUnet, time_series: n
         batches = []
         for i in range(batches_computed, batches_compute_end):
             batches.append(index_array(time_series, batches_starts[i] - expand, batches_ends[i] + expand))
+
         batches = np.stack(batches, axis=0)
         batches_torch = torch.tensor(batches, dtype=torch.float32, device=model.get_device())
 
+        # create time ndarray
+        if model.use_time_input:
+            batch_times = []
+            for i in range(batches_computed, batches_compute_end):
+                hour = times["hours"][batches_starts[i]]
+                minute = times["mins"][batches_starts[i]]
+                second = times["secs"][batches_starts[i]]
+                time = (hour * 3600 + minute * 60 + second) // 5
+                time -= expand * 5
+                batch_times.append(time)
+            batch_times = np.array(batch_times)
+        else:
+            batch_times = None
+
         # run model
         with torch.no_grad():
-            batches_out, _, _, _ = model(batches_torch)
+            batches_out, _, _, _ = model(batches_torch, time=batch_times)
             batches_out = torch.sigmoid(batches_out[:, :, expand:-expand])
             batches_out = batches_out.cpu().numpy()
 

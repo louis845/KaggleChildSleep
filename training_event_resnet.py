@@ -57,9 +57,10 @@ def dice_loss(preds: torch.Tensor, ground_truth: torch.Tensor, eps=1e-5):
 
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
-                            accel_data_batch: torch.Tensor, labels_batch: torch.Tensor):
+                            accel_data_batch: torch.Tensor, labels_batch: torch.Tensor, times_batch: np.ndarray):
     optimizer_.zero_grad()
-    pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn")
+    times_input = times_batch if use_time_information else None
+    pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn", time=times_input)
     if predict_center_mode == "center":
         pred_logits = pred_logits[:, :, expand:-expand]
     if use_ce_loss:
@@ -91,7 +92,7 @@ def training_step(record: bool):
     # training
     with tqdm.tqdm(total=len(training_sampler)) as pbar:
         while training_sampler.entries_remaining() > 0:
-            accel_data_batch, labels_batch, increment =\
+            accel_data_batch, labels_batch, times_batch, increment =\
                 training_sampler.sample(batch_size, random_shift=random_shift,
                                         random_flip=random_flip, random_vflip=flip_value, always_flip=always_flip,
                                         expand=expand, elastic_deformation=use_elastic_deformation, v_elastic_deformation=use_velastic_deformation,
@@ -118,7 +119,7 @@ def training_step(record: bool):
             # train model now
             loss, preds, small_loss, mid_loss, large_loss, num_events = single_training_step(model, optimizer,
                                                                            accel_data_batch_torch,
-                                                                           labels_batch_torch)
+                                                                           labels_batch_torch, times_batch)
             #time.sleep(0.2)
 
             # record
@@ -146,9 +147,10 @@ def training_step(record: bool):
             train_history[key].append(current_metrics[key])
 
 def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tensor,
-                           labels_batch: torch.Tensor):
+                           labels_batch: torch.Tensor, times_batch: np.ndarray):
     with torch.no_grad():
-        pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn")
+        times_input = times_batch if use_time_information else None
+        pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn", time=times_input)
         if (predict_center_mode == "center" or predict_center_mode == "expanded"):
             pred_logits = pred_logits[:, :, expand:-expand]
         if use_ce_loss:
@@ -174,7 +176,7 @@ def validation_step():
     with (tqdm.tqdm(total=len(val_sampler)) as pbar):
         while val_sampler.entries_remaining() > 0:
             # load the batch
-            accel_data_batch, labels_batch, increment = val_sampler.sample(batch_size, expand=expand, include_all_events=include_all_events,
+            accel_data_batch, labels_batch, times_batch, increment = val_sampler.sample(batch_size, expand=expand, include_all_events=include_all_events,
                                                                            include_events_in_extension=(predict_center_mode == "expanded"))
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
@@ -190,7 +192,7 @@ def validation_step():
                 labels_batch = labels_batch[:, :, expand:-expand]
 
             # val model now
-            loss, preds, small_loss, mid_loss, large_loss, num_events = single_validation_step(model, accel_data_batch, labels_batch)
+            loss, preds, small_loss, mid_loss, large_loss, num_events = single_validation_step(model, accel_data_batch, labels_batch, times_batch)
 
             # record
             with torch.no_grad():
@@ -261,10 +263,16 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
             elif mix_anglez_enmo:
                 accel_data = accel_data[0:1, :]
 
+            # load the times if required
+            if use_time_information:
+                times = {"hours": all_data[series_id]["hours"], "mins": all_data[series_id]["mins"], "secs": all_data[series_id]["secs"]}
+            else:
+                times = None
+
             proba_preds = model_event_unet.event_confidence_inference(model=model, time_series=accel_data,
                                                                     batch_size=batch_size * 5,
                                                                     prediction_length=prediction_length,
-                                                                    expand=expand)
+                                                                    expand=expand, times=times)
             onset_IOU_probas = iou_score_converter.convert(proba_preds[0, :])
             wakeup_IOU_probas = iou_score_converter.convert(proba_preds[1, :])
 
@@ -360,6 +368,7 @@ if __name__ == "__main__":
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
     parser.add_argument("--dropout_pos_embeddings", action="store_true", help="Whether to dropout the positional embeddings. Default False.")
     parser.add_argument("--attn_dropout", type=float, default=0.0, help="Attention dropout rate. Default 0.0.")
+    parser.add_argument("--use_time_information", action="store_true", help="Whether to use time information. Default False.")
     parser.add_argument("--use_elastic_deformation", action="store_true", help="Whether to use elastic deformation. Default False.")
     parser.add_argument("--use_velastic_deformation", action="store_true", help="Whether to use velastic deformation (only available for anglez). Default False.")
     parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use cross entropy loss. Default False.")
@@ -422,6 +431,7 @@ if __name__ == "__main__":
     dropout = args.dropout
     dropout_pos_embeddings = args.dropout_pos_embeddings
     attn_dropout = args.attn_dropout
+    use_time_information = args.use_time_information
     use_elastic_deformation = args.use_elastic_deformation
     use_velastic_deformation = args.use_velastic_deformation
     use_ce_loss = args.use_ce_loss
@@ -492,7 +502,7 @@ if __name__ == "__main__":
                             use_batch_norm=use_batch_norm, attn_out_channels=2, attention_bottleneck=attention_bottleneck,
                             expected_attn_input_length=17280 + (2 * expand), attention_blocks=attention_blocks,
                             upconv_channels_override=upconv_channels_override, attention_mode=attention_mode,
-                            attention_dropout=attn_dropout)
+                            attention_dropout=attn_dropout, use_time_input=use_time_information)
     model = model.to(config.device)
 
     # initialize optimizer
@@ -564,6 +574,7 @@ if __name__ == "__main__":
         "dropout": dropout,
         "dropout_pos_embeddings": dropout_pos_embeddings,
         "attn_dropout": attn_dropout,
+        "use_time_information": use_time_information,
         "use_elastic_deformation": use_elastic_deformation,
         "use_velastic_deformation": use_velastic_deformation,
         "use_ce_loss": use_ce_loss,
