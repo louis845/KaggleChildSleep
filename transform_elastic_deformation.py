@@ -10,20 +10,31 @@ from matplotlib.figure import Figure
 from scipy.interpolate import interp1d
 
 def generate_deformation_indices(length):
-    deformed_time_indices = np.random.randint(0, length, size=length)
-    deformed_time_indices = np.sort(deformed_time_indices)
+    assert length % 12 == 0, "Length must be divisible by 12 (multiple of 1min)"
+    def_type = np.random.randint(0, 4)
+    if def_type == 0:
+        deformed_time_indices = np.random.randint(0, length, size=length)
+        deformed_time_indices = np.sort(deformed_time_indices)
+    else:
+        if def_type == 1:
+            strength = 2
+        elif def_type == 2:
+            strength = 3
+        else:
+            strength = 6
+
+        deformed_time_indices = np.random.randint(0, length // strength, size=length // strength) * strength
+        deformed_time_indices = np.sort(deformed_time_indices)
+        ground = np.arange(length // strength)
+        deformed_time_indices = interp1d(ground, deformed_time_indices, kind="cubic")(np.arange(length))
+        deformed_time_indices = np.clip(np.round(deformed_time_indices).astype(np.int32), 0, length - 1)
+
     return deformed_time_indices
 
 def deform_time_series(time_series, deformed_time_indices):
     assert time_series.shape[1] == len(deformed_time_indices)
     assert len(time_series.shape) == 2
 
-    """num_features = time_series.shape[0]
-    deformed_time_series = np.zeros_like(time_series)
-
-    ground_indices = np.arange(len(deformed_time_indices))
-    for k in range(num_features):
-        deformed_time_series[k, :] = interp1d(ground_indices, time_series[k, :], kind="nearest")(deformed_time_indices)"""
     deformed_time_series = time_series[:, deformed_time_indices]
     return deformed_time_series
 
