@@ -24,6 +24,17 @@ def load_all_data_into_dict():
         all_data[series_id]["hours"] = hours
     return all_data
 
+def correct_time(secs: np.ndarray, mins: np.ndarray, hours: np.ndarray):
+    daytime = secs.astype(np.int32) + mins.astype(np.int32) * 60 + hours.astype(np.int32) * 3600
+    init_times = daytime - np.arange(len(daytime)) * 5 # 5 second intervals
+    avg_start = np.median(init_times)
+    daytime = avg_start + np.arange(len(daytime)) * 5
+    secs = daytime % 60
+    mins = (daytime // 60) % 60
+    hours = (daytime // 3600) % 24
+    return secs.astype(np.float32), mins.astype(np.float32), hours.astype(np.float32)
+
+
 if __name__ == "__main__":
     # Ensure the input directory exists
     assert os.path.exists("individual_train_series"), "You should run convert_to_individual_series.py before this"
@@ -34,6 +45,9 @@ if __name__ == "__main__":
 
     if not os.path.isdir(FOLDER):
         os.mkdir(FOLDER)
+    num_discrepancy = 0
+    num_time = 0
+    discrepancy_series = []
     for file in tqdm.tqdm(os.listdir("individual_train_series")):
         series_id = file.split(".")[0]
         series_folder = os.path.join(FOLDER, series_id)
@@ -65,6 +79,20 @@ if __name__ == "__main__":
         mins = timestamps.dt.minute.to_numpy(dtype=np.float32)
         hours = timestamps.dt.hour.to_numpy(dtype=np.float32)
 
-        np.save(os.path.join(series_folder, "secs.npy"), secs)
-        np.save(os.path.join(series_folder, "mins.npy"), mins)
-        np.save(os.path.join(series_folder, "hours.npy"), hours)
+        secs_corr, mins_corr, hours_corr = correct_time(secs, mins, hours)
+        discrepancies = np.sum((secs_corr != secs) | (mins_corr != mins) | (hours_corr != hours))
+        num_discrepancy += discrepancies
+        num_time += len(secs)
+        if discrepancies > 0:
+            discrepancy_series.append(series_id)
+
+        np.save(os.path.join(series_folder, "secs.npy"), secs_corr)
+        np.save(os.path.join(series_folder, "mins.npy"), mins_corr)
+        np.save(os.path.join(series_folder, "hours.npy"), hours_corr)
+
+    print(f"Total number of discrepancies: {num_discrepancy}/{num_time}")
+    print(f"Percentage of discrepancies: {num_discrepancy / num_time * 100:.2f}%")
+    print(f"Total number of series with discrepancies: {len(discrepancy_series)}")
+    print(f"Series with discrepancies: {discrepancy_series}")
+
+    # ['08db4255286f', '10469f6765bf', '1087d7b0ff2e', '12d01911d509', '16fe2798ed0f', '188d4b7cd28b', '18a0ca03431d', '1d4569cbac0f', '2654a87be968', '292a75c0b94e', '2b8d87addea9', '2f7504d0f426', '3c336d6ba566', '416354edd92a', '44d8c02b369e', '4a31811f3558', '51fdcc8d9fe7', '5e816f11f5c3', '655f19eabf1e', '67f5fc60e494', '7476c0bd18d2', '7df249527c63', '808652a666c6', '844f54dcab89', '8a306e0890c0', '971207c6a525', 'a596ad0b82aa', 'a88088855de5', 'a9a2f7fac455', 'aa81faa78747', 'b4b75225b224', 'b737f8c78ec5', 'b84960841a75', 'bccf2f2819f8', 'bfe41e96d12f', 'c3072a759efb', 'c5d08fc3e040', 'c6788e579967', 'c75b4b207bea', 'd5e47b94477e', 'df33ae359fb5', 'dfc3ccebfdc9', 'e30cb792a2bc', 'e4500e7e19e1', 'eec197a4bdca', 'f56824b503a0']
