@@ -12,6 +12,7 @@ from scipy.interpolate import interp1d
 def generate_deformation_indices(length):
     assert length % 12 == 0, "Length must be divisible by 12 (multiple of 1min)"
     def_type = np.random.randint(0, 4)
+    def_type = 3
     if def_type == 0:
         deformed_time_indices = np.random.randint(0, length, size=length)
         deformed_time_indices = np.sort(deformed_time_indices)
@@ -23,9 +24,9 @@ def generate_deformation_indices(length):
         else:
             strength = 6
 
-        deformed_time_indices = np.random.randint(0, length // strength, size=length // strength) * strength
+        deformed_time_indices = np.random.randint(0, length // strength + 1, size=length // strength + 1) * strength
         deformed_time_indices = np.sort(deformed_time_indices)
-        ground = np.arange(length // strength)
+        ground = np.arange(length // strength + 1) * strength
         deformed_time_indices = interp1d(ground, deformed_time_indices, kind="cubic")(np.arange(length))
         deformed_time_indices = np.clip(np.round(deformed_time_indices).astype(np.int32), 0, length - 1)
 
@@ -96,7 +97,7 @@ if __name__ == "__main__":
                 deformed_y = deform_time_series(np.stack([y1, y2], axis=0), deformed_time_indices)
 
                 y1 = deformed_y[0, :]
-                y1 = deform_v_time_series(y1)
+                #y1 = deform_v_time_series(y1)
                 y2 = deformed_y[1, :]
 
             self.axis.set_ylim([self.min_y, self.max_y])
