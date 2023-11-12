@@ -229,6 +229,7 @@ class IntervalEventsSampler:
         self.sample_low += increment
         accel_datas = np.stack(accel_datas, axis=0)
         event_segmentations = np.stack(event_segmentations, axis=0)
+        times = np.array(times, dtype=np.int32)
 
         return accel_datas, event_segmentations, times, increment
 

@@ -251,12 +251,12 @@ class EventConfidenceUnet(torch.nn.Module):
         if self.num_attention_blocks > 0:
             time_tensor = None
             if self.use_time_input:
-                with torch.no_grad():
+                with (torch.no_grad()):
                     time_tensor = 2 * np.pi * torch.tensor(time, dtype=torch.float32, device=self.get_device()).unsqueeze(-1).unsqueeze(-1) / self.period_length
-                    length_time_tensor = 2 * np.pi * torch.arange(self.expected_attn_input_length // self.input_length_multiple, dtype=torch.float32).unsqueeze(0).unsqueeze(0)\
-                                         / (self.period_length // self.input_length_multiple)
-                    channel_time_tensor = 2 * np.pi * torch.arange(self.stem_final_layer_channels // 2, dtype=torch.float32).unsqueeze(0).unsqueeze(-1)\
-                                          / (self.stem_final_layer_channels // 2)
+                    length_time_tensor = 2 * np.pi * torch.arange(self.expected_attn_input_length // self.input_length_multiple, dtype=torch.float32,
+                                                                  device=self.get_device()).unsqueeze(0).unsqueeze(0) / (self.period_length // self.input_length_multiple)
+                    channel_time_tensor = 2 * np.pi * torch.arange(self.stem_final_layer_channels // 2, dtype=torch.float32,
+                                                                   device=self.get_device()).unsqueeze(0).unsqueeze(-1) / (self.stem_final_layer_channels // 2)
                     time_tensor = torch.sin(time_tensor + length_time_tensor + channel_time_tensor)
 
             for i in range(len(self.attention_blocks)):
@@ -406,7 +406,7 @@ def event_confidence_single_inference(model: EventConfidenceUnet, time_series: n
                 time = (hour * 3600 + minute * 60 + second) // 5
                 time -= expand * 5
                 batch_times.append(time)
-            batch_times = np.array(batch_times)
+            batch_times = np.array(batch_times, dtype=np.int32)
         else:
             batch_times = None
 
