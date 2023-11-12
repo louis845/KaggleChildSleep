@@ -11,8 +11,7 @@ from scipy.interpolate import interp1d
 
 def generate_deformation_indices(length):
     assert length % 12 == 0, "Length must be divisible by 12 (multiple of 1min)"
-    def_type = np.random.randint(0, 4)
-    def_type = 3
+    def_type = np.random.randint(0, 3)
     if def_type == 0:
         deformed_time_indices = np.random.randint(0, length, size=length)
         deformed_time_indices = np.sort(deformed_time_indices)
@@ -54,7 +53,11 @@ def deform_v_time_series(time_series, deform_scale=True):
 
     if deform_scale:
         if np.random.rand() > 0.5:
-            scale = 1.0 + 0.1 * np.random.rand() * np.sin(10 * (0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=len(time_series)) + np.random.rand() * 2 * np.pi)
+            scale = 1.0 +\
+                    0.025 * np.random.rand() * np.sin(10 * (0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=len(time_series)) + np.random.rand() * 2 * np.pi) + \
+                    0.025 * np.random.rand() * np.sin(10 * (0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=len(time_series)) + np.random.rand() * 2 * np.pi) + \
+                    0.025 * np.random.rand() * np.sin(10 * (0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=len(time_series)) + np.random.rand() * 2 * np.pi) + \
+                    0.025 * np.random.rand() * np.sin(10 * (0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=len(time_series)) + np.random.rand() * 2 * np.pi)
             time_series = time_series * scale
 
     return time_series
@@ -92,12 +95,13 @@ if __name__ == "__main__":
             y2 = enmo.to_numpy(dtype=np.float32) / 0.1018 # std computed by check_series_properties.py
 
             if deform:
-                deformed_time_indices = generate_deformation_indices(len(x))
+                #deformed_time_indices = generate_deformation_indices(len(x))
+                deformed_time_indices = np.arange(len(x))
 
                 deformed_y = deform_time_series(np.stack([y1, y2], axis=0), deformed_time_indices)
 
                 y1 = deformed_y[0, :]
-                #y1 = deform_v_time_series(y1)
+                y1 = deform_v_time_series(y1)
                 y2 = deformed_y[1, :]
 
             self.axis.set_ylim([self.min_y, self.max_y])
