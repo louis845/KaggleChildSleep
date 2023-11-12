@@ -112,6 +112,21 @@ if __name__ == "__main__":
     IOU_intersection_width = args.IOU_intersection_width
     IOU_union_width = args.IOU_union_width
 
+    args = {
+        "hidden_blocks": hidden_blocks,
+        "hidden_channels": hidden_channels,
+        "bottleneck_factor": bottleneck_factor,
+        "squeeze_excitation": squeeze_excitation,
+        "kernel_size": kernel_size,
+        "attention_blocks": attention_blocks,
+        "attention_bottleneck": attention_bottleneck,
+        "upconv_channels_override": upconv_channels_override,
+        "expand": expand,
+        "use_batch_norm": use_batch_norm,
+        "prediction_length": prediction_length,
+        "batch_size": batch_size,
+    }
+
     # load data
     all_data = convert_to_npy_naive.load_all_data_into_dict()
 
@@ -143,16 +158,22 @@ if __name__ == "__main__":
 
         print("Running inference on {}...".format(name))
 
+        # override args
+        opt_args = args.copy()
+        for key in option:
+            if key not in ["name", "folder_name", "models", "entries", "input_type"]:
+                opt_args[key] = option[key]
+
         for k in range(len(models)):
             model_name = models[k]
             validation_entries = manager_folds.load_dataset(entries[k])
             model_dir = os.path.join("./models", model_name)
 
             all_preds = inference(model_dir, validation_entries, all_data,
-                                    hidden_blocks, hidden_channels, bottleneck_factor, squeeze_excitation, kernel_size,
-                                    attention_blocks, attention_bottleneck, upconv_channels_override,
-                                    expand, use_batch_norm, use_anglez_only, use_enmo_only,
-                                    prediction_length, batch_size)
+                                    opt_args["hidden_blocks"], opt_args["hidden_channels"], opt_args["bottleneck_factor"], opt_args["squeeze_excitation"], opt_args["kernel_size"],
+                                    opt_args["attention_blocks"], opt_args["attention_bottleneck"], opt_args["upconv_channels_override"],
+                                    opt_args["expand"], opt_args["use_batch_norm"], use_anglez_only, use_enmo_only,
+                                    opt_args["prediction_length"], opt_args["batch_size"])
 
             for series_id in tqdm.tqdm(validation_entries):
                 preds = all_preds[series_id]
