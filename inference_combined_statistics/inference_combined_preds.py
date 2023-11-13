@@ -1,6 +1,7 @@
 import os
 import argparse
 import json
+import shutil
 
 import numpy as np
 import torch
@@ -36,11 +37,14 @@ if __name__ == "__main__":
         name = option["name"]
         conf_results = option["conf_results"]
         out_folder = option["out_folder"]
+        if os.path.isdir(os.path.join(FOLDER, out_folder)):
+            shutil.rmtree(os.path.join(FOLDER, out_folder))
+        os.mkdir(os.path.join(FOLDER, out_folder))
 
         conf_results_folders = [os.path.join("./inference_confidence_statistics/confidence_labels", conf_result)
                                  for conf_result in conf_results]
 
-        for series_id in series_ids:
+        for series_id in tqdm.tqdm(series_ids):
             ensembled_onset_preds = None
             ensembled_wakeup_preds = None
 
