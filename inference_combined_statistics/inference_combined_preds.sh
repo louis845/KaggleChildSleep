@@ -2,4 +2,4 @@
 export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 cd ..
 
-python inference_regression_statistics/inference_regression_preds.py --device 0
+python inference_combined_statistics/inference_combined_preds.py --device 0
