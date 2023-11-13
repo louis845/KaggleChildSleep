@@ -39,24 +39,63 @@ def align_predictions(preds_locs, preds_local_kernel, first_zero):
 
     return np.unique(preds_locs)
 
-def align_and_augment_predictions(preds_locs, preds_local_kernel, preds_probas, series_secs):
-    total_length = len(series_secs)
+def augment_left_right(preds_locs, preds_local_kernel):
+    preds_left = preds_locs - 12
+    preds_right = preds_locs + 12
 
-    first_zero = np.argwhere(series_secs == 0).flatten()[0]
-    align_mod6 = (first_zero + 3) % 6
+    left_kernel_val = index_out_of_bounds(preds_local_kernel, preds_left)
+    right_kernel_val = index_out_of_bounds(preds_local_kernel, preds_right)
 
-    # align predictions
-    preds_locs1 = preds_locs + np.mod(align_mod6 - preds_locs, 6)
-    preds_locs2 = preds_locs1 - 6
-    out_of_bounds = preds_locs1 >= total_length
-    preds_locs1[out_of_bounds] = preds_locs2[out_of_bounds]
-    out_of_bounds = preds_locs2 < 0
-    preds_locs2[out_of_bounds] = preds_locs1[out_of_bounds]
-    preds_locs_new = np.where(preds_local_kernel[preds_locs1] > preds_local_kernel[preds_locs2], preds_locs1, preds_locs2)
+    augmented_locs1 = np.where(left_kernel_val > right_kernel_val, preds_left, preds_right)
+    augmented_locs2 = np.where(left_kernel_val > right_kernel_val, preds_right, preds_left)[(left_kernel_val != -1) & (right_kernel_val != -1)]
 
-    preds_locs = np.where(np.mod(preds_locs, 6) == align_mod6, preds_locs, preds_locs_new)
+    return augmented_locs1, augmented_locs2
 
-    # augment predictions
-    left_shift_locs = preds_locs - 24
-    right_shift_locs = preds_locs + 24
+def augment_and_cat(preds_locs, preds_local_kernel, preds_probas, divisor: float, shifts: list[float]):
+    augmented_locs1, augmented_locs2 = augment_left_right(preds_locs, preds_local_kernel)
+    preds_locs_probas = preds_probas[preds_locs]
+    augmented_locs_probas1 = preds_probas[augmented_locs1]
+    augmented_locs_probas2 = preds_probas[augmented_locs2]
 
+    all_preds_locs = np.concatenate([preds_locs, augmented_locs1, augmented_locs2])
+    all_preds_probas = np.concatenate([preds_locs_probas / divisor + shifts[0],
+                                       augmented_locs_probas1 / divisor + shifts[1],
+                                       augmented_locs_probas2 / divisor + shifts[2]])
+    return all_preds_locs, all_preds_probas
+
+def get_augmented_predictions(preds_locs, preds_local_kernel, preds_probas, cutoff_thresh: float):
+    if len(preds_locs) == 0:
+        return np.array([], dtype=np.int32), np.array([], dtype=np.float32)
+
+    if cutoff_thresh == 0.0:
+        all_preds_locs, all_preds_probas = augment_and_cat(preds_locs, preds_local_kernel, preds_probas,
+                                                           3.0, [2.0 / 3, 1.0 / 3, 0.0])
+    else:
+        preds_locs_below = preds_locs[preds_probas[preds_locs] < cutoff_thresh]
+        preds_locs_above = preds_locs[preds_probas[preds_locs] >= cutoff_thresh]
+
+        if len(preds_locs_above) == 0: # all below
+            all_preds_locs, all_preds_probas = augment_and_cat(preds_locs, preds_local_kernel, preds_probas,
+                                                               6.0, [2.0 / 6, 1.0 / 6, 0.0])
+        elif len(preds_locs_below) == 0: # all above
+            all_preds_locs, all_preds_probas = augment_and_cat(preds_locs, preds_local_kernel, preds_probas,
+                                                               6.0, [5.0 / 6, 4.0 / 6, 3.0 / 6])
+        else:
+            all_above_preds_locs, all_above_preds_probas = augment_and_cat(preds_locs_above, preds_local_kernel, preds_probas,
+                                                               6.0, [5.0 / 6, 4.0 / 6, 3.0 / 6])
+            all_below_preds_locs, all_below_preds_probas = augment_and_cat(preds_locs_below, preds_local_kernel, preds_probas,
+                                                               6.0, [2.0 / 6, 1.0 / 6, 0.0])
+            all_preds_locs = np.concatenate([all_above_preds_locs, all_below_preds_locs])
+            all_preds_probas = np.concatenate([all_above_preds_probas, all_below_preds_probas])
+    sort_index = np.argsort(all_preds_locs)
+    all_preds_locs, all_preds_probas = all_preds_locs[sort_index], all_preds_probas[sort_index]
+    return all_preds_locs, all_preds_probas
+
+def align_and_augment_predictions(preds_locs, preds_local_kernel, preds_probas, series_secs, cutoff_thresh: float):
+    if len(preds_locs) == 0:
+        return np.array([], dtype=np.int32), np.array([], dtype=np.float32)
+
+    first_zero = compute_first_zero(series_secs)
+    preds_locs = align_predictions(preds_locs, preds_local_kernel, first_zero)
+
+    return get_augmented_predictions(preds_locs, preds_local_kernel, preds_probas, cutoff_thresh)
