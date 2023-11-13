@@ -1,6 +1,7 @@
 [
   {
-    "name": "Standard",
-    "conf_results": ["event5fold_local"]
+    "name": "Local 3Length Ensemble",
+    "conf_results": ["event5fold_local", "event5fold_3length"],
+    "out_folder": "event5fold_local_3length"
   }
 ]
