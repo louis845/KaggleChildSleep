@@ -452,6 +452,7 @@ if __name__ == "__main__":
     assert not (use_iou_loss and use_ce_loss), "Cannot use both IOU loss and cross entropy loss."
     assert sum([use_anglez_only, use_enmo_only, mix_anglez_enmo]) <= 1, "Cannot use more than one of anglez only, enmo only, and mix anglez and enmo."
     assert predict_center_mode in ["all", "center", "expanded"], "predict_center_mode must be one of all, center, expanded."
+    assert not (use_time_information and random_flip), "Cannot use time information and random flip at the same time."
     # all      - predict all parts of the interval, events only happen in the center, and the expanded parts will be predicted as negative (for both training and validation)
     # center   - predict only the center parts of the interval. No optimization and predictions will be made for the expanded parts (for both training and validation)
     # expanded - use the entire interval (expanded parts included) for optimization, and only the center part for prediction (validation)
