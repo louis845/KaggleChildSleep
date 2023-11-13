@@ -15,7 +15,7 @@ FOLDER = "./inference_confidence_statistics/confidence_labels"
 
 def inference(model_dir, validation_entries, all_data,
               hidden_blocks, hidden_channels, bottleneck_factor, squeeze_excitation, kernel_size,
-              attention_blocks, attention_bottleneck, upconv_channels_override,
+              attention_blocks, attention_bottleneck, attention_mode, upconv_channels_override,
               expand, use_batch_norm, use_anglez_only, use_enmo_only,
               prediction_length, batch_size,
               show_tqdm_bar=True):
@@ -31,7 +31,8 @@ def inference(model_dir, validation_entries, all_data,
                                                  attention_bottleneck=attention_bottleneck,
                                                  expected_attn_input_length=17280 + (2 * expand),
                                                  attention_blocks=attention_blocks,
-                                                 upconv_channels_override=upconv_channels_override)
+                                                 upconv_channels_override=upconv_channels_override,
+                                                 attention_mode=attention_mode)
     model = model.to(config.device)
     model.eval()
 
@@ -83,6 +84,7 @@ if __name__ == "__main__":
     parser.add_argument("--kernel_size", type=int, default=11, help="Kernel size for the first layer. Default 11.")
     parser.add_argument("--attention_blocks", type=int, default=4, help="Number of attention blocks to use. Default 4.")
     parser.add_argument("--attention_bottleneck", type=int, default=None, help="The bottleneck factor of the attention module. Default None.")
+    parser.add_argument("--attention_mode", type=str, default="learned", help="Attention mode. Must be 'learned' or 'length'")
     parser.add_argument("--upconv_channels_override", type=int, default=None, help="Number of fixed channels for the upsampling path. Default None, do not override.")
     parser.add_argument("--expand", type=int, default=0, help="Expand the intervals by this amount. Default 0.")
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
@@ -104,6 +106,7 @@ if __name__ == "__main__":
     kernel_size = args.kernel_size
     attention_blocks = args.attention_blocks
     attention_bottleneck = args.attention_bottleneck
+    attention_mode = args.attention_mode
     upconv_channels_override = args.upconv_channels_override
     expand = args.expand
     use_batch_norm = args.use_batch_norm
@@ -120,6 +123,7 @@ if __name__ == "__main__":
         "kernel_size": kernel_size,
         "attention_blocks": attention_blocks,
         "attention_bottleneck": attention_bottleneck,
+        "attention_mode": attention_mode,
         "upconv_channels_override": upconv_channels_override,
         "expand": expand,
         "use_batch_norm": use_batch_norm,
@@ -171,7 +175,7 @@ if __name__ == "__main__":
 
             all_preds = inference(model_dir, validation_entries, all_data,
                                     opt_args["hidden_blocks"], opt_args["hidden_channels"], opt_args["bottleneck_factor"], opt_args["squeeze_excitation"], opt_args["kernel_size"],
-                                    opt_args["attention_blocks"], opt_args["attention_bottleneck"], opt_args["upconv_channels_override"],
+                                    opt_args["attention_blocks"], opt_args["attention_bottleneck"], opt_args["attention_mode"], opt_args["upconv_channels_override"],
                                     opt_args["expand"], opt_args["use_batch_norm"], use_anglez_only, use_enmo_only,
                                     opt_args["prediction_length"], opt_args["batch_size"])
 
