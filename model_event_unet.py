@@ -404,7 +404,10 @@ def event_confidence_single_inference(model: EventConfidenceUnet, time_series: n
                 minute = times["mins"][batches_starts[i]]
                 second = times["secs"][batches_starts[i]]
                 time = (hour * 3600 + minute * 60 + second) // 5
-                time -= expand * 5
+                time -= expand
+                if time < 0:
+                    time += 17280
+                time = time % 17280
                 batch_times.append(time)
             batch_times = np.array(batch_times, dtype=np.int32)
         else:

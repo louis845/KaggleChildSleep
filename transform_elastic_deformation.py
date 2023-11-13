@@ -13,12 +13,14 @@ def generate_deformation_indices(length):
     assert length % 12 == 0, "Length must be divisible by 12 (multiple of 1min)"
     def_type = np.random.randint(0, 3)
     if def_type == 0:
+        deformed_time_indices = np.arange(length, dtype=np.int32)
+    elif def_type == 1:
         deformed_time_indices = np.random.randint(0, length, size=length)
         deformed_time_indices = np.sort(deformed_time_indices)
     else:
-        if def_type == 1:
+        if def_type == 2:
             strength = 2
-        elif def_type == 2:
+        elif def_type == 3:
             strength = 3
         else:
             strength = 6
@@ -53,11 +55,10 @@ def deform_v_time_series(time_series, deform_scale=True):
 
     if deform_scale:
         if np.random.rand() > 0.5:
-            scale = 1.0 +\
-                    0.025 * np.random.rand() * np.sin(10 * (0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=len(time_series)) + np.random.rand() * 2 * np.pi) + \
-                    0.025 * np.random.rand() * np.sin(10 * (0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=len(time_series)) + np.random.rand() * 2 * np.pi) + \
-                    0.025 * np.random.rand() * np.sin(10 * (0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=len(time_series)) + np.random.rand() * 2 * np.pi) + \
-                    0.025 * np.random.rand() * np.sin(10 * (0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=len(time_series)) + np.random.rand() * 2 * np.pi)
+            strength = np.random.randint(1, 5)
+            scale = 1.0
+            for k in range(strength):
+                scale = scale + 0.025 * np.random.rand() * np.sin(10 * (0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=len(time_series)) + np.random.rand() * 2 * np.pi)
             time_series = time_series * scale
 
     return time_series
