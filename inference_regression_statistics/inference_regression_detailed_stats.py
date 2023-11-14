@@ -56,19 +56,6 @@ def compute_numbers(X, Y, n=240):
 
     return right_indices - left_indices
 
-def prune(event_locs, event_vals, pruning_radius):
-    descending_order = np.argsort(event_vals)[::-1]
-    keeps = np.ones(len(event_locs), dtype=bool)
-
-    for k in range(len(event_locs)):
-        if keeps[descending_order[k]]:
-            loc = event_locs[descending_order[k]]
-            left_idx, right_idx = np.searchsorted(event_locs, [loc - pruning_radius + 1, loc + pruning_radius], side="left")
-            if right_idx - left_idx > 1:
-                keeps[left_idx:right_idx] = False
-                keeps[descending_order[k]] = True
-    return event_locs[keeps]
-
 def compute_metrics(selected_folder, is_onset, cutoff, pruning_radius, align_predictions: bool):
     files_list, kernel_vals_file_list, series_id_list = get_argmax_files_list(selected_folder, is_onset=is_onset)
     median_errs = []
@@ -83,7 +70,7 @@ def compute_metrics(selected_folder, is_onset, cutoff, pruning_radius, align_pre
 
         event_locs = event_locs[event_vals > cutoff]  # restrict
         if (len(event_locs) > 0) and (pruning_radius > 0): # prune if needed
-            event_locs = prune(event_locs, event_vals[event_vals > cutoff], pruning_radius=pruning_radius)
+            event_locs = postprocessing.prune(event_locs, event_vals[event_vals > cutoff], pruning_radius=pruning_radius)
         if (len(event_locs) > 0) and align_predictions:
             all_kernel_values = np.load(kernel_vals_file_list[k])
             seconds_values = np.load("../data_naive/{}/secs.npy".format(series_id_list[k]))

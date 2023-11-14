@@ -46,7 +46,7 @@ class PairwiseLengthAttn1D(torch.nn.Module):
         self.proj_k = torch.nn.Conv1d(qk_in_channels, key_query_channels, kernel_size=1, bias=False)
         self.proj_v = torch.nn.Conv1d(in_channels, out_channels, kernel_size=1, bias=False)
 
-        self.register_buffer("pairwise_distance", (torch.abs(torch.arange(input_length, dtype=torch.float32) -
+        self.register_buffer("pairwise_distance", ((torch.arange(input_length, dtype=torch.float32) -
                                                             torch.arange(input_length, dtype=torch.float32).unsqueeze(-1)) / (input_length - 1))
                                                             .unsqueeze(0).unsqueeze(0)) # (1, 1, T, T)
 

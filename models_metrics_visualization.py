@@ -156,6 +156,9 @@ class MetricPlotter(QMainWindow):
                 if "accuracy" in metric or "precision" in metric or "recall" in metric:
                     ax.set_ylim(0.75, 1.0)
                     ax.set_yticks(np.arange(0.75, 1.0, 0.05))
+                if "AP" in metric:
+                    ax.set_ylim(0.7, 0.85)
+                    ax.set_yticks(np.arange(0.7, 0.85, 0.05))
 
                 for model, df in data.items():
                     epochs = np.arange(max_epochs)

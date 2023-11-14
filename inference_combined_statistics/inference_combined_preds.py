@@ -23,8 +23,11 @@ if __name__ == "__main__":
     # initialize gpu
     config.parse_args(args)
 
-    iou_score_converter = model_event_unet.ProbasIOUScoreConverter(intersection_width=30 * 12,
-                                                                   union_width=60 * 12, device=config.device)
+    union_widths = [31, 35, 40, 45, 50, 55, 60, 70, 80, 90, 100, 120]
+    iou_score_converters = {}
+    for width in union_widths:
+        iou_score_converters[width] = model_event_unet.ProbasIOUScoreConverter(intersection_width=30 * 12,
+                                                                       union_width=width * 12, device=config.device)
 
     # get list of series ids
     series_ids = [x.split(".")[0] for x in os.listdir("individual_train_series")]
@@ -40,9 +43,13 @@ if __name__ == "__main__":
         if os.path.isdir(os.path.join(FOLDER, out_folder)):
             shutil.rmtree(os.path.join(FOLDER, out_folder))
         os.mkdir(os.path.join(FOLDER, out_folder))
+        for width in union_widths:
+            os.mkdir(os.path.join(FOLDER, out_folder, "width{}".format(width)))
 
         conf_results_folders = [os.path.join("./inference_confidence_statistics/confidence_labels", conf_result)
                                  for conf_result in conf_results]
+
+        print("Combining predictions with option {}...".format(name))
 
         for series_id in tqdm.tqdm(series_ids):
             ensembled_onset_preds = None
@@ -64,10 +71,11 @@ if __name__ == "__main__":
             ensembled_onset_preds = ensembled_onset_preds / len(conf_results_folders)
             ensembled_wakeup_preds = ensembled_wakeup_preds / len(conf_results_folders)
 
-            # convert to IOU score
-            onset_IOU_score = iou_score_converter.convert(ensembled_onset_preds)
-            wakeup_IOU_score = iou_score_converter.convert(ensembled_wakeup_preds)
+            for width in union_widths:
+                # convert to IOU score
+                onset_IOU_score = iou_score_converters[width].convert(ensembled_onset_preds)
+                wakeup_IOU_score = iou_score_converters[width].convert(ensembled_wakeup_preds)
 
-            # save predictions
-            np.save(os.path.join(FOLDER, out_folder, "{}_onset.npy".format(series_id)), onset_IOU_score)
-            np.save(os.path.join(FOLDER, out_folder, "{}_wakeup.npy".format(series_id)), wakeup_IOU_score)
+                # save predictions
+                np.save(os.path.join(FOLDER, out_folder, "width{}".format(width), "{}_onset.npy".format(series_id)), onset_IOU_score)
+                np.save(os.path.join(FOLDER, out_folder, "width{}".format(width), "{}_wakeup.npy".format(series_id)), wakeup_IOU_score)

@@ -1,5 +1,20 @@
 import numpy as np
 
+def prune(event_locs, event_vals, pruning_radius):
+    # assumes the indices (event_locs) are sorted
+    # event locs same length as event vals, prunes event locs according to radius
+    descending_order = np.argsort(event_vals)[::-1]
+    keeps = np.ones(len(event_locs), dtype=bool)
+
+    for k in range(len(event_locs)):
+        if keeps[descending_order[k]]:
+            loc = event_locs[descending_order[k]]
+            left_idx, right_idx = np.searchsorted(event_locs, [loc - pruning_radius + 1, loc + pruning_radius], side="left")
+            if right_idx - left_idx > 1:
+                keeps[left_idx:right_idx] = False
+                keeps[descending_order[k]] = True
+    return event_locs[keeps]
+
 def index_out_of_bounds(arr, indices):
     # assumes that the indices are sorted
     start = np.searchsorted(indices, 0, side="left")

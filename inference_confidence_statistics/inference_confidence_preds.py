@@ -17,7 +17,7 @@ def inference(model_dir, validation_entries, all_data,
               hidden_blocks, hidden_channels, bottleneck_factor, squeeze_excitation, kernel_size,
               attention_blocks, attention_bottleneck, attention_mode, upconv_channels_override,
               expand, use_batch_norm, use_anglez_only, use_enmo_only,
-              prediction_length, batch_size,
+              prediction_length, batch_size, use_time_information,
               show_tqdm_bar=True):
     # init model
     in_channels = 1 if (use_anglez_only or use_enmo_only) else 2
@@ -32,7 +32,8 @@ def inference(model_dir, validation_entries, all_data,
                                                  expected_attn_input_length=17280 + (2 * expand),
                                                  attention_blocks=attention_blocks,
                                                  upconv_channels_override=upconv_channels_override,
-                                                 attention_mode=attention_mode)
+                                                 attention_mode=attention_mode,
+                                                 use_time_input=use_time_information)
     model = model.to(config.device)
     model.eval()
 
@@ -54,10 +55,17 @@ def inference(model_dir, validation_entries, all_data,
             elif use_enmo_only:
                 accel_data = accel_data[1:2, :]
 
+            # load the times if required
+            if use_time_information:
+                times = {"hours": all_data[series_id]["hours"], "mins": all_data[series_id]["mins"],
+                         "secs": all_data[series_id]["secs"]}
+            else:
+                times = None
+
             preds = model_event_unet.event_confidence_inference(model=model, time_series=accel_data,
                                                                 batch_size=batch_size,
                                                                 prediction_length=prediction_length,
-                                                                expand=expand)
+                                                                expand=expand, times=times)
 
             # save to dict
             all_preds[series_id] = {
@@ -90,6 +98,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
+    parser.add_argument("--use_time_information", action="store_true", help="Whether to use time information. Default False.")
     parser.add_argument("--IOU_intersection_width", type=int, default=30 * 12, help="Intersection width for IOU score. Default 30 * 12.")
     parser.add_argument("--IOU_union_width", type=int, default=60 * 12, help="Union width for IOU score. Default 60 * 12.")
     config.add_argparse_arguments(parser)
@@ -112,6 +121,7 @@ if __name__ == "__main__":
     use_batch_norm = args.use_batch_norm
     prediction_length = args.prediction_length
     batch_size = args.batch_size
+    use_time_information = args.use_time_information
     IOU_intersection_width = args.IOU_intersection_width
     IOU_union_width = args.IOU_union_width
 
@@ -129,6 +139,7 @@ if __name__ == "__main__":
         "use_batch_norm": use_batch_norm,
         "prediction_length": prediction_length,
         "batch_size": batch_size,
+        "use_time_information": use_time_information
     }
 
     # load data
@@ -177,7 +188,7 @@ if __name__ == "__main__":
                                     opt_args["hidden_blocks"], opt_args["hidden_channels"], opt_args["bottleneck_factor"], opt_args["squeeze_excitation"], opt_args["kernel_size"],
                                     opt_args["attention_blocks"], opt_args["attention_bottleneck"], opt_args["attention_mode"], opt_args["upconv_channels_override"],
                                     opt_args["expand"], opt_args["use_batch_norm"], use_anglez_only, use_enmo_only,
-                                    opt_args["prediction_length"], opt_args["batch_size"])
+                                    opt_args["prediction_length"], opt_args["batch_size"], opt_args["use_time_information"])
 
             for series_id in tqdm.tqdm(validation_entries):
                 preds = all_preds[series_id]

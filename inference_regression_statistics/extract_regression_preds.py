@@ -8,19 +8,6 @@ import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # add root folder to sys.path
 import postprocessing
 
-def prune(event_locs, event_vals, pruning_radius):
-    descending_order = np.argsort(event_vals)[::-1]
-    keeps = np.ones(len(event_locs), dtype=bool)
-
-    for k in range(len(event_locs)):
-        if keeps[descending_order[k]]:
-            loc = event_locs[descending_order[k]]
-            left_idx, right_idx = np.searchsorted(event_locs, [loc - pruning_radius + 1, loc + pruning_radius], side="left")
-            if right_idx - left_idx > 1:
-                keeps[left_idx:right_idx] = False
-                keeps[descending_order[k]] = True
-    return event_locs[keeps]
-
 out_folder = "regression_preds"
 if os.path.isdir(out_folder):
     shutil.rmtree(out_folder)
@@ -52,9 +39,9 @@ for series_id in tqdm.tqdm(series_ids):
 
     if pruning > 0:
         if len(onset_locs) > 0:
-            onset_locs = prune(onset_locs, onset_values[onset_values > cutoff], pruning)
+            onset_locs = postprocessing.prune(onset_locs, onset_values[onset_values > cutoff], pruning)
         if len(wakeup_locs) > 0:
-            wakeup_locs = prune(wakeup_locs, wakeup_values[wakeup_values > cutoff], pruning)
+            wakeup_locs = postprocessing.prune(wakeup_locs, wakeup_values[wakeup_values > cutoff], pruning)
 
     if alignment:
         seconds_values = np.load("../data_naive/{}/secs.npy".format(series_id))

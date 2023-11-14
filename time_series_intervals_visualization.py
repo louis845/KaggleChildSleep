@@ -44,6 +44,8 @@ class MatplotlibWidget(QWidget):
         #self.axis.plot(x, extras["wakeup_conf"] * 10.0, label="wakeup_conf")
         self.axis.plot(x, extras["onset_IOU_conf"] * 10.0, label="onset_IOU_conf")  # easier viewing
         self.axis.plot(x, extras["wakeup_IOU_conf"] * 10.0, label="wakeup_IOU_conf")
+        self.axis.plot(x, extras["onset_IOU_conf2"] * 10.0, label="onset_IOU_conf2")
+        self.axis.plot(x, extras["wakeup_IOU_conf2"] * 10.0, label="wakeup_IOU_conf2")
 
         for event_time, event_type in events:
             color = "blue" if event_type in [1, 3, 4] else "red"
@@ -218,11 +220,15 @@ def load_file(item):
     extras["onset_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_onset_locs.npy".format(item))
     extras["wakeup_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_wakeup_locs.npy".format(item))
 
-    confidence_pred_folder = "./inference_confidence_statistics/confidence_labels/event5fold_expanded_anglez"
+    confidence_pred_folder = "./inference_confidence_statistics/confidence_labels/event5fold_3length"
     extras["onset_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_onset.npy"))
     extras["wakeup_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_wakeup.npy"))
     extras["onset_IOU_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_IOU_onset.npy"))
     extras["wakeup_IOU_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_IOU_wakeup.npy"))
+
+    confidence_pred_folder2 = "./inference_combined_statistics/combined_predictions/event5fold_local_3length"
+    extras["onset_IOU_conf2"] = np.load(os.path.join(confidence_pred_folder2, item + "_onset.npy"))
+    extras["wakeup_IOU_conf2"] = np.load(os.path.join(confidence_pred_folder2, item + "_wakeup.npy"))
 
     return df["anglez"], df["enmo"], df["timestamp"], extras
 
