@@ -61,8 +61,6 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
     optimizer_.zero_grad()
     times_input = times_batch if use_time_information else None
     pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn", time=times_input)
-    if predict_center_mode == "center":
-        pred_logits = pred_logits[:, :, expand:-expand]
     if use_ce_loss:
         loss = ce_loss(pred_logits, labels_batch)
     elif use_iou_loss:
@@ -96,7 +94,7 @@ def training_step(record: bool):
                 training_sampler.sample(batch_size, random_shift=random_shift,
                                         random_flip=random_flip, random_vflip=flip_value, always_flip=always_flip,
                                         expand=expand, elastic_deformation=use_elastic_deformation, v_elastic_deformation=use_velastic_deformation,
-                                        include_all_events=include_all_events, include_events_in_extension=(predict_center_mode == "expanded"))
+                                        randomly_dropout_expanded_parts=random_exp_dropout)
             assert labels_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(labels_batch.shape)
             assert accel_data_batch.shape[-1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(accel_data_batch.shape)
 
@@ -112,9 +110,6 @@ def training_step(record: bool):
                     accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
                 else:
                     accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
-
-            if predict_center_mode == "center":
-                labels_batch_torch = labels_batch_torch[:, :, expand:-expand]
 
             # train model now
             loss, preds, small_loss, mid_loss, large_loss, num_events = single_training_step(model, optimizer,
@@ -151,8 +146,7 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
     with torch.no_grad():
         times_input = times_batch if use_time_information else None
         pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn", time=times_input)
-        if (predict_center_mode == "center" or predict_center_mode == "expanded"):
-            pred_logits = pred_logits[:, :, expand:-expand]
+        pred_logits = pred_logits[:, :, expand:-expand]
         if use_ce_loss:
             loss = ce_loss(pred_logits, labels_batch)
         elif use_iou_loss:
@@ -176,8 +170,7 @@ def validation_step():
     with (tqdm.tqdm(total=len(val_sampler)) as pbar):
         while val_sampler.entries_remaining() > 0:
             # load the batch
-            accel_data_batch, labels_batch, times_batch, increment = val_sampler.sample(batch_size, expand=expand, include_all_events=include_all_events,
-                                                                           include_events_in_extension=(predict_center_mode == "expanded"))
+            accel_data_batch, labels_batch, times_batch, increment = val_sampler.sample(batch_size, expand=expand)
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
 
@@ -188,8 +181,7 @@ def validation_step():
             elif mix_anglez_enmo:
                 accel_data_batch = accel_data_batch[:, 0:1, :]
 
-            if (predict_center_mode == "center" or predict_center_mode == "expanded"):
-                labels_batch = labels_batch[:, :, expand:-expand]
+            labels_batch = labels_batch[:, :, expand:-expand]
 
             # val model now
             loss, preds, small_loss, mid_loss, large_loss, num_events = single_validation_step(model, accel_data_batch, labels_batch, times_batch)
@@ -357,10 +349,11 @@ if __name__ == "__main__":
     parser.add_argument("--kernel_size", type=int, default=11, help="Kernel size for the first layer. Default 11.")
     parser.add_argument("--attention_blocks", type=int, default=4, help="Number of attention blocks to use. Default 4.")
     parser.add_argument("--attention_bottleneck", type=int, default=None, help="The bottleneck factor of the attention module. Default None.")
-    parser.add_argument("--attention_mode", type=str, default="learned", help="Attention mode. Default 'learned'. Must be 'learned' or 'length'.")
+    parser.add_argument("--attention_mode", type=str, default="learned", help="Attention mode. Default 'learned'. Must be 'learned', 'length' or 'nosym_length'.")
     parser.add_argument("--upconv_channels_override", type=int, default=None, help="Number of fixed channels for the upsampling path. Default None, do not override.")
     parser.add_argument("--random_shift", type=int, default=0, help="Randomly shift the intervals by at most this amount. Default 0.")
     parser.add_argument("--random_flip", action="store_true", help="Randomly flip the intervals. Default False.")
+    parser.add_argument("--random_exp_dropout", action="store_true", help="Randomly dropout the expanded parts of the intervals. Default False.")
     parser.add_argument("--always_flip", action="store_true", help="Always flip the intervals. Default False.")
     parser.add_argument("--flip_value", action="store_true", help="Whether to flip the value of the intervals. Default False.")
     parser.add_argument("--expand", type=int, default=0, help="Expand the intervals by this amount. Default 0.")
@@ -377,14 +370,12 @@ if __name__ == "__main__":
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
     parser.add_argument("--mix_anglez_enmo", action="store_true", help="Whether to mix anglez and enmo. Default False.")
-    parser.add_argument("--include_all_events", action="store_true", help="Whether to include all events. Default False.")
     parser.add_argument("--exclude_bad_series_from_training", action="store_true", help="Whether to exclude bad series from training. Default False.")
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
     parser.add_argument("--prediction_stride", type=int, default=4320, help="Number of timesteps to stride when predicting. Default 4320.")
-    parser.add_argument("--predict_center_mode", type=str, default="all", help="Optimization target for the center (expanded parts omitted) and the expanded parts of the intervals. Default all.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
-    parser.add_argument("--log_average_precision", action="store_true", help="Whether to log the average precision. Default False.")
+    parser.add_argument("--log_average_precision", action="store_false", help="Whether to log the average precision. Default True.")
     manager_folds.add_argparse_arguments(parser)
     manager_models.add_argparse_arguments(parser)
     config.add_argparse_arguments(parser)
@@ -424,6 +415,7 @@ if __name__ == "__main__":
     upconv_channels_override = args.upconv_channels_override
     random_shift = args.random_shift
     random_flip = args.random_flip
+    random_exp_dropout = args.random_exp_dropout
     always_flip = args.always_flip
     flip_value = args.flip_value
     expand = args.expand
@@ -440,18 +432,15 @@ if __name__ == "__main__":
     use_anglez_only = args.use_anglez_only
     use_enmo_only = args.use_enmo_only
     mix_anglez_enmo = args.mix_anglez_enmo
-    include_all_events = args.include_all_events
     exclude_bad_series_from_training = args.exclude_bad_series_from_training
     prediction_length = args.prediction_length
     prediction_stride = args.prediction_stride
-    predict_center_mode = args.predict_center_mode
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
     log_average_precision = args.log_average_precision
 
     assert not (use_iou_loss and use_ce_loss), "Cannot use both IOU loss and cross entropy loss."
     assert sum([use_anglez_only, use_enmo_only, mix_anglez_enmo]) <= 1, "Cannot use more than one of anglez only, enmo only, and mix anglez and enmo."
-    assert predict_center_mode in ["all", "center", "expanded"], "predict_center_mode must be one of all, center, expanded."
     assert not (use_time_information and random_flip), "Cannot use time information and random flip at the same time."
     # all      - predict all parts of the interval, events only happen in the center, and the expanded parts will be predicted as negative (for both training and validation)
     # center   - predict only the center parts of the interval. No optimization and predictions will be made for the expanded parts (for both training and validation)
@@ -568,6 +557,7 @@ if __name__ == "__main__":
         "upconv_channels_override": upconv_channels_override,
         "random_shift": random_shift,
         "random_flip": random_flip,
+        "random_exp_dropout": random_exp_dropout,
         "always_flip": always_flip,
         "flip_value": flip_value,
         "expand": expand,
@@ -584,11 +574,9 @@ if __name__ == "__main__":
         "use_anglez_only": use_anglez_only,
         "use_enmo_only": use_enmo_only,
         "mix_anglez_enmo": mix_anglez_enmo,
-        "include_all_events": include_all_events,
         "exclude_bad_series_from_training": exclude_bad_series_from_training,
         "prediction_length": prediction_length,
         "prediction_stride": prediction_stride,
-        "predict_center_mode": predict_center_mode,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
         "log_average_precision": log_average_precision,
@@ -629,7 +617,6 @@ if __name__ == "__main__":
     print("Always flip: " + str(always_flip))
     print("Elastic deformation: " + str(use_elastic_deformation))
     print("Expand: " + str(expand))
-    print("Prediction mode:" + str(predict_center_mode))
     print("Use anglez only: " + str(use_anglez_only))
     print("Use enmo only: " + str(use_enmo_only))
     print("Mix anglez and enmo: " + str(mix_anglez_enmo))

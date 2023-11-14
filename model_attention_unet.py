@@ -25,7 +25,8 @@ class SymmetricLinear(torch.nn.Module):
 
 class PairwiseLengthAttn1D(torch.nn.Module):
     # assumes the input is (N, C, T)
-    def __init__(self, in_channels, out_channels, key_query_channels, input_length, heads=8, num_mix=1, dropout=0.0, use_time_input=False):
+    def __init__(self, in_channels, out_channels, key_query_channels, input_length, heads=8, num_mix=1, dropout=0.0, use_time_input=False,
+                 use_symmetric_timediff=True):
         super(PairwiseLengthAttn1D, self).__init__()
         assert out_channels % heads == 0, "out_channels must be divisible by heads"
         assert key_query_channels % heads == 0, "key_query_channels must be divisible by heads"
@@ -46,9 +47,14 @@ class PairwiseLengthAttn1D(torch.nn.Module):
         self.proj_k = torch.nn.Conv1d(qk_in_channels, key_query_channels, kernel_size=1, bias=False)
         self.proj_v = torch.nn.Conv1d(in_channels, out_channels, kernel_size=1, bias=False)
 
-        self.register_buffer("pairwise_distance", ((torch.arange(input_length, dtype=torch.float32) -
-                                                            torch.arange(input_length, dtype=torch.float32).unsqueeze(-1)) / (input_length - 1))
-                                                            .unsqueeze(0).unsqueeze(0)) # (1, 1, T, T)
+        if use_symmetric_timediff:
+            self.register_buffer("pairwise_distance", (torch.abs(torch.arange(input_length, dtype=torch.float32) -
+                                                                torch.arange(input_length, dtype=torch.float32).unsqueeze(-1)) / (input_length - 1))
+                                                                .unsqueeze(0).unsqueeze(0))  # (1, 1, T, T)
+        else:
+            self.register_buffer("pairwise_distance", ((torch.arange(input_length, dtype=torch.float32) -
+                                                                torch.arange(input_length, dtype=torch.float32).unsqueeze(-1)) / (input_length - 1))
+                                                                .unsqueeze(0).unsqueeze(0)) # (1, 1, T, T)
 
 
         self.mix1 = torch.nn.ModuleList()
@@ -182,7 +188,7 @@ class AttentionBlock1DWithPositionalEncoding(torch.nn.Module):
                  dropout_pos_embeddings=False, attn_dropout=0.0, use_time_input=False):
         super(AttentionBlock1DWithPositionalEncoding, self).__init__()
         assert channels % 2 == 0, "channels must be divisible by 2"
-        assert attention_mode in ["learned", "length"], "attention_mode must be one of ['learned', 'length']"
+        assert attention_mode in ["learned", "length", "nosym_length"], "attention_mode must be one of ['learned', 'length', 'nosym_length']"
         if dropout_pos_embeddings:
             assert attention_mode == "learned", "dropout_pos_embeddings can only be True if attention_mode is 'learned'"
         self.input_length = input_length
@@ -190,7 +196,8 @@ class AttentionBlock1DWithPositionalEncoding(torch.nn.Module):
         if attention_mode == "learned":
             self.multihead_attn = MultiHeadAttn1D(channels + (channels // 2), hidden_channels, key_query_channels, heads, dropout=attn_dropout)
         else:
-            self.length_attn = PairwiseLengthAttn1D(channels, hidden_channels, key_query_channels, input_length, heads, dropout=attn_dropout, use_time_input=use_time_input)
+            self.length_attn = PairwiseLengthAttn1D(channels, hidden_channels, key_query_channels, input_length, heads, dropout=attn_dropout, use_time_input=use_time_input,
+                                                    use_symmetric_timediff=(attention_mode == "length"))
         self.layer_norm1 = torch.nn.GroupNorm(num_channels=hidden_channels, num_groups=1)
         self.nonlin1 = torch.nn.GELU()
 

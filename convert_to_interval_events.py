@@ -81,8 +81,8 @@ class IntervalEventsSampler:
         self.sample_low = 0
 
     def sample_single(self, index: int, random_shift: int=0, flip: bool=False, vflip=False, expand: int=0,
-                      elastic_deformation=False, v_elastic_deformation=False, include_all_events=False, include_events_in_extension=False,
-                      randomly_augment_time=False):
+                      elastic_deformation=False, v_elastic_deformation=False, randomly_augment_time=False,
+                      randomly_dropout_expanded_parts=False):
         # index denotes the index in self.all_segmentations_list
         # vflip and v_elastic_deformation is applied to anglez only, not to enmo
         # returns (accel_data, event_segmentations), where event_segmentations[0, :] is onset, and event_segmentations[1, :] is wakeup
@@ -116,16 +116,21 @@ class IntervalEventsSampler:
         assert start - expand >= 0 and end + expand <= total_length, "start: {}, end: {}, total_length: {}".format(start, end, total_length)
 
         # find the events that need to be included, and generate elastic deformation if necessary
-        if include_events_in_extension:
-            events_start, events_end = start - expand, end + expand
-        else:
-            events_start, events_end = start, end
+        events_start, events_end = start - expand, end + expand
         if elastic_deformation:
             deformation_indices = transform_elastic_deformation.generate_deformation_indices(length=end - start + expand * 2)
-            if include_events_in_extension:
-                events_start, events_end = start - expand + deformation_indices[0], start - expand + deformation_indices[-1]
-            else:
-                events_start, events_end = start - expand + deformation_indices[expand], start - expand + deformation_indices[expand + end - start - 1]
+            events_start, events_end = start - expand + deformation_indices[0], start - expand + deformation_indices[-1]
+
+        # generate expanded parts dropout if necessary
+        dropout_expanded_parts = False
+        if randomly_dropout_expanded_parts:
+            if np.random.rand() < 0.1:
+                dropout_expanded_parts = True
+                left_dropout, right_dropout = 0, 0
+                if np.random.rand() < 0.5:
+                    left_dropout = np.random.randint(low=0, high=expand)
+                else:
+                    right_dropout = np.random.randint(low=0, high=expand)
 
         # load events
         series_events = self.events.loc[self.events["series_id"] == series_id]
@@ -141,7 +146,7 @@ class IntervalEventsSampler:
                         "onset": int(evts.iloc[0]["step"]),
                         "wakeup": int(evts.iloc[1]["step"])
                     })
-                elif include_all_events:
+                else:
                     evt_type = evts.iloc[0]["event"]
                     assert len(evts) == 1
                     assert evt_type in ["onset", "wakeup"]
@@ -166,27 +171,35 @@ class IntervalEventsSampler:
             onset = (int(event["onset"] - start + expand)) if event["onset"] is not None else None
             wakeup = (int(event["wakeup"] - start + expand)) if event["wakeup"] is not None else None
             if elastic_deformation:
+                # compute position after elastic deformation
                 onset = transform_elastic_deformation.find_closest_index(deformation_indices, onset) if onset is not None else None
                 wakeup = transform_elastic_deformation.find_closest_index(deformation_indices, wakeup) if wakeup is not None else None
 
             if flip:
                 onset, wakeup = wakeup, onset
             if onset is not None:
-                event_segmentations[0, max(0, onset - event_tolerance_width):min(event_segmentations.shape[1],
-                                                                                 onset + event_tolerance_width + 1)] = 1.0
+                if (not dropout_expanded_parts) or (onset >= left_dropout and onset <= (end - start + 2 * expand - right_dropout)):
+                    event_segmentations[0, max(0, onset - event_tolerance_width):min(event_segmentations.shape[1],
+                                                                                     onset + event_tolerance_width + 1)] = 1.0
             if wakeup is not None:
-                event_segmentations[1, max(0, wakeup - event_tolerance_width):min(event_segmentations.shape[1],
-                                                                                  wakeup + event_tolerance_width + 1)] = 1.0
+                if (not dropout_expanded_parts) or (wakeup >= left_dropout and wakeup <= (end - start + 2 * expand - right_dropout)):
+                    event_segmentations[1, max(0, wakeup - event_tolerance_width):min(event_segmentations.shape[1],
+                                                                                      wakeup + event_tolerance_width + 1)] = 1.0
         if elastic_deformation:
             accel_data = transform_elastic_deformation.deform_time_series(accel_data, deformation_indices)
-        if flip:
-            accel_data = np.flip(accel_data, axis=1)
-            event_segmentations = np.flip(event_segmentations, axis=1)
         if vflip:
             # flip anglez only
             accel_data[0, :] = -accel_data[0, :]
         if v_elastic_deformation:
             accel_data[0, :] = transform_elastic_deformation.deform_v_time_series(accel_data[0, :])
+        if dropout_expanded_parts:
+            if left_dropout > 0:
+                accel_data[:, :left_dropout] = 0
+            elif right_dropout > 0:
+                accel_data[:, -right_dropout:] = 0
+        if flip:
+            accel_data = np.flip(accel_data, axis=1)
+            event_segmentations = np.flip(event_segmentations, axis=1)
 
         hour = self.naive_all_data[series_id]["hours"][start - expand]
         minute = self.naive_all_data[series_id]["mins"][start - expand]
@@ -200,8 +213,8 @@ class IntervalEventsSampler:
 
         return accel_data, event_segmentations, time
 
-    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, random_vflip=False, expand: int=0, elastic_deformation=False,
-               v_elastic_deformation=False, include_all_events=False, include_events_in_extension=False):
+    def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, random_vflip=False, expand: int=0,
+               elastic_deformation=False, v_elastic_deformation=False, randomly_dropout_expanded_parts=False):
         assert self.shuffle_indices is not None, "shuffle_indices is None, call shuffle() first"
 
         accel_datas = []
@@ -220,8 +233,7 @@ class IntervalEventsSampler:
                 vflip = np.random.randint(0, 2) == 1
 
             accel_data, event_segmentation, time = self.sample_single(self.shuffle_indices[k], random_shift=random_shift, flip=flip, vflip=vflip, expand=expand, elastic_deformation=elastic_deformation,
-                                                                      v_elastic_deformation=v_elastic_deformation, include_all_events=include_all_events, include_events_in_extension=include_events_in_extension,
-                                                                      randomly_augment_time=self.train_or_test == "train")
+                                                                      v_elastic_deformation=v_elastic_deformation, randomly_augment_time=self.train_or_test == "train", randomly_dropout_expanded_parts=randomly_dropout_expanded_parts)
             accel_datas.append(accel_data)
             event_segmentations.append(event_segmentation)
             times.append(time)
