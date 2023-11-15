@@ -1,6 +1,8 @@
 import sys
 import os
+import json
 
+import matplotlib.figure
 from PySide2.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QSlider, QLabel, QCheckBox, QComboBox, QHBoxLayout, QPushButton
 from PySide2.QtGui import QFontMetrics
 from PySide2.QtCore import Qt
@@ -13,6 +15,82 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # add root folder to sys.path
 import postprocessing
 import metrics_ap
+import convert_to_seriesid_events
+import convert_to_pred_events
+
+def plot_single_precision_recall_curve(ax, precisions, recalls, ap, title):
+    ax.plot(recalls, precisions)
+    ax.set_title(title)
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.text(0.5, 0.5, "AP: {:.4f}".format(ap), horizontalalignment="center", verticalalignment="center")
+
+validation_AP_tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30][::-1]
+regression_labels_folder = os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV", "huber_kernel6")
+def validation_ap(fig: matplotlib.figure.Figure, predicted_events, gt_events, iou_probas_folder,
+                  width, cutoff, augmentation):
+    ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+    ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+
+    for series_id in all_series_ids:
+        # load the regression predictions
+        preds_locs = predicted_events[series_id]
+        preds_locs_onset = preds_locs["onset"]
+        preds_locs_wakeup = preds_locs["wakeup"]
+
+        # load the IOU probas
+        onset_IOU_probas = np.load(os.path.join(iou_probas_folder, "{}_onset.npy".format(series_id)))
+        wakeup_IOU_probas = np.load(os.path.join(iou_probas_folder, "{}_wakeup.npy".format(series_id)))
+
+        if augmentation:
+            # load the kernel predictions
+            onset_kernel = np.load(os.path.join(regression_labels_folder, "{}_onset.npy".format(series_id)))
+            wakeup_kernel = np.load(os.path.join(regression_labels_folder, "{}_wakeup.npy".format(series_id)))
+
+            # augment and restrict the probas
+            preds_locs_onset, onset_IOU_probas = postprocessing.get_augmented_predictions(preds_locs_onset,
+                                                            onset_kernel, onset_IOU_probas, cutoff_thresh=cutoff)
+            preds_locs_wakeup, wakeup_IOU_probas = postprocessing.get_augmented_predictions(preds_locs_wakeup,
+                                                            wakeup_kernel, wakeup_IOU_probas, cutoff_thresh=cutoff)
+        else:
+            # just restrict, without augmentation
+            onset_IOU_probas = onset_IOU_probas[preds_locs_onset]
+            wakeup_IOU_probas = wakeup_IOU_probas[preds_locs_wakeup]
+
+        # get the ground truth
+        gt_onset_locs = gt_events[series_id]["onset"]
+        gt_wakeup_locs = gt_events[series_id]["wakeup"]
+
+        # add info
+        for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+            ap_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
+            ap_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
+
+    # compute average precision
+    ap_onset_precisions, ap_onset_recalls, ap_onset_average_precisions = [], [], []
+    ap_wakeup_precisions, ap_wakeup_recalls, ap_wakeup_average_precisions = [], [], []
+    for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+        ap_onset_precision, ap_onset_recall, ap_onset_average_precision = ap_onset_metric.get()
+        ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision = ap_wakeup_metric.get()
+        ap_onset_precisions.append(ap_onset_precision)
+        ap_onset_recalls.append(ap_onset_recall)
+        ap_onset_average_precisions.append(ap_onset_average_precision)
+        ap_wakeup_precisions.append(ap_wakeup_precision)
+        ap_wakeup_recalls.append(ap_wakeup_recall)
+        ap_wakeup_average_precisions.append(ap_wakeup_average_precision)
+
+    # draw the precision-recall curve using matplotlib onto file "epoch{}_AP.png".format(epoch) inside the ap_log_dir
+    axes = fig.subplots(4, 5)
+    fig.suptitle("Width: {}, Cutoff: {}, Augmentation: {} (Onset mAP: {}, Wakeup mAP: {})".format(width, cutoff, augmentation,
+                                                                np.mean(ap_onset_average_precisions), np.mean(ap_wakeup_average_precisions)))
+    for k in range(len(validation_AP_tolerances)):
+        ax = axes[k // 5, k % 5]
+        plot_single_precision_recall_curve(ax, ap_onset_precisions[k], ap_onset_recalls[k], ap_onset_average_precisions[k], "Onset AP{}".format(validation_AP_tolerances[k]))
+        ax = axes[(k + 10) // 5, (k + 10) % 5]
+        plot_single_precision_recall_curve(ax, ap_wakeup_precisions[k], ap_wakeup_recalls[k], ap_wakeup_average_precisions[k], "Wakeup AP{}".format(validation_AP_tolerances[k]))
+    fig.subplots_adjust(wspace=0.5, hspace=0.7)
 
 class MainWindow(QMainWindow):
     union_width_values = [31, 35, 40, 45, 50, 55, 60, 70, 80, 90, 100, 120]
@@ -20,8 +98,11 @@ class MainWindow(QMainWindow):
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
 
+        with open(os.path.join("./inference_combined_statistics/inference_combined_preds_options.json"), "r") as f:
+            self.options = json.load(f)
+
         # Initialize folders
-        #self.folders = {subfolder: os.path.join("./regression_labels", subfolder) for subfolder in os.listdir("./regression_labels")}
+        self.folders = {option["name"]: option for option in self.options}
 
         self.setWindowTitle("Detailed combined statistics")
 
@@ -49,7 +130,7 @@ class MainWindow(QMainWindow):
 
         # Create a dropdown menu
         self.dropdown = QComboBox()
-        #self.dropdown.addItems(list(self.folders.keys()))  # Added items to the dropdown menu
+        self.dropdown.addItems(list(self.folders.keys()))  # Added items to the dropdown menu
         self.main_layout.addWidget(self.dropdown)
 
         # Create checkboxes
@@ -90,8 +171,20 @@ class MainWindow(QMainWindow):
         self.plot_button.clicked.connect(self.update_plots)
         self.main_layout.addWidget(self.plot_button)
 
+    def get_selected_folder(self):
+        union_width = self.get_union_width()
+        option_name = self.dropdown.currentText()
+        selected_folder = os.path.join("./inference_combined_statistics/combined_predictions", self.folders[option_name]["out_folder"], "width{}".format(union_width))
+        return selected_folder
+
     def update_plots(self):
-        pass
+        self.fig_plots.clear()
+
+        selected_folder = self.get_selected_folder()
+        validation_ap(self.fig_plots, regression_predicted_events, per_series_id_events, selected_folder, self.get_union_width(), self.get_cutoff(),
+                      self.checkbox_augmentation.isChecked())
+
+        self.canvas_plots.draw()
 
     def get_union_width(self):
         return self.union_width_values[self.slider_union_width.value()]
@@ -108,25 +201,10 @@ class MainWindow(QMainWindow):
         self.update_plots()
 
 if __name__ == "__main__":
-    events = pd.read_csv("../data/train_events.csv")
-    events = events.dropna()
-    loaded_events = {}
-    all_series_ids = [filename.split(".")[0] for filename in os.listdir("../individual_train_series")]
-    for series_id in all_series_ids:
-        series_events = events[events["series_id"] == series_id]
-        if len(series_events) > 0:
-            series_onsets = np.unique(series_events.loc[series_events["event"] == "onset"]["step"].to_numpy())
-            series_wakeups = np.unique(series_events.loc[series_events["event"] == "wakeup"]["step"].to_numpy())
+    all_series_ids = [filename.split(".")[0] for filename in os.listdir("./individual_train_series")]
 
-            loaded_events[series_id] = {
-                "onsets": series_onsets,
-                "wakeups": series_wakeups
-            }
-        else:
-            loaded_events[series_id] = {
-                "onsets": np.array([]),
-                "wakeups": np.array([])
-            }
+    per_series_id_events = convert_to_seriesid_events.get_events_per_seriesid()
+    regression_predicted_events = convert_to_pred_events.load_all_pred_events_into_dict()
 
     app = QApplication(sys.argv)
     window = MainWindow()
