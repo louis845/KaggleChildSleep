@@ -96,30 +96,39 @@ def compute_metrics(selected_folder, is_onset, cutoff, pruning_radius, align_pre
 
     return min_errs, median_errs, gaps, numbers, numbers_low
 
-def plot_graph_with_labels(ax, y_huber, y_gaussian, y_important_values=[12, 36, 60]):
+def plot_graph_with_labels(ax, y_huber, y_laplace, y_gaussian, y_important_values=[12, 36, 60]):
     # Generate x-values
     x = np.arange(len(y_huber))
 
     # Plot the graphs
     ax.plot(x, y_huber, label="Huber")
+    ax.plot(x, y_laplace, label="Laplace")
     ax.plot(x, y_gaussian, label="Gaussian")
 
     # Add rectangles for specific y-values
     ticks_vals = []
     for y_value in y_important_values:
         # Find the corresponding x-values for each graph
-        y1_idx = np.searchsorted(y_huber, y_value)
-        if y1_idx < len(y_huber):
-            x_y1 = x[y1_idx]
-            y_y1 = y_huber[y1_idx]
+        y_idx = np.searchsorted(y_huber, y_value)
+        if y_idx < len(y_huber):
+            x_y1 = x[y_idx]
+            y_y1 = y_huber[y_idx]
             rect_y1 = Rectangle((0, 0), x_y1, y_y1, fill=False, edgecolor="red", linestyle=":")
             ax.add_patch(rect_y1)
             ticks_vals.append(x_y1)
 
-        y2_idx = np.searchsorted(y_gaussian, y_value)
-        if y2_idx < len(y_gaussian):
-            x_y2 = x[y2_idx]
-            y_y2 = y_gaussian[y2_idx]
+        y_idx = np.searchsorted(y_laplace, y_value)
+        if y_idx < len(y_laplace):
+            x_y1 = x[y_idx]
+            y_y1 = y_laplace[y_idx]
+            rect_y1 = Rectangle((0, 0), x_y1, y_y1, fill=False, edgecolor="red", linestyle=":")
+            ax.add_patch(rect_y1)
+            ticks_vals.append(x_y1)
+
+        y_idx = np.searchsorted(y_gaussian, y_value)
+        if y_idx < len(y_gaussian):
+            x_y2 = x[y_idx]
+            y_y2 = y_gaussian[y_idx]
             rect_y2 = Rectangle((0, 0), x_y2, y_y2, fill=False, edgecolor="blue", linestyle=":")
             ax.add_patch(rect_y2)
             ticks_vals.append(x_y2)
@@ -129,7 +138,7 @@ def plot_graph_with_labels(ax, y_huber, y_gaussian, y_important_values=[12, 36, 
 
 
 class MainWindow(QMainWindow):
-    kernel_width_values = [2, 4, 6, 9, 12, 24, 36, 48, 60, 90, 120, 180, 240, 360]
+    kernel_width_values = [2, 6, 9, 12, 36, 90, 360]
 
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
@@ -258,9 +267,13 @@ class MainWindow(QMainWindow):
     def update_plots(self):
         selected_summary_name = self.get_selected_summary_name()
         selected_folder_huber = self.get_selected_folder(kernel_shape="huber")
+        selected_folder_laplace = self.get_selected_folder(kernel_shape="laplace")
         selected_folder_gaussian = self.get_selected_folder(kernel_shape="gaussian")
         min_errs_huber, median_errs_huber, gaps_huber, numbers_huber, numbers_huber_low =\
             compute_metrics(selected_folder_huber, is_onset=self.checkbox_onset.isChecked(), cutoff=self.get_cutoff(),
+                            pruning_radius=self.get_pruning(), align_predictions=self.checkbox_aligned.isChecked())
+        min_errs_laplace, median_errs_laplace, gaps_laplace, numbers_laplace, numbers_laplace_low = \
+            compute_metrics(selected_folder_laplace, is_onset=self.checkbox_onset.isChecked(), cutoff=self.get_cutoff(),
                             pruning_radius=self.get_pruning(), align_predictions=self.checkbox_aligned.isChecked())
         min_errs_gaussian, median_errs_gaussian, gaps_gaussian, numbers_gaussian, numbers_gaussian_low =\
             compute_metrics(selected_folder_gaussian, is_onset=self.checkbox_onset.isChecked(), cutoff=self.get_cutoff(),
@@ -282,18 +295,26 @@ class MainWindow(QMainWindow):
         ax_count = self.fig_count_distribution.add_subplot(111)
 
         ax_minerr.plot(np.arange(101), np.percentile(min_errs_huber, np.arange(101)), label="Huber")
+        ax_minerr.plot(np.arange(101), np.percentile(min_errs_laplace, np.arange(101)), label="Laplace")
         ax_minerr.plot(np.arange(101), np.percentile(min_errs_gaussian, np.arange(101)), label="Gaussian")
         ax_medianerr.plot(np.arange(101), np.percentile(median_errs_huber, np.arange(101)), label="Huber")
+        ax_medianerr.plot(np.arange(101), np.percentile(median_errs_laplace, np.arange(101)), label="Laplace")
         ax_medianerr.plot(np.arange(101), np.percentile(median_errs_gaussian, np.arange(101)), label="Gaussian")
         ax_lowcount.plot(np.arange(101), np.percentile(numbers_huber_low, np.arange(101)), label="Huber")
+        ax_lowcount.plot(np.arange(101), np.percentile(numbers_laplace_low, np.arange(101)), label="Laplace")
         ax_lowcount.plot(np.arange(101), np.percentile(numbers_gaussian_low, np.arange(101)), label="Gaussian")
-        plot_graph_with_labels(ax_minerr_bounded, np.percentile(min_errs_huber, np.arange(101)), np.percentile(min_errs_gaussian, np.arange(101)))
-        plot_graph_with_labels(ax_medianerr_bounded, np.percentile(median_errs_huber, np.arange(101)), np.percentile(median_errs_gaussian, np.arange(101)))
+        plot_graph_with_labels(ax_minerr_bounded, np.percentile(min_errs_huber, np.arange(101)),
+                               np.percentile(min_errs_laplace, np.arange(101)),
+                               np.percentile(min_errs_gaussian, np.arange(101)))
+        plot_graph_with_labels(ax_medianerr_bounded, np.percentile(median_errs_huber, np.arange(101)),
+                               np.percentile(median_errs_laplace, np.arange(101)),
+                               np.percentile(median_errs_gaussian, np.arange(101)))
         ax_minerr_bounded.set_ylim([0, 80])
         ax_medianerr_bounded.set_ylim([0, 80])
         ax_minerr_bounded.set_yticks(np.arange(0, 81, 20))
         ax_medianerr_bounded.set_yticks(np.arange(0, 81, 20))
         ax_count.plot(np.arange(101), np.percentile(numbers_huber, np.arange(101)), label="Huber")
+        ax_count.plot(np.arange(101), np.percentile(numbers_laplace, np.arange(101)), label="Laplace")
         ax_count.plot(np.arange(101), np.percentile(numbers_gaussian, np.arange(101)), label="Gaussian")
 
         ax_minerr.set_title("Min error ({})".format(selected_summary_name))
@@ -333,9 +354,9 @@ class MainWindow(QMainWindow):
 
     def get_selected_folder(self, kernel_shape):
         results_summary_folder = self.folders[self.dropdown.currentText()]
-        if "kernel" in os.listdir(results_summary_folder):
+        if "gaussian_kernel" in os.listdir(results_summary_folder):
             # learnable sigmas. this means the kernel shape must be huber, and the kernel width is learnt
-            return os.path.join(results_summary_folder, "kernel")
+            return os.path.join(results_summary_folder, "{}_kernel".format(kernel_shape))
 
         kernel_width = self.get_kernel_width()
 
