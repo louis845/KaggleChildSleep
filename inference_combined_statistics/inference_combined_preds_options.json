@@ -1,8 +1,23 @@
 [
   {
-    "name": "Local 3Length Ensemble",
-    "conf_results": ["event5fold_local", "event5fold_3length"],
-    "out_folder": "event5fold_local_3length"
+    "name": "Local 3Length Ensemble (old)",
+    "conf_results": ["old_event5fold_local", "old_event5fold_3length"],
+    "out_folder": "old_event5fold_local_3length"
+  },
+  {
+    "name": "3Length (old)",
+    "conf_results": ["old_event5fold_3length"],
+    "out_folder": "old_event5fold_3length"
+  },
+  {
+    "name": "Time 2Length (old)",
+    "conf_results": ["old_event5fold_time_2length"],
+    "out_folder": "old_event5fold_time_2length"
+  },
+  {
+    "name": "3Length Time 2Length Ensemble (old)",
+    "conf_results": ["old_event5fold_3length", "old_event5fold_time_2length"],
+    "out_folder": "old_event5fold_3length_time_2length"
   },
   {
     "name": "3Length",
@@ -15,8 +30,28 @@
     "out_folder": "event5fold_time_2length"
   },
   {
+    "name": "3Length Boundary Dropout",
+    "conf_results": ["event5fold_2drop_2length"],
+    "out_folder": "event5fold_2drop_2length"
+  },
+  {
     "name": "3Length Time 2Length Ensemble",
     "conf_results": ["event5fold_3length", "event5fold_time_2length"],
     "out_folder": "event5fold_3length_time_2length"
+  },
+  {
+    "name": "3Length Boundary Dropout Ensemble",
+    "conf_results": ["event5fold_2drop_2length", "event5fold_3length"],
+    "out_folder": "event5fold_2drop_3length"
+  },
+  {
+    "name": "3Length Boundary Dropout Time 2Length Ensemble",
+    "conf_results": ["event5fold_2drop_2length", "event5fold_time_2length"],
+    "out_folder": "event5fold_2drop_time_2length"
+  },
+  {
+    "name": "All Ensemble",
+    "conf_results": ["event5fold_2drop_2length", "event5fold_3length", "event5fold_time_2length"],
+    "out_folder": "event5fold_all"
   }
 ]

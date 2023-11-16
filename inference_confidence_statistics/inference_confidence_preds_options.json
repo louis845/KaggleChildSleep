@@ -1,30 +1,35 @@
 [
   {
-    "name": "Expanded Predictions (With Dropout, With Flipping, anglez)",
-    "folder_name": "event5fold_expanded_anglez",
-    "models": ["event5fold_expanded_elastic_model_fold1", "event5fold_expanded_elastic_model_fold2", "event5fold_expanded_elastic_model_fold3", "event5fold_expanded_elastic_model_fold4", "event5fold_expanded_elastic_model_fold5"],
-    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
-    "input_type": "anglez"
-  },
-  {
-    "name": "Expanded Predictions (With Dropout, With Flipping, both)",
-    "folder_name": "event5fold_expanded_both",
-    "models": ["event5fold_expanded_all_elastic_model_fold1", "event5fold_expanded_all_elastic_model_fold2", "event5fold_expanded_all_elastic_model_fold3", "event5fold_expanded_all_elastic_model_fold4", "event5fold_expanded_all_elastic_model_fold5"],
-    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
-    "input_type": "both"
-  },
-  {
-    "name": "Expanded Predictions (Local)",
-    "folder_name": "event5fold_local",
+    "name": "Expanded Predictions (Local, old)",
+    "folder_name": "old_event5fold_local",
     "models": ["event5fold_expanded_elastic_local_model_fold1", "event5fold_expanded_elastic_local_model_fold2", "event5fold_expanded_elastic_local_model_fold3", "event5fold_expanded_elastic_local_model_fold4", "event5fold_expanded_elastic_local_model_fold5"],
     "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
     "input_type": "anglez",
     "attention_blocks": 0
   },
   {
+    "name": "Expanded Predictions (3 Length, old)",
+    "folder_name": "old_event5fold_3length",
+    "models": ["event5fold_expanded_2elastic_length3_drop_model_fold1", "event5fold_expanded_2elastic_length3_drop_model_fold2", "event5fold_expanded_2elastic_length3_drop_model_fold3", "event5fold_expanded_2elastic_length3_drop_model_fold4", "event5fold_expanded_2elastic_length3_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "anglez",
+    "attention_blocks": 3,
+    "attention_mode": "length"
+  },
+  {
+    "name": "Expanded Predictions (Time, old)",
+    "folder_name": "old_event5fold_time_2length",
+    "models": ["event5fold_expanded_2elastic_length2_time_drop_model_fold1", "event5fold_expanded_2elastic_length2_time_drop_model_fold2", "event5fold_expanded_2elastic_length2_time_drop_model_fold3", "event5fold_expanded_2elastic_length2_time_drop_model_fold4", "event5fold_expanded_2elastic_length2_time_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "anglez",
+    "attention_blocks": 2,
+    "attention_mode": "length",
+    "use_time_information": true
+  },
+  {
     "name": "Expanded Predictions (3 Length)",
     "folder_name": "event5fold_3length",
-    "models": ["event5fold_expanded_2elastic_length3_drop_model_fold1", "event5fold_expanded_2elastic_length3_drop_model_fold2", "event5fold_expanded_2elastic_length3_drop_model_fold3", "event5fold_expanded_2elastic_length3_drop_model_fold4", "event5fold_expanded_2elastic_length3_drop_model_fold5"],
+    "models": ["event5fold_2elastic_length3_drop_model_fold1", "event5fold_2elastic_length3_drop_model_fold2", "event5fold_2elastic_length3_drop_model_fold3", "event5fold_2elastic_length3_drop_model_fold4", "event5fold_2elastic_length3_drop_model_fold5"],
     "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
     "input_type": "anglez",
     "attention_blocks": 3,
@@ -33,11 +38,20 @@
   {
     "name": "Expanded Predictions (Time)",
     "folder_name": "event5fold_time_2length",
-    "models": ["event5fold_expanded_2elastic_length2_time_drop_model_fold1", "event5fold_expanded_2elastic_length2_time_drop_model_fold2", "event5fold_expanded_2elastic_length2_time_drop_model_fold3", "event5fold_expanded_2elastic_length2_time_drop_model_fold4", "event5fold_expanded_2elastic_length2_time_drop_model_fold5"],
+    "models": ["event5fold_2elastic_length2_time_drop_model_fold1", "event5fold_2elastic_length2_time_drop_model_fold2", "event5fold_2elastic_length2_time_drop_model_fold3", "event5fold_2elastic_length2_time_drop_model_fold4", "event5fold_2elastic_length2_time_drop_model_fold5"],
     "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
     "input_type": "anglez",
     "attention_blocks": 2,
     "attention_mode": "length",
     "use_time_information": true
+  },
+  {
+    "name": "Expanded Predictions (Boundary dropout)",
+    "folder_name": "event5fold_2drop_2length",
+    "models": ["event5fold_2elastic_length3_2drop_model_fold1", "event5fold_2elastic_length3_2drop_model_fold2", "event5fold_2elastic_length3_2drop_model_fold3", "event5fold_2elastic_length3_2drop_model_fold4", "event5fold_2elastic_length3_2drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "anglez",
+    "attention_blocks": 3,
+    "attention_mode": "length"
   }
 ]

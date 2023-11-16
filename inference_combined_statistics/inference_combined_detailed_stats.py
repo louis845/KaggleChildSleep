@@ -18,8 +18,9 @@ import metrics_ap
 import convert_to_seriesid_events
 import convert_to_pred_events
 
-def plot_single_precision_recall_curve(ax, precisions, recalls, ap, title):
+def plot_single_precision_recall_curve(ax, precisions, recalls, ap, proba, title):
     ax.plot(recalls, precisions)
+    #ax.scatter(recalls, precisions, c=proba, cmap="coolwarm")
     ax.set_title(title)
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
@@ -69,17 +70,19 @@ def validation_ap(fig: matplotlib.figure.Figure, predicted_events, gt_events, io
             ap_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
 
     # compute average precision
-    ap_onset_precisions, ap_onset_recalls, ap_onset_average_precisions = [], [], []
-    ap_wakeup_precisions, ap_wakeup_recalls, ap_wakeup_average_precisions = [], [], []
+    ap_onset_precisions, ap_onset_recalls, ap_onset_average_precisions, ap_onset_probas = [], [], [], []
+    ap_wakeup_precisions, ap_wakeup_recalls, ap_wakeup_average_precisions, ap_wakeup_probas = [], [], [], []
     for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
-        ap_onset_precision, ap_onset_recall, ap_onset_average_precision = ap_onset_metric.get()
-        ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision = ap_wakeup_metric.get()
+        ap_onset_precision, ap_onset_recall, ap_onset_average_precision, ap_onset_proba = ap_onset_metric.get()
+        ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision, ap_wakeup_proba = ap_wakeup_metric.get()
         ap_onset_precisions.append(ap_onset_precision)
         ap_onset_recalls.append(ap_onset_recall)
         ap_onset_average_precisions.append(ap_onset_average_precision)
+        ap_onset_probas.append(ap_onset_proba)
         ap_wakeup_precisions.append(ap_wakeup_precision)
         ap_wakeup_recalls.append(ap_wakeup_recall)
         ap_wakeup_average_precisions.append(ap_wakeup_average_precision)
+        ap_wakeup_probas.append(ap_wakeup_proba)
 
     # draw the precision-recall curve using matplotlib onto file "epoch{}_AP.png".format(epoch) inside the ap_log_dir
     axes = fig.subplots(4, 5)
@@ -87,9 +90,11 @@ def validation_ap(fig: matplotlib.figure.Figure, predicted_events, gt_events, io
                                                                 np.mean(ap_onset_average_precisions), np.mean(ap_wakeup_average_precisions)))
     for k in range(len(validation_AP_tolerances)):
         ax = axes[k // 5, k % 5]
-        plot_single_precision_recall_curve(ax, ap_onset_precisions[k], ap_onset_recalls[k], ap_onset_average_precisions[k], "Onset AP{}".format(validation_AP_tolerances[k]))
+        plot_single_precision_recall_curve(ax, ap_onset_precisions[k], ap_onset_recalls[k], ap_onset_average_precisions[k],
+                                           ap_onset_probas[k], "Onset AP{}".format(validation_AP_tolerances[k]))
         ax = axes[(k + 10) // 5, (k + 10) % 5]
-        plot_single_precision_recall_curve(ax, ap_wakeup_precisions[k], ap_wakeup_recalls[k], ap_wakeup_average_precisions[k], "Wakeup AP{}".format(validation_AP_tolerances[k]))
+        plot_single_precision_recall_curve(ax, ap_wakeup_precisions[k], ap_wakeup_recalls[k], ap_wakeup_average_precisions[k],
+                                           ap_wakeup_probas[k], "Wakeup AP{}".format(validation_AP_tolerances[k]))
     fig.subplots_adjust(wspace=0.5, hspace=0.7)
 
 class MainWindow(QMainWindow):
@@ -194,11 +199,11 @@ class MainWindow(QMainWindow):
 
     def update_union_width_value(self, value):
         self.slider_union_width_label.setText("Union width: " + str(self.get_union_width()))
-        self.update_plots()
+        #self.update_plots()
 
     def update_cutoff_value(self, value):
         self.slider_cutoff_label.setText("Cutoff: " + str(self.get_cutoff()))
-        self.update_plots()
+        #self.update_plots()
 
 if __name__ == "__main__":
     all_series_ids = [filename.split(".")[0] for filename in os.listdir("./individual_train_series")]

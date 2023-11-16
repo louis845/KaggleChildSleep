@@ -343,15 +343,15 @@ class MainWindow(QMainWindow):
 
     def update_kernel_width_value(self, value):
         self.slider_kernel_width_label.setText("Kernel width: " + str(self.get_kernel_width()))
-        self.update_plots()
+        #self.update_plots()
 
     def update_cutoff_value(self, value):
         self.slider_cutoff_label.setText("Cutoff: " + str(self.get_cutoff()))
-        self.update_plots()
+        #self.update_plots()
 
     def update_pruning_value(self, value):
         self.slider_pruning_label.setText("Pruning: " + str(self.get_pruning()))
-        self.update_plots()
+        #self.update_plots()
 
 if __name__ == "__main__":
     events = pd.read_csv("../data/train_events.csv")

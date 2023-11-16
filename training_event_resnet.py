@@ -291,8 +291,8 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
     ap_onset_precisions, ap_onset_recalls, ap_onset_average_precisions = [], [], []
     ap_wakeup_precisions, ap_wakeup_recalls, ap_wakeup_average_precisions = [], [], []
     for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
-        ap_onset_precision, ap_onset_recall, ap_onset_average_precision = ap_onset_metric.get()
-        ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision = ap_wakeup_metric.get()
+        ap_onset_precision, ap_onset_recall, ap_onset_average_precision, _ = ap_onset_metric.get()
+        ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision, _ = ap_wakeup_metric.get()
         ap_onset_precisions.append(ap_onset_precision)
         ap_onset_recalls.append(ap_onset_recall)
         ap_onset_average_precisions.append(ap_onset_average_precision)

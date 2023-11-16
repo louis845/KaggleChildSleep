@@ -54,16 +54,30 @@ class EventMetrics:
         matches = matches[idxs]
         probas = probas[idxs]
 
-        # compute precision and recall curve
-        precision = np.cumsum(matches) / np.arange(1, len(matches) + 1)
-        recall = np.cumsum(matches) / self.num_positive
-        precision = np.concatenate([[1], precision, [0]])
-        recall = np.concatenate([[0], recall, [1]])
+        # compute precision and recall curve (using Kaggle code)
+        distinct_value_indices = np.where(np.diff(probas))[0]
+        threshold_idxs = np.r_[distinct_value_indices, matches.size - 1]
+        probas = probas[threshold_idxs]
+
+        # Matches become TPs and non-matches FPs as confidence threshold decreases
+        tps = np.cumsum(matches)[threshold_idxs]
+        fps = np.cumsum(~matches)[threshold_idxs]
+
+        precision = tps / (tps + fps)
+        precision[np.isnan(precision)] = 0
+        recall = tps / self.num_positive  # total number of ground truths might be different than total number of matches
+
+        # Stop when full recall attained and reverse the outputs so recall is non-increasing.
+        last_ind = tps.searchsorted(tps[-1])
+        sl = slice(last_ind, None, -1)
+
+        # Final precision is 1 and final recall is 0 and final proba is 1
+        precision, recall, probas = np.r_[precision[sl], 1], np.r_[recall[sl], 0], np.r_[probas[sl], 1]
 
         # compute average precision
-        average_precision = np.trapz(precision, recall)
+        average_precision = -np.sum(np.diff(recall) * np.array(precision)[:-1])
 
-        return precision, recall, average_precision
+        return precision, recall, average_precision, probas
 
     def write_to_dict(self, x: dict):
         x[self.name] = self.get()
@@ -71,4 +85,4 @@ class EventMetrics:
     def reset(self):
         self.matches.clear()
         self.probas.clear()
-        self.num_true = 0
+        self.num_positive = 0

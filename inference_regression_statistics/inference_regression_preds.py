@@ -19,12 +19,15 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
     FOLDERS_DICT = {
         "regression": os.path.join(out_folder, "regression")
     }
-    ker_vals = [2, 4, 6, 9, 12, 24, 36, 48, 60, 90, 120, 180, 240, 360]
+    ker_vals = [2, 6, 9, 12, 36, 90, 360]
     if use_sigmas:
-        FOLDERS_DICT["kernel"] = os.path.join(out_folder, "kernel")
+        FOLDERS_DICT["gaussian_kernel"] = os.path.join(out_folder, "gaussian_kernel")
+        FOLDERS_DICT["laplace_kernel"] = os.path.join(out_folder, "laplace_kernel")
+        FOLDERS_DICT["huber_kernel"] = os.path.join(out_folder, "huber_kernel")
     else:
         for k in ker_vals:
             FOLDERS_DICT["gaussian_kernel{}".format(k)] = os.path.join(out_folder, "gaussian_kernel{}".format(k))
+            FOLDERS_DICT["laplace_kernel{}".format(k)] = os.path.join(out_folder, "laplace_kernel{}".format(k))
             FOLDERS_DICT["huber_kernel{}".format(k)] = os.path.join(out_folder, "huber_kernel{}".format(k))
 
     for key in FOLDERS_DICT:
@@ -75,11 +78,12 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
                 # generate kernel predictions
                 if use_sigmas:
                     # onset
-                    npy_file = os.path.join(FOLDERS_DICT["kernel"], "{}_onset.npy".format(series_id))
+                    npy_file = os.path.join(FOLDERS_DICT["gaussian_kernel"], "{}_onset.npy".format(series_id))
                     if os.path.isfile(npy_file):
                         onset_kernel_pred = np.load(npy_file)
                     else:
-                        onset_kernel_pred = kernel_utils.generate_kernel_preds_sigma_gpu(preds[0, :], sigmas_array=preds[2, :], device=preds.device)
+                        onset_kernel_pred = kernel_utils.generate_kernel_preds_sigma_gpu(preds[0, :], sigmas_array=preds[2, :], device=preds.device,
+                                                                                         kernel_generating_function=kernel_utils.generate_kernel_preds_sigmas)
                         np.save(npy_file, onset_kernel_pred)
                     local_maximums = (onset_kernel_pred[1:-1] > onset_kernel_pred[0:-2]) & (onset_kernel_pred[1:-1] > onset_kernel_pred[2:])
                     local_maximums = np.argwhere(local_maximums).flatten() + 1
@@ -87,14 +91,45 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
                         local_maximums.astype(np.float32),
                         onset_kernel_pred[local_maximums].astype(np.float32)
                     ], axis=0)
-                    np.save(os.path.join(FOLDERS_DICT["kernel"], "{}_onset_locmax.npy".format(series_id)), local_maximums)
+                    np.save(os.path.join(FOLDERS_DICT["gaussian_kernel"], "{}_onset_locmax.npy".format(series_id)), local_maximums)
+                    
+                    npy_file = os.path.join(FOLDERS_DICT["laplace_kernel"], "{}_onset.npy".format(series_id))
+                    if os.path.isfile(npy_file):
+                        onset_kernel_pred = np.load(npy_file)
+                    else:
+                        onset_kernel_pred = kernel_utils.generate_kernel_preds_sigma_gpu(preds[0, :], sigmas_array=preds[2, :], device=preds.device,
+                                                                                         kernel_generating_function=kernel_utils.generate_kernel_preds_laplace_sigmas)
+                        np.save(npy_file, onset_kernel_pred)
+                    local_maximums = (onset_kernel_pred[1:-1] > onset_kernel_pred[0:-2]) & (onset_kernel_pred[1:-1] > onset_kernel_pred[2:])
+                    local_maximums = np.argwhere(local_maximums).flatten() + 1
+                    local_maximums = np.stack([
+                        local_maximums.astype(np.float32),
+                        onset_kernel_pred[local_maximums].astype(np.float32)
+                    ], axis=0)
+                    np.save(os.path.join(FOLDERS_DICT["laplace_kernel"], "{}_onset_locmax.npy".format(series_id)), local_maximums)
+                    
+                    npy_file = os.path.join(FOLDERS_DICT["huber_kernel"], "{}_onset.npy".format(series_id))
+                    if os.path.isfile(npy_file):
+                        onset_kernel_pred = np.load(npy_file)
+                    else:
+                        onset_kernel_pred = kernel_utils.generate_kernel_preds_sigma_gpu(preds[0, :], sigmas_array=preds[2, :], device=preds.device,
+                                                                                         kernel_generating_function=kernel_utils.generate_kernel_preds_huber_sigmas)
+                        np.save(npy_file, onset_kernel_pred)
+                    local_maximums = (onset_kernel_pred[1:-1] > onset_kernel_pred[0:-2]) & (onset_kernel_pred[1:-1] > onset_kernel_pred[2:])
+                    local_maximums = np.argwhere(local_maximums).flatten() + 1
+                    local_maximums = np.stack([
+                        local_maximums.astype(np.float32),
+                        onset_kernel_pred[local_maximums].astype(np.float32)
+                    ], axis=0)
+                    np.save(os.path.join(FOLDERS_DICT["huber_kernel"], "{}_onset_locmax.npy".format(series_id)), local_maximums)
 
                     # wakeup
-                    npy_file = os.path.join(FOLDERS_DICT["kernel"], "{}_wakeup.npy".format(series_id))
+                    npy_file = os.path.join(FOLDERS_DICT["gaussian_kernel"], "{}_wakeup.npy".format(series_id))
                     if os.path.isfile(npy_file):
                         wakeup_kernel_pred = np.load(npy_file)
                     else:
-                        wakeup_kernel_pred = kernel_utils.generate_kernel_preds_sigma_gpu(preds[1, :], sigmas_array=preds[3, :], device=preds.device)
+                        wakeup_kernel_pred = kernel_utils.generate_kernel_preds_sigma_gpu(preds[1, :], sigmas_array=preds[3, :], device=preds.device,
+                                                                                          kernel_generating_function=kernel_utils.generate_kernel_preds_sigmas)
                         np.save(npy_file, wakeup_kernel_pred)
                     local_maximums = (wakeup_kernel_pred[1:-1] > wakeup_kernel_pred[0:-2]) & (wakeup_kernel_pred[1:-1] > wakeup_kernel_pred[2:])
                     local_maximums = np.argwhere(local_maximums).flatten() + 1
@@ -102,7 +137,37 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
                         local_maximums.astype(np.float32),
                         wakeup_kernel_pred[local_maximums].astype(np.float32)
                     ], axis=0)
-                    np.save(os.path.join(FOLDERS_DICT["kernel"], "{}_wakeup_locmax.npy".format(series_id)), local_maximums)
+                    np.save(os.path.join(FOLDERS_DICT["gaussian_kernel"], "{}_wakeup_locmax.npy".format(series_id)), local_maximums)
+
+                    npy_file = os.path.join(FOLDERS_DICT["laplace_kernel"], "{}_wakeup.npy".format(series_id))
+                    if os.path.isfile(npy_file):
+                        wakeup_kernel_pred = np.load(npy_file)
+                    else:
+                        wakeup_kernel_pred = kernel_utils.generate_kernel_preds_sigma_gpu(preds[1, :], sigmas_array=preds[3, :], device=preds.device,
+                                                                                          kernel_generating_function=kernel_utils.generate_kernel_preds_laplace_sigmas)
+                        np.save(npy_file, wakeup_kernel_pred)
+                    local_maximums = (wakeup_kernel_pred[1:-1] > wakeup_kernel_pred[0:-2]) & (wakeup_kernel_pred[1:-1] > wakeup_kernel_pred[2:])
+                    local_maximums = np.argwhere(local_maximums).flatten() + 1
+                    local_maximums = np.stack([
+                        local_maximums.astype(np.float32),
+                        wakeup_kernel_pred[local_maximums].astype(np.float32)
+                    ], axis=0)
+                    np.save(os.path.join(FOLDERS_DICT["laplace_kernel"], "{}_wakeup_locmax.npy".format(series_id)), local_maximums)
+
+                    npy_file = os.path.join(FOLDERS_DICT["huber_kernel"], "{}_wakeup.npy".format(series_id))
+                    if os.path.isfile(npy_file):
+                        wakeup_kernel_pred = np.load(npy_file)
+                    else:
+                        wakeup_kernel_pred = kernel_utils.generate_kernel_preds_sigma_gpu(preds[1, :], sigmas_array=preds[3, :], device=preds.device,
+                                                                                          kernel_generating_function=kernel_utils.generate_kernel_preds_huber_sigmas)
+                        np.save(npy_file, wakeup_kernel_pred)
+                    local_maximums = (wakeup_kernel_pred[1:-1] > wakeup_kernel_pred[0:-2]) & (wakeup_kernel_pred[1:-1] > wakeup_kernel_pred[2:])
+                    local_maximums = np.argwhere(local_maximums).flatten() + 1
+                    local_maximums = np.stack([
+                        local_maximums.astype(np.float32),
+                        wakeup_kernel_pred[local_maximums].astype(np.float32)
+                    ], axis=0)
+                    np.save(os.path.join(FOLDERS_DICT["huber_kernel"], "{}_wakeup_locmax.npy".format(series_id)), local_maximums)
                 else:
                     for ker_val in ker_vals:
                         npy_file = os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id))
@@ -120,6 +185,23 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
                             onset_gaussian_pred[local_maximums].astype(np.float32)
                         ], axis=0)
                         np.save(os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_onset_locmax.npy".format(series_id)), local_maximums)
+
+                    for ker_val in ker_vals:
+                        npy_file = os.path.join(FOLDERS_DICT["laplace_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id))
+                        if os.path.isfile(npy_file):
+                            onset_laplace_pred = np.load(npy_file)
+                        else:
+                            onset_laplace_pred = kernel_utils.generate_kernel_preds_gpu(preds[0, :], device=preds.device,
+                                                                                         kernel_generating_function=kernel_utils.generate_kernel_preds_laplace,
+                                                                                         kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
+                            np.save(npy_file, onset_laplace_pred)
+                        local_maximums = (onset_laplace_pred[1:-1] > onset_laplace_pred[0:-2]) & (onset_laplace_pred[1:-1] > onset_laplace_pred[2:])
+                        local_maximums = np.argwhere(local_maximums).flatten() + 1
+                        local_maximums = np.stack([
+                            local_maximums.astype(np.float32),
+                            onset_laplace_pred[local_maximums].astype(np.float32)
+                        ], axis=0)
+                        np.save(os.path.join(FOLDERS_DICT["laplace_kernel{}".format(ker_val)], "{}_onset_locmax.npy".format(series_id)), local_maximums)
 
                     for ker_val in ker_vals:
                         npy_file = os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_onset.npy".format(series_id))
@@ -154,6 +236,23 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
                             wakeup_gaussian_pred[local_maximums].astype(np.float32)
                         ], axis=0)
                         np.save(os.path.join(FOLDERS_DICT["gaussian_kernel{}".format(ker_val)], "{}_wakeup_locmax.npy".format(series_id)), local_maximums)
+
+                    for ker_val in ker_vals:
+                        npy_file = os.path.join(FOLDERS_DICT["laplace_kernel{}".format(ker_val)], "{}_wakeup.npy".format(series_id))
+                        if os.path.isfile(npy_file):
+                            wakeup_laplace_pred = np.load(npy_file)
+                        else:
+                            wakeup_laplace_pred = kernel_utils.generate_kernel_preds_gpu(preds[1, :], device=preds.device,
+                                                                                         kernel_generating_function=kernel_utils.generate_kernel_preds_laplace,
+                                                                                         kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
+                            np.save(npy_file, wakeup_laplace_pred)
+                        local_maximums = (wakeup_laplace_pred[1:-1] > wakeup_laplace_pred[0:-2]) & (wakeup_laplace_pred[1:-1] > wakeup_laplace_pred[2:])
+                        local_maximums = np.argwhere(local_maximums).flatten() + 1
+                        local_maximums = np.stack([
+                            local_maximums.astype(np.float32),
+                            wakeup_laplace_pred[local_maximums].astype(np.float32)
+                        ], axis=0)
+                        np.save(os.path.join(FOLDERS_DICT["laplace_kernel{}".format(ker_val)], "{}_wakeup_locmax.npy".format(series_id)), local_maximums)
 
                     for ker_val in ker_vals:
                         npy_file = os.path.join(FOLDERS_DICT["huber_kernel{}".format(ker_val)], "{}_wakeup.npy".format(series_id))
