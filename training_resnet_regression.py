@@ -488,11 +488,11 @@ if __name__ == "__main__":
     parser.add_argument("--optimizer", type=str, default="adam", help="Which optimizer to use. Available options: adam, sgd. Default adam.")
     parser.add_argument("--epochs_per_save", type=int, default=2, help="Number of epochs between saves. Default 2.")
     parser.add_argument("--use_standard_model", action="store_true", help="Whether to use the standard model. Default False. This overrides the options below.")
-    parser.add_argument("--hidden_blocks", type=int, nargs="+", default=[1, 6, 8, 23, 8],
+    parser.add_argument("--hidden_blocks", type=int, nargs="+", default=[2, 2, 2, 2, 3],
                         help="Number of hidden 2d blocks for ResNet backbone.")
-    parser.add_argument("--hidden_channels", type=int, nargs="+", default=[2], help="Number of hidden channels. Default 2. Can be a list to specify num channels in each downsampled layer.")
+    parser.add_argument("--hidden_channels", type=int, nargs="+", default=[4, 4, 8, 16, 32], help="Number of hidden channels. Default 2. Can be a list to specify num channels in each downsampled layer.")
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
-    parser.add_argument("--kernel_size", type=int, default=11, help="Kernel size for the first layer. Default 11.")
+    parser.add_argument("--kernel_size", type=int, default=3, help="Kernel size for the first layer. Default 3.")
     parser.add_argument("--disable_deep_upconv_contraction", action="store_true", help="Whether to disable the deep upconv contraction. Default False.")
     parser.add_argument("--deep_upconv_kernel", type=int, default=5, help="Kernel size for the deep upconv layers. Default 5.")
     parser.add_argument("--deep_upconv_channels_override", type=int, default=None, help="Override the number of channels for the deep upconv layers. Default None.")
@@ -595,7 +595,8 @@ if __name__ == "__main__":
     # initialize model
     in_channels = 1 if (use_anglez_only or use_enmo_only) else 2
     if use_standard_model:
-        model = model_event_unet.EventRegressorUnet(use_learnable_sigma=(loss_type == "huber_sigma"))
+        model = model_event_unet.EventRegressorUnet(use_learnable_sigma=(loss_type == "huber_sigma"), hidden_channels=hidden_channels,
+                                                    blocks=hidden_blocks)
     else:
         model = model_attention_unet.Unet3fDeepSupervision(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
                                 bottleneck_factor=bottleneck_factor, squeeze_excitation=False,

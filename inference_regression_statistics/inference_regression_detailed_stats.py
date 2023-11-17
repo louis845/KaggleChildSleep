@@ -113,7 +113,7 @@ def plot_graph_with_labels(ax, y_huber, y_laplace, y_gaussian, y_important_value
         if y_idx < len(y_huber):
             x_y1 = x[y_idx]
             y_y1 = y_huber[y_idx]
-            rect_y1 = Rectangle((0, 0), x_y1, y_y1, fill=False, edgecolor="red", linestyle=":")
+            rect_y1 = Rectangle((0, 0), x_y1, y_y1, fill=False, edgecolor="blue", linestyle=":")
             ax.add_patch(rect_y1)
             ticks_vals.append(x_y1)
 
@@ -121,7 +121,7 @@ def plot_graph_with_labels(ax, y_huber, y_laplace, y_gaussian, y_important_value
         if y_idx < len(y_laplace):
             x_y1 = x[y_idx]
             y_y1 = y_laplace[y_idx]
-            rect_y1 = Rectangle((0, 0), x_y1, y_y1, fill=False, edgecolor="red", linestyle=":")
+            rect_y1 = Rectangle((0, 0), x_y1, y_y1, fill=False, edgecolor="orange", linestyle=":")
             ax.add_patch(rect_y1)
             ticks_vals.append(x_y1)
 
@@ -129,7 +129,7 @@ def plot_graph_with_labels(ax, y_huber, y_laplace, y_gaussian, y_important_value
         if y_idx < len(y_gaussian):
             x_y2 = x[y_idx]
             y_y2 = y_gaussian[y_idx]
-            rect_y2 = Rectangle((0, 0), x_y2, y_y2, fill=False, edgecolor="blue", linestyle=":")
+            rect_y2 = Rectangle((0, 0), x_y2, y_y2, fill=False, edgecolor="green", linestyle=":")
             ax.add_patch(rect_y2)
             ticks_vals.append(x_y2)
 

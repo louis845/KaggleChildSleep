@@ -20,6 +20,11 @@
     "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"]
   },
   {
+    "name": "Standard 5CV VElastic",
+    "models": ["regress_standard5cv_velastic_model_fold1", "regress_standard5cv_velastic_model_fold2", "regress_standard5cv_velastic_model_fold3", "regress_standard5cv_velastic_model_fold4", "regress_standard5cv_velastic_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"]
+  },
+  {
     "name": "Standard 5CV Sigmas",
     "models": ["regress_standard5cv_sigma_model_fold1", "regress_standard5cv_sigma_model_fold2", "regress_standard5cv_sigma_model_fold3", "regress_standard5cv_sigma_model_fold4", "regress_standard5cv_sigma_model_fold5"],
     "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
@@ -42,5 +47,21 @@
     "models": ["regress_standard5cv_sigma_2elastic_model_fold1", "regress_standard5cv_sigma_2elastic_model_fold2", "regress_standard5cv_sigma_2elastic_model_fold3", "regress_standard5cv_sigma_2elastic_model_fold4", "regress_standard5cv_sigma_2elastic_model_fold5"],
     "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
     "use_sigmas": true
+  },
+  {
+    "name": "Standard 5CV Mid",
+    "models": ["regress_standard5cv_mid_model_fold1", "regress_standard5cv_mid_model_fold2", "regress_standard5cv_mid_model_fold3", "regress_standard5cv_mid_model_fold4", "regress_standard5cv_mid_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "hidden_blocks": [2, 2, 2, 2, 2, 3],
+    "hidden_channels": [4, 4, 8, 16, 32, 64],
+    "pred_width": 180
+  },
+  {
+    "name": "Standard 5CV Wide",
+    "models": ["regress_standard5cv_wide_model_fold1", "regress_standard5cv_wide_model_fold2", "regress_standard5cv_wide_model_fold3", "regress_standard5cv_wide_model_fold4", "regress_standard5cv_wide_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "hidden_blocks": [2, 2, 2, 2, 2, 3],
+    "hidden_channels": [4, 4, 8, 16, 32, 64],
+    "pred_width": 240
   }
 ]

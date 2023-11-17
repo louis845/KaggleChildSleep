@@ -14,7 +14,11 @@ import convert_to_npy_naive
 
 FOLDER = "./inference_regression_statistics/regression_labels"
 
-def inference(model_dir, out_folder, validation_entries, target_multiple, use_sigmas):
+def inference(model_dir, out_folder, validation_entries, target_multiple, use_sigmas, hidden_channels, hidden_blocks, pred_width):
+    # init model
+    model = model_event_unet.EventRegressorUnet(use_learnable_sigma=use_sigmas, hidden_channels=hidden_channels, blocks=hidden_blocks)
+    model = model.to(config.device)
+
     # specify folders, and create them if they don't exist
     FOLDERS_DICT = {
         "regression": os.path.join(out_folder, "regression")
@@ -176,7 +180,7 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
                         else:
                             onset_gaussian_pred = kernel_utils.generate_kernel_preds_gpu(preds[0, :], device=preds.device,
                                                                                          kernel_generating_function=kernel_utils.generate_kernel_preds,
-                                                                                         kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
+                                                                                         kernel_radius=ker_val, max_clip=2 * pred_width + 5 * ker_val)
                             np.save(npy_file, onset_gaussian_pred)
                         local_maximums = (onset_gaussian_pred[1:-1] > onset_gaussian_pred[0:-2]) & (onset_gaussian_pred[1:-1] > onset_gaussian_pred[2:])
                         local_maximums = np.argwhere(local_maximums).flatten() + 1
@@ -193,7 +197,7 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
                         else:
                             onset_laplace_pred = kernel_utils.generate_kernel_preds_gpu(preds[0, :], device=preds.device,
                                                                                          kernel_generating_function=kernel_utils.generate_kernel_preds_laplace,
-                                                                                         kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
+                                                                                         kernel_radius=ker_val, max_clip=2 * pred_width + 5 * ker_val)
                             np.save(npy_file, onset_laplace_pred)
                         local_maximums = (onset_laplace_pred[1:-1] > onset_laplace_pred[0:-2]) & (onset_laplace_pred[1:-1] > onset_laplace_pred[2:])
                         local_maximums = np.argwhere(local_maximums).flatten() + 1
@@ -210,7 +214,7 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
                         else:
                             onset_huber_pred = kernel_utils.generate_kernel_preds_gpu(preds[0, :], device=preds.device,
                                                                                          kernel_generating_function=kernel_utils.generate_kernel_preds_huber,
-                                                                                         kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
+                                                                                         kernel_radius=ker_val, max_clip=2 * pred_width + 5 * ker_val)
                             np.save(npy_file, onset_huber_pred)
                         local_maximums = (onset_huber_pred[1:-1] > onset_huber_pred[0:-2]) & (onset_huber_pred[1:-1] > onset_huber_pred[2:])
                         local_maximums = np.argwhere(local_maximums).flatten() + 1
@@ -227,7 +231,7 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
                         else:
                             wakeup_gaussian_pred = kernel_utils.generate_kernel_preds_gpu(preds[1, :], device=preds.device,
                                                                                          kernel_generating_function=kernel_utils.generate_kernel_preds,
-                                                                                         kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
+                                                                                         kernel_radius=ker_val, max_clip=2 * pred_width + 5 * ker_val)
                             np.save(npy_file, wakeup_gaussian_pred)
                         local_maximums = (wakeup_gaussian_pred[1:-1] > wakeup_gaussian_pred[0:-2]) & (wakeup_gaussian_pred[1:-1] > wakeup_gaussian_pred[2:])
                         local_maximums = np.argwhere(local_maximums).flatten() + 1
@@ -244,7 +248,7 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
                         else:
                             wakeup_laplace_pred = kernel_utils.generate_kernel_preds_gpu(preds[1, :], device=preds.device,
                                                                                          kernel_generating_function=kernel_utils.generate_kernel_preds_laplace,
-                                                                                         kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
+                                                                                         kernel_radius=ker_val, max_clip=2 * pred_width + 5 * ker_val)
                             np.save(npy_file, wakeup_laplace_pred)
                         local_maximums = (wakeup_laplace_pred[1:-1] > wakeup_laplace_pred[0:-2]) & (wakeup_laplace_pred[1:-1] > wakeup_laplace_pred[2:])
                         local_maximums = np.argwhere(local_maximums).flatten() + 1
@@ -261,7 +265,7 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
                         else:
                             wakeup_huber_pred = kernel_utils.generate_kernel_preds_gpu(preds[1, :], device=preds.device,
                                                                                          kernel_generating_function=kernel_utils.generate_kernel_preds_huber,
-                                                                                         kernel_radius=ker_val, max_clip=240 + 5 * ker_val)
+                                                                                         kernel_radius=ker_val, max_clip=2 * pred_width + 5 * ker_val)
                             np.save(npy_file, wakeup_huber_pred)
                         local_maximums = (wakeup_huber_pred[1:-1] > wakeup_huber_pred[0:-2]) & (wakeup_huber_pred[1:-1] > wakeup_huber_pred[2:])
                         local_maximums = np.argwhere(local_maximums).flatten() + 1
@@ -292,12 +296,8 @@ if __name__ == "__main__":
 
     assert not (use_anglez_only and use_enmo_only), "Cannot use both anglez only and enmo only."
 
-    # this is constant
-    blocks_length = 5
-
     # load data
     all_data = convert_to_npy_naive.load_all_data_into_dict()
-    target_multiple = 3 * (2 ** (blocks_length - 2))
 
     # load options for statistics computation
     with open("./inference_regression_statistics/inference_regression_preds_options.json", "r") as f:
@@ -308,14 +308,22 @@ if __name__ == "__main__":
         models = option["models"]
         entries = option["entries"]
         use_sigmas = ("use_sigmas" in option) and option["use_sigmas"]
+        hidden_channels = [4, 4, 8, 16, 32]
+        hidden_blocks = [2, 2, 2, 2, 3]
+        pred_width = 120
+        if "hidden_channels" in option:
+            hidden_channels = option["hidden_channels"]
+        if "hidden_blocks" in option:
+            hidden_blocks = option["hidden_blocks"]
+        if "pred_width" in option:
+            pred_width = option["pred_width"]
+        blocks_length = len(hidden_channels)
         print("Running inference on {}".format(name))
-
-        # init model
-        model = model_event_unet.EventRegressorUnet(use_learnable_sigma=use_sigmas)
-        model = model.to(config.device)
 
         assert len(models) == len(entries), "Number of models and entries must be the same."
         assert all([os.path.isdir(os.path.join("models", model_name)) for model_name in models]), "All models must exist."
+
+        target_multiple = 3 * (2 ** (blocks_length - 2))
 
         name_formatted = name.replace(" ", "_").replace("(", "").replace(")", "")
         out_folder = os.path.join(FOLDER, name_formatted)
@@ -330,4 +338,5 @@ if __name__ == "__main__":
             model_dir = os.path.join("models", model_name)
             validation_entries = manager_folds.load_dataset(entry)
 
-            inference(model_dir, out_folder, validation_entries, target_multiple, use_sigmas)
+            inference(model_dir, out_folder, validation_entries, target_multiple, use_sigmas,
+                      hidden_channels=hidden_channels, hidden_blocks=hidden_blocks, pred_width=pred_width)

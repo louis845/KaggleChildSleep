@@ -215,8 +215,8 @@ def load_file(item):
     filename = "./individual_train_series/" + item + ".parquet"
     df = pd.read_parquet(filename)
     extras = {}
-    extras["onset_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV_Sigmas/kernel/{}_onset.npy".format(item))
-    extras["wakeup_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV_Sigmas/kernel/{}_wakeup.npy".format(item))
+    extras["onset_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV_Sigmas/gaussian_kernel/{}_onset.npy".format(item))
+    extras["wakeup_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV_Sigmas/gaussian_kernel/{}_wakeup.npy".format(item))
     extras["onset_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_onset_locs.npy".format(item))
     extras["wakeup_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_wakeup_locs.npy".format(item))
 
@@ -226,7 +226,7 @@ def load_file(item):
     extras["onset_IOU_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_IOU_onset.npy"))
     extras["wakeup_IOU_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_IOU_wakeup.npy"))
 
-    confidence_pred_folder2 = "./inference_combined_statistics/combined_predictions/event5fold_local_3length"
+    confidence_pred_folder2 = "./inference_combined_statistics/combined_predictions/event5fold_3length_time_2length/width55"
     extras["onset_IOU_conf2"] = np.load(os.path.join(confidence_pred_folder2, item + "_onset.npy"))
     extras["wakeup_IOU_conf2"] = np.load(os.path.join(confidence_pred_folder2, item + "_wakeup.npy"))
 

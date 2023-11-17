@@ -14,9 +14,12 @@ if os.path.isdir(out_folder):
 os.mkdir(out_folder)
 
 PREDS = "Standard_5CV"
-kernel_shape = "gaussian"
+kernel_shape = "laplace"
 kernel_size = 6
-cutoff = 6.0
+cutoff = 5.0
+#kernel_shape = "gaussian"
+#kernel_size = 9
+#cutoff = 4.5
 pruning = 60
 alignment = True
 
@@ -25,7 +28,7 @@ preds_folder = os.path.join("regression_labels", PREDS, "{}_kernel{}".format(ker
 """cutoff = 2.0
 pruning = 60
 alignment = True
-preds_folder = os.path.join("regression_labels", "Standard_5CV_Sigmas_VElastic", "kernel")"""
+preds_folder = os.path.join("regression_labels", "Standard_5CV_Sigmas_VElastic", "gaussian_kernel")"""
 series_ids = [x.split(".")[0] for x in os.listdir("../individual_train_series")]
 for series_id in tqdm.tqdm(series_ids):
     onset_locmax_file = os.path.join(preds_folder, "{}_onset_locmax.npy".format(series_id))
