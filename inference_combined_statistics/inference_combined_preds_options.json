@@ -73,5 +73,70 @@
     "name": "3Length BCE Time 2Length 3Ensemble",
     "conf_results": ["event5fold_3length", "event5fold_3length_bce", "event5fold_time_2length"],
     "out_folder": "event5fold_3length_3length_bce_time_2length"
+  },
+  {
+    "name": "3Length (More Stride)",
+    "conf_results": ["event5fold_3length_ms"],
+    "out_folder": "event5fold_3length_ms"
+  },
+  {
+    "name": "Time 2Length (More Stride)",
+    "conf_results": ["event5fold_time_2length_ms"],
+    "out_folder": "event5fold_time_2length_ms"
+  },
+  {
+    "name": "3Length Time 2Length Ensemble (More Stride)",
+    "conf_results": ["event5fold_3length_ms", "event5fold_time_2length_ms"],
+    "out_folder": "event5fold_3length_time_2length_ms"
+  },
+  {
+    "name": "3Length BCE Ensemble (More Stride)",
+    "conf_results": ["event5fold_3length_ms", "event5fold_3length_bce_ms"],
+    "out_folder": "event5fold_3length_bce_ensemble_ms"
+  },
+  {
+    "name": "3Length BCE Time 2Length 3Ensemble (More Stride)",
+    "conf_results": ["event5fold_3length_ms", "event5fold_3length_bce_ms", "event5fold_time_2length_ms"],
+    "out_folder": "event5fold_3length_3length_bce_time_2length_ms"
+  },
+  {
+    "name": "3Length (Flipping)",
+    "conf_results": ["event5fold_3length_fp"],
+    "out_folder": "event5fold_3length_fp"
+  },
+  {
+    "name": "3Length Time 2Length Ensemble (Flipping)",
+    "conf_results": ["event5fold_3length_fp", "event5fold_time_2length"],
+    "out_folder": "event5fold_3length_time_2length_fp"
+  },
+  {
+    "name": "3Length BCE Ensemble (Flipping)",
+    "conf_results": ["event5fold_3length_fp", "event5fold_3length_bce_fp"],
+    "out_folder": "event5fold_3length_bce_ensemble_fp"
+  },
+  {
+    "name": "3Length BCE Time 2Length 3Ensemble (Flipping)",
+    "conf_results": ["event5fold_3length_fp", "event5fold_3length_bce_fp", "event5fold_time_2length"],
+    "out_folder": "event5fold_3length_3length_bce_time_2length_fp"
+  },
+  {
+    "name": "3Length (More Stride, Flipping)",
+    "conf_results": ["event5fold_3length_msfp"],
+    "out_folder": "event5fold_3length_msfp"
+  },
+  {
+    "name": "3Length Time 2Length Ensemble (More Stride, Flipping)",
+    "conf_results": ["event5fold_3length_msfp", "event5fold_time_2length_ms"],
+    "out_folder": "event5fold_3length_time_2length_msfp"
+  },
+  {
+    "name": "3Length BCE Ensemble (More Stride, Flipping)",
+    "conf_results": ["event5fold_3length_msfp", "event5fold_3length_bce_msfp"],
+    "out_folder": "event5fold_3length_bce_ensemble_msfp"
+  },
+  {
+    "name": "3Length BCE Time 2Length 3Ensemble (More Stride, Flipping)",
+    "conf_results": ["event5fold_3length_msfp", "event5fold_3length_bce_msfp", "event5fold_time_2length_ms"],
+    "out_folder": "event5fold_3length_3length_bce_time_2length_msfp"
   }
 ]
