@@ -18,6 +18,8 @@ def inference(model_dir, validation_entries, all_data,
               attention_blocks, attention_bottleneck, attention_mode, upconv_channels_override,
               expand, use_batch_norm, use_anglez_only, use_enmo_only,
               prediction_length, batch_size, use_time_information,
+
+              stride_count=4, flip_augmentation=False,
               show_tqdm_bar=True):
     # init model
     in_channels = 1 if (use_anglez_only or use_enmo_only) else 2
@@ -65,7 +67,9 @@ def inference(model_dir, validation_entries, all_data,
             preds = model_event_unet.event_confidence_inference(model=model, time_series=accel_data,
                                                                 batch_size=batch_size,
                                                                 prediction_length=prediction_length,
-                                                                expand=expand, times=times)
+                                                                expand=expand, times=times,
+                                                                stride_count=stride_count,
+                                                                flip_augmentation=flip_augmentation)
 
             # save to dict
             all_preds[series_id] = {
@@ -139,7 +143,9 @@ if __name__ == "__main__":
         "use_batch_norm": use_batch_norm,
         "prediction_length": prediction_length,
         "batch_size": batch_size,
-        "use_time_information": use_time_information
+        "use_time_information": use_time_information,
+        "stride_count": 4,
+        "flip_augmentation": False
     }
 
     # load data
@@ -190,7 +196,9 @@ if __name__ == "__main__":
                                     opt_args["hidden_blocks"], opt_args["hidden_channels"], opt_args["bottleneck_factor"], opt_args["squeeze_excitation"], opt_args["kernel_size"],
                                     opt_args["attention_blocks"], opt_args["attention_bottleneck"], opt_args["attention_mode"], opt_args["upconv_channels_override"],
                                     opt_args["expand"], opt_args["use_batch_norm"], use_anglez_only, use_enmo_only,
-                                    opt_args["prediction_length"], opt_args["batch_size"], opt_args["use_time_information"])
+                                    opt_args["prediction_length"], opt_args["batch_size"], opt_args["use_time_information"],
+
+                                    stride_count=opt_args["stride_count"], flip_augmentation=opt_args["flip_augmentation"])
 
             for series_id in tqdm.tqdm(validation_entries):
                 preds = all_preds[series_id]

@@ -322,7 +322,8 @@ def event_regression_inference(model: EventRegressorUnet, time_series: np.ndarra
     return preds
 
 def event_confidence_inference(model: EventConfidenceUnet, time_series: np.ndarray, batch_size=32,
-                               prediction_length=17280, expand=8640, times: Optional[dict[str, np.ndarray]]=None):
+                               prediction_length=17280, expand=8640, times: Optional[dict[str, np.ndarray]]=None,
+                               stride_count=4, flip_augmentation=False):
     if model.use_time_input:
         assert times is not None, "times must be provided if model uses time input"
         assert "hours" in times and "mins" in times and "secs" in times, "times must contain hours, mins, secs"
@@ -330,6 +331,7 @@ def event_confidence_inference(model: EventConfidenceUnet, time_series: np.ndarr
             assert isinstance(times[key], np.ndarray), f"times[{key}] must be a numpy array"
             assert len(times[key].shape) == 1, f"times[{key}] must be a 1D array"
             assert len(times[key]) == time_series.shape[1], f"times[{key}] must have the same length as time_series"
+        assert not flip_augmentation, "rotation_augmentation must be False if model uses time input"
     else:
         assert times is None, "times must not be provided if model does not use time input"
 
@@ -340,16 +342,21 @@ def event_confidence_inference(model: EventConfidenceUnet, time_series: np.ndarr
     multiplicities = np.zeros((total_length,), dtype=np.int32)
 
     starts = []
-    for k in range(4):
-        starts.append(k * prediction_length // 4)
-    for k in range(4):
-        starts.append((total_length + k * prediction_length // 4) % prediction_length)
+    for k in range(stride_count):
+        starts.append(k * prediction_length // stride_count)
+    for k in range(stride_count):
+        starts.append((total_length + k * prediction_length // stride_count) % prediction_length)
 
     for start in starts:
         event_confidence_single_inference(model, time_series, probas, multiplicities,
                                           batch_size=batch_size,
                                           prediction_length=prediction_length, prediction_stride=prediction_length,
                                           expand=expand, start=start, times=times)
+        if flip_augmentation:
+            event_confidence_single_inference(model, time_series, probas, multiplicities,
+                                              batch_size=batch_size,
+                                              prediction_length=prediction_length, prediction_stride=prediction_length,
+                                              expand=expand, start=start, times=times, flipped=True)
     multiplicities[multiplicities == 0] = 1 # avoid division by zero. the probas will be zero anyway
     return probas / multiplicities # auto broadcast
 
@@ -357,7 +364,8 @@ def event_confidence_single_inference(model: EventConfidenceUnet, time_series: n
                                       probas: np.ndarray, multiplicities: np.ndarray,
                                       batch_size=32,
                                       prediction_length=17280, prediction_stride=17280,
-                                      expand=8640, start=0, times=None):
+                                      expand=8640, start=0, times=None,
+                                      flipped=False):
     model.eval()
 
     assert len(time_series.shape) == 2, "time_series must be a 2D array"
@@ -415,9 +423,14 @@ def event_confidence_single_inference(model: EventConfidenceUnet, time_series: n
 
         # run model
         with torch.no_grad():
-            batches_out, _, _, _ = model(batches_torch, time=batch_times)
-            batches_out = torch.sigmoid(batches_out[:, :, expand:-expand])
-            batches_out = batches_out.cpu().numpy()
+            if flipped:
+                batches_out, _, _, _ = model(torch.flip(batches_torch, dims=[-1,]), time=batch_times)
+                batches_out = torch.flip(torch.sigmoid(batches_out[:, :, expand:-expand]), dims=[-1,])
+                batches_out = batches_out.cpu().numpy()
+            else:
+                batches_out, _, _, _ = model(batches_torch, time=batch_times)
+                batches_out = torch.sigmoid(batches_out[:, :, expand:-expand])
+                batches_out = batches_out.cpu().numpy()
 
         # update probas
         for i in range(batches_computed, batches_compute_end):
