@@ -13,17 +13,18 @@ if os.path.isdir(out_folder):
     shutil.rmtree(out_folder)
 os.mkdir(out_folder)
 
-PREDS = "Standard_5CV_Mid"
-#kernel_shape = "laplace"
-#kernel_size = 6
-#cutoff = 5.0
-kernel_shape = "gaussian"
-kernel_size = 9
-cutoff = 4.5
+#PREDS = ["Standard_5CV_Mid"]
+#kernel_shape = ["gaussian"]
+#kernel_size = [9]
+PREDS = ["Standard_5CV_Mid", "Standard_5CV_Wide", "Standard_5CV"]
+kernel_shape = ["gaussian", "gaussian", "gaussian"]
+kernel_size = [9, 9, 9]
+cutoff = 3.875#4.5
 pruning = 60
 alignment = True
 
-preds_folder = os.path.join("regression_labels", PREDS, "{}_kernel{}".format(kernel_shape, kernel_size))
+preds_folder = [os.path.join("regression_labels", PREDS[k], "{}_kernel{}".format(kernel_shape[k], kernel_size[k])) for k in range(len(PREDS))] +\
+                  [os.path.join("regression_labels", "Standard_5CV_Sigmas", "gaussian_kernel")]
 
 """cutoff = 2.0
 pruning = 60
@@ -31,19 +32,32 @@ alignment = True
 preds_folder = os.path.join("regression_labels", "Standard_5CV_Sigmas_VElastic", "gaussian_kernel")"""
 series_ids = [x.split(".")[0] for x in os.listdir("../individual_train_series")]
 for series_id in tqdm.tqdm(series_ids):
-    onset_locmax_file = os.path.join(preds_folder, "{}_onset_locmax.npy".format(series_id))
-    wakeup_locmax_file = os.path.join(preds_folder, "{}_wakeup_locmax.npy".format(series_id))
+    onset_kernel_values, wakeup_kernel_values = None, None
 
-    onset_locmax = np.load(onset_locmax_file)
-    wakeup_locmax = np.load(wakeup_locmax_file)
+    for k in range(len(PREDS)):
+        onset_kernel_file = os.path.join(preds_folder[k], "{}_onset.npy".format(series_id))
+        wakeup_kernel_file = os.path.join(preds_folder[k], "{}_wakeup.npy".format(series_id))
 
-    onset_locs = onset_locmax[0, :]
-    onset_values = onset_locmax[1, :]
-    wakeup_locs = wakeup_locmax[0, :]
-    wakeup_values = wakeup_locmax[1, :]
+        if k == 0:
+            onset_kernel_values = np.load(os.path.join(preds_folder[k], "{}_onset.npy".format(series_id)))
+            wakeup_kernel_values = np.load(os.path.join(preds_folder[k], "{}_wakeup.npy".format(series_id)))
+        else:
+            onset_kernel_values = onset_kernel_values + np.load(os.path.join(preds_folder[k], "{}_onset.npy".format(series_id)))
+            wakeup_kernel_values = wakeup_kernel_values + np.load(os.path.join(preds_folder[k], "{}_wakeup.npy".format(series_id)))
+    if len(PREDS) > 1:
+        onset_kernel_values = onset_kernel_values / len(PREDS)
+        wakeup_kernel_values = wakeup_kernel_values / len(PREDS)
 
-    onset_locs = onset_locs[onset_values > cutoff].astype(np.int32)
-    wakeup_locs = wakeup_locs[wakeup_values > cutoff].astype(np.int32)
+    onset_locs = (onset_kernel_values[1:-1] > onset_kernel_values[0:-2]) & (onset_kernel_values[1:-1] > onset_kernel_values[2:])
+    onset_locs = np.argwhere(onset_locs).flatten() + 1
+    wakeup_locs = (wakeup_kernel_values[1:-1] > wakeup_kernel_values[0:-2]) & (wakeup_kernel_values[1:-1] > wakeup_kernel_values[2:])
+    wakeup_locs = np.argwhere(wakeup_locs).flatten() + 1
+
+    onset_values = onset_kernel_values[onset_locs]
+    wakeup_values = wakeup_kernel_values[wakeup_locs]
+
+    onset_locs = onset_locs[onset_values > cutoff]
+    wakeup_locs = wakeup_locs[wakeup_values > cutoff]
 
     if pruning > 0:
         if len(onset_locs) > 0:
@@ -55,10 +69,8 @@ for series_id in tqdm.tqdm(series_ids):
         seconds_values = np.load("../data_naive/{}/secs.npy".format(series_id))
         first_zero = postprocessing.compute_first_zero(seconds_values)
         if len(onset_locs) > 0:
-            onset_kernel_values = np.load(os.path.join(preds_folder, "{}_onset.npy".format(series_id)))
             onset_locs = postprocessing.align_predictions(onset_locs, onset_kernel_values, first_zero=first_zero)
         if len(wakeup_locs) > 0:
-            wakeup_kernel_values = np.load(os.path.join(preds_folder, "{}_wakeup.npy".format(series_id)))
             wakeup_locs = postprocessing.align_predictions(wakeup_locs, wakeup_kernel_values, first_zero=first_zero)
 
     np.save(os.path.join(out_folder, "{}_onset_locs.npy".format(series_id)), onset_locs)
