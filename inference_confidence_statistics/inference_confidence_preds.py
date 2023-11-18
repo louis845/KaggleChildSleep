@@ -168,6 +168,8 @@ if __name__ == "__main__":
         out_dir = os.path.join(FOLDER, folder_name)
         if not os.path.isdir(out_dir):
             os.mkdir(out_dir)
+        else:
+            continue
         with open(os.path.join(out_dir, "name.txt"), "w") as f:
             f.write(name)
 

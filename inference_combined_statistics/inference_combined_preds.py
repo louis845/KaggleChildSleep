@@ -41,7 +41,7 @@ if __name__ == "__main__":
         conf_results = option["conf_results"]
         out_folder = option["out_folder"]
         if os.path.isdir(os.path.join(FOLDER, out_folder)):
-            shutil.rmtree(os.path.join(FOLDER, out_folder))
+            continue
         os.mkdir(os.path.join(FOLDER, out_folder))
         for width in union_widths:
             os.mkdir(os.path.join(FOLDER, out_folder, "width{}".format(width)))

@@ -36,6 +36,15 @@
     "attention_mode": "length"
   },
   {
+    "name": "Expanded Predictions (3 Length, BCE)",
+    "folder_name": "event5fold_3length_bce",
+    "models": ["event5fold_2elastic_length3_bce_drop_model_fold1", "event5fold_2elastic_length3_bce_drop_model_fold2", "event5fold_2elastic_length3_bce_drop_model_fold3", "event5fold_2elastic_length3_bce_drop_model_fold4", "event5fold_2elastic_length3_bce_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "anglez",
+    "attention_blocks": 3,
+    "attention_mode": "length"
+  },
+  {
     "name": "Expanded Predictions (Time)",
     "folder_name": "event5fold_time_2length",
     "models": ["event5fold_2elastic_length2_time_drop_model_fold1", "event5fold_2elastic_length2_time_drop_model_fold2", "event5fold_2elastic_length2_time_drop_model_fold3", "event5fold_2elastic_length2_time_drop_model_fold4", "event5fold_2elastic_length2_time_drop_model_fold5"],

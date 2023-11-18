@@ -53,5 +53,25 @@
     "name": "All Ensemble",
     "conf_results": ["event5fold_2drop_2length", "event5fold_3length", "event5fold_time_2length"],
     "out_folder": "event5fold_all"
+  },
+  {
+    "name": "3Length BCE",
+    "conf_results": ["event5fold_3length_bce"],
+    "out_folder": "event5fold_3length_bce"
+  },
+  {
+    "name": "3Length BCE Ensemble",
+    "conf_results": ["event5fold_3length", "event5fold_3length_bce"],
+    "out_folder": "event5fold_3length_bce_ensemble"
+  },
+  {
+    "name": "3Length BCE Time 2Length Ensemble",
+    "conf_results": ["event5fold_3length_bce", "event5fold_time_2length"],
+    "out_folder": "event5fold_3length_bce_time_2length"
+  },
+  {
+    "name": "3Length BCE Time 2Length 3Ensemble",
+    "conf_results": ["event5fold_3length", "event5fold_3length_bce", "event5fold_time_2length"],
+    "out_folder": "event5fold_3length_3length_bce_time_2length"
   }
 ]

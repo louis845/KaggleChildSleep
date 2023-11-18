@@ -30,6 +30,17 @@ import model_event_unet
 
 # same as training_clean_data.py, but with 3 factor downsampling at the first layer
 
+def log_t(x, t=0.2):
+    return ((x + 1e-6) ** (1.0 - t) - 1.0) / (1.0 - t)
+
+def elementwise_bounded_ce_loss(preds, gt, t=0.2):
+    # see Robust Bi-Tempered Logistic Loss
+    # Based on Bregman Divergences paper
+    log_t_part = -torch.where(gt == 1, log_t(preds, t), log_t(1 - preds, t))
+    additional_part = (1 - preds ** (2 - t) - (1 - preds) ** (2 - t)) / (t - 2)
+
+    return log_t_part + additional_part
+
 def ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
                                                                                                  ground_truth.shape)
@@ -55,6 +66,15 @@ def dice_loss(preds: torch.Tensor, ground_truth: torch.Tensor, eps=1e-5):
     union = torch.sum(pred_probas + ground_truth, dim=(1, 2))
     return torch.sum(1 - (2 * intersection + eps) / (union + eps))
 
+def bounded_ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
+    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
+                                                                                                 ground_truth.shape)
+    pred_probas = torch.sigmoid(preds)
+    bce = elementwise_bounded_ce_loss(pred_probas, ground_truth)
+    if mask is None:
+        return torch.sum(torch.mean(bce, dim=(1, 2)))
+    else:
+        return torch.sum(torch.mean(bce * mask, dim=(1, 2)))
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
                             accel_data_batch: torch.Tensor, labels_batch: torch.Tensor, times_batch: np.ndarray):
@@ -67,6 +87,8 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
         loss = 0.01 * dice_loss(pred_logits, labels_batch) + focal_loss(pred_logits, labels_batch)
     elif use_ce_iou_loss:
         loss = ce_loss(pred_logits, labels_batch) + 0.01 * dice_loss(pred_logits, labels_batch)
+    elif use_bounded_ce_loss:
+        loss = bounded_ce_loss(pred_logits, labels_batch)
     else:
         loss = focal_loss(pred_logits, labels_batch)
 
@@ -153,6 +175,8 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
             loss = 0.01 * dice_loss(pred_logits, labels_batch) + focal_loss(pred_logits, labels_batch)
         elif use_ce_iou_loss:
             loss = ce_loss(pred_logits, labels_batch) + 0.01 * dice_loss(pred_logits, labels_batch)
+        elif use_bounded_ce_loss:
+            loss = bounded_ce_loss(pred_logits, labels_batch)
         else:
             loss = focal_loss(pred_logits, labels_batch)
 
@@ -364,6 +388,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_time_information", action="store_true", help="Whether to use time information. Default False.")
     parser.add_argument("--use_elastic_deformation", action="store_true", help="Whether to use elastic deformation. Default False.")
     parser.add_argument("--use_velastic_deformation", action="store_true", help="Whether to use velastic deformation (only available for anglez). Default False.")
+    parser.add_argument("--use_bounded_ce_loss", action="store_true", help="Whether to use bounded cross entropy loss. Default False.")
     parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use cross entropy loss. Default False.")
     parser.add_argument("--use_iou_loss", action="store_true", help="Whether to use IOU loss. Default False.")
     parser.add_argument("--use_ce_iou_loss", action="store_true", help="Whether to use a combination of cross entropy and IOU loss. Default False.")
@@ -426,6 +451,7 @@ if __name__ == "__main__":
     use_time_information = args.use_time_information
     use_elastic_deformation = args.use_elastic_deformation
     use_velastic_deformation = args.use_velastic_deformation
+    use_bounded_ce_loss = args.use_bounded_ce_loss
     use_ce_loss = args.use_ce_loss
     use_iou_loss = args.use_iou_loss
     use_ce_iou_loss = args.use_ce_iou_loss
@@ -496,7 +522,9 @@ if __name__ == "__main__":
     model = model.to(config.device)
 
     # initialize optimizer
-    loss_print = "Cross entropy" if use_ce_loss else ("IOU" if use_iou_loss else ("Cross entropy + IOU" if use_ce_iou_loss else "Focal"))
+    loss_print = "Cross entropy" if use_ce_loss else ("IOU" if use_iou_loss else ("Cross entropy + IOU" if use_ce_iou_loss else (
+        "Bounded cross entropy" if use_bounded_ce_loss else "Focal"
+    )))
     print("Loss: " + loss_print)
     print("Learning rate: " + str(learning_rate))
     print("Momentum: " + str(momentum))
@@ -568,6 +596,7 @@ if __name__ == "__main__":
         "use_time_information": use_time_information,
         "use_elastic_deformation": use_elastic_deformation,
         "use_velastic_deformation": use_velastic_deformation,
+        "use_bounded_ce_loss": use_bounded_ce_loss,
         "use_ce_loss": use_ce_loss,
         "use_iou_loss": use_iou_loss,
         "use_ce_iou_loss": use_ce_iou_loss,
