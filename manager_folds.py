@@ -23,20 +23,30 @@ def save_dataset(dataset_name: str, dataset: list[str]):
         json.dump({"dataset": dataset}, f, indent=4)
 
 def add_argparse_arguments(parser: argparse.ArgumentParser):
-    parser.add_argument("--train_data", type=str, required=True)
-    parser.add_argument("--val_data", type=str, required=True)
+    parser.add_argument("--train_data", type=str)
+    parser.add_argument("--val_data", type=str)
+    parser.add_argument("--train_all", action="store_true")
 
 def parse_args(args: argparse.Namespace) -> tuple[list[str], list[str], str, str]:
     train_data_name = args.train_data
     val_data_name = args.val_data
-    assert dataset_exists(train_data_name)
-    assert dataset_exists(val_data_name)
+    train_all = args.train_all
+    if not train_all:
+        assert train_data_name is not None and val_data_name is not None, "You should specify train_data and val_data if you are not training on all data"
+        assert dataset_exists(train_data_name)
+        assert dataset_exists(val_data_name)
 
-    train_data = load_dataset(train_data_name)
-    val_data = load_dataset(val_data_name)
+        train_data = load_dataset(train_data_name)
+        val_data = load_dataset(val_data_name)
 
-    # assert that they are disjoint
-    assert len(set(train_data).intersection(set(val_data))) == 0
+        # assert that they are disjoint
+        assert len(set(train_data).intersection(set(val_data))) == 0
+    else:
+        all_series = [file.split(".")[0] for file in os.listdir("individual_train_series")]
+        train_data = all_series.copy()
+        val_data = all_series
+        train_data_name = "all"
+        val_data_name = "all"
 
     return train_data, val_data, train_data_name, val_data_name
 
