@@ -138,5 +138,35 @@
     "name": "3Length BCE Time 2Length 3Ensemble (More Stride, Flipping)",
     "conf_results": ["event5fold_3length_msfp", "event5fold_3length_bce_msfp", "event5fold_time_2length_ms"],
     "out_folder": "event5fold_3length_3length_bce_time_2length_msfp"
+  },
+  {
+    "name": "3Length (Best)",
+    "conf_results": ["event5fold_3length_best"],
+    "out_folder": "event5fold_3length_best"
+  },
+  {
+    "name": "Time 2Length (Best)",
+    "conf_results": ["event5fold_time_2length_best"],
+    "out_folder": "event5fold_time_2length_best"
+  },
+  {
+    "name": "3Length Time 2Length Ensemble (Best)",
+    "conf_results": ["event5fold_3length_best", "event5fold_time_2length_best"],
+    "out_folder": "event5fold_3length_time_2length_best"
+  },
+  {
+    "name": "3Length (More Stride, Best)",
+    "conf_results": ["event5fold_3length_ms_best"],
+    "out_folder": "event5fold_3length_ms_best"
+  },
+  {
+    "name": "Time 2Length (More Stride, Best)",
+    "conf_results": ["event5fold_time_2length_ms_best"],
+    "out_folder": "event5fold_time_2length_ms_best"
+  },
+  {
+    "name": "3Length Time 2Length Ensemble (More Stride, Best)",
+    "conf_results": ["event5fold_3length_ms_best", "event5fold_time_2length_ms_best"],
+    "out_folder": "event5fold_3length_time_2length_ms_best"
   }
 ]

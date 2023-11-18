@@ -3,6 +3,7 @@ import argparse
 import json
 
 import numpy as np
+import pandas as pd
 import torch
 import tqdm
 
@@ -19,7 +20,7 @@ def inference(model_dir, validation_entries, all_data,
               expand, use_batch_norm, use_anglez_only, use_enmo_only,
               prediction_length, batch_size, use_time_information,
 
-              stride_count=4, flip_augmentation=False,
+              stride_count=4, flip_augmentation=False, use_best_model=False,
               show_tqdm_bar=True):
     # init model
     in_channels = 1 if (use_anglez_only or use_enmo_only) else 2
@@ -40,7 +41,13 @@ def inference(model_dir, validation_entries, all_data,
     model.eval()
 
     # load model
-    model.load_state_dict(torch.load(os.path.join(model_dir, "model.pt")))
+    if use_best_model:
+        val_metrics = pd.read_csv(os.path.join(model_dir, "val_metrics.csv"), index_col=0)
+        val_mAP = val_metrics["val_onset_mAP"] + val_metrics["val_wakeup_mAP"] # take with grain of salt, using validation metrics to pick best model
+        best_model_idx = int(val_mAP.iloc[:30].idxmax())
+        model.load_state_dict(torch.load(os.path.join(model_dir, "model_{}.pt".format(best_model_idx))))
+    else:
+        model.load_state_dict(torch.load(os.path.join(model_dir, "model.pt")))
 
     # inference
     all_preds = {}
@@ -145,7 +152,8 @@ if __name__ == "__main__":
         "batch_size": batch_size,
         "use_time_information": use_time_information,
         "stride_count": 4,
-        "flip_augmentation": False
+        "flip_augmentation": False,
+        "use_best_model": False
     }
 
     # load data
@@ -198,7 +206,8 @@ if __name__ == "__main__":
                                     opt_args["expand"], opt_args["use_batch_norm"], use_anglez_only, use_enmo_only,
                                     opt_args["prediction_length"], opt_args["batch_size"], opt_args["use_time_information"],
 
-                                    stride_count=opt_args["stride_count"], flip_augmentation=opt_args["flip_augmentation"])
+                                    stride_count=opt_args["stride_count"], flip_augmentation=opt_args["flip_augmentation"],
+                                    use_best_model=opt_args["use_best_model"])
 
             for series_id in tqdm.tqdm(validation_entries):
                 preds = all_preds[series_id]
