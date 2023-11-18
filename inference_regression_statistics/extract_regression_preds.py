@@ -13,13 +13,13 @@ if os.path.isdir(out_folder):
     shutil.rmtree(out_folder)
 os.mkdir(out_folder)
 
-PREDS = "Standard_5CV"
-kernel_shape = "laplace"
-kernel_size = 6
-cutoff = 5.0
-#kernel_shape = "gaussian"
-#kernel_size = 9
-#cutoff = 4.5
+PREDS = "Standard_5CV_Mid"
+#kernel_shape = "laplace"
+#kernel_size = 6
+#cutoff = 5.0
+kernel_shape = "gaussian"
+kernel_size = 9
+cutoff = 4.5
 pruning = 60
 alignment = True
 
