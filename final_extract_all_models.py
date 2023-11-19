@@ -14,7 +14,7 @@ out_folder = "final_models"
 if __name__ == "__main__":
     # copy 5cv regression models
     for model in tqdm.tqdm(regression_models_5cv):
-        for k in range(5):
+        for k in range(1, 6):
             model_name = model.format(k)
             model_dir = os.path.join("models", model.format(k))
 
@@ -28,7 +28,7 @@ if __name__ == "__main__":
 
     # copy 5cv confidence models
     for model in tqdm.tqdm(confidence_models_5cv):
-        for k in range(5):
+        for k in range(1, 6):
             # usual model
             model_name = model.format(k)
             model_dir = os.path.join("models", model.format(k))
