@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-import typing
+import competition_models
 
 def correct_time(secs: np.ndarray, mins: np.ndarray, hours: np.ndarray):
     daytime = secs.astype(np.int32) + mins.astype(np.int32) * 60 + hours.astype(np.int32) * 3600
@@ -16,9 +16,9 @@ def correct_time(secs: np.ndarray, mins: np.ndarray, hours: np.ndarray):
 
 class CompetitionInference:
 
-    def __init__(self, input_pq_file: str, series_inference_callable: typing.Callable):
+    def __init__(self, input_pq_file: str, models_callable: competition_models.CompetitionModels):
         self.input_pq_file = input_pq_file
-        self.series_inference_callable = series_inference_callable
+        self.models_callable = models_callable
 
     def inference_all(self):
         # Load only the "series_id" column
@@ -42,4 +42,4 @@ class CompetitionInference:
             secs_corr, mins_corr, hours_corr = correct_time(secs, mins, hours)
 
             # Call the series inference callable
-            self.series_inference_callable(series_id, accel_data, secs_corr, mins_corr, hours_corr)
+            self.models_callable.run_inference(series_id, accel_data, secs_corr, mins_corr, hours_corr)
