@@ -1,3 +1,5 @@
+import gc
+
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
@@ -20,7 +22,12 @@ class CompetitionInference:
         self.input_pq_file = input_pq_file
         self.models_callable = models_callable
 
-    def inference_all(self):
+    def inference_all(self, out_file_path):
+        # Create output file
+        out_file = open(out_file_path, "w")
+        row_id = 0
+        out_file.write("row_id,series_id,step,event,score\n")
+
         # Load only the "series_id" column
         series_id_df = pd.read_parquet(self.input_pq_file, columns=["series_id"])
 
@@ -42,4 +49,20 @@ class CompetitionInference:
             secs_corr, mins_corr, hours_corr = correct_time(secs, mins, hours)
 
             # Call the series inference callable
-            self.models_callable.run_inference(series_id, accel_data, secs_corr, mins_corr, hours_corr)
+            onset_locs, onset_IOU_probas, wakeup_locs, wakeup_IOU_probas = self.models_callable.run_inference(series_id, accel_data, secs_corr, mins_corr, hours_corr)
+
+            # Save the results
+            if len(onset_locs) > 0:
+                for i in range(len(onset_locs)):
+                    out_file.write("{},{},{},{},{}\n".format(row_id, series_id, onset_locs[i], "onset", onset_IOU_probas[i]))
+                    row_id += 1
+            out_file.flush()
+            if len(wakeup_locs) > 0:
+                for i in range(len(wakeup_locs)):
+                    out_file.write("{},{},{},{},{}\n".format(row_id, series_id, wakeup_locs[i], "wakeup", wakeup_IOU_probas[i]))
+                    row_id += 1
+            out_file.flush()
+
+            gc.collect()
+
+        out_file.close()
