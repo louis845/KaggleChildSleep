@@ -48,6 +48,7 @@ class CompetitionInference:
         # Iteratively read data for each "series_id"
         if show_tqdm_bar:
             series_ids = tqdm.tqdm(series_ids)
+        ctime2 = time.time()
         for series_id in series_ids:
             ctime = time.time()
             df = pd.read_parquet(self.input_pq_file, columns=["step", "timestamp", "anglez"],
@@ -102,6 +103,7 @@ class CompetitionInference:
                 all_second_postprocessing_time.append(time_elapsed_performance_metrics["second_postprocessing_time"])
 
         print("---------------------------------------- All completed ----------------------------------------")
+        print("Total Time: {}".format(time.time() - ctime2))
         print("Avg Preprocessing Time: {}".format(np.mean(all_preprocessing_time)))
         print("Avg Inference Time: {}".format(np.mean(all_inference_time)))
         print("Avg Kernel Values Time: {}".format(np.mean(all_avg_kernel_values_time)))
@@ -134,6 +136,7 @@ if __name__ == "__main__":
     # Run the evaluation script
     solution = pd.read_csv("../data/train_events.csv")
     submission = pd.read_csv(out_file_path)
+    ctime = time.time()
     score = kaggle_ap_detection.score(solution, submission,
                                       tolerances={"onset": [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30],
                                                   "wakeup": [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30]},
@@ -142,5 +145,6 @@ if __name__ == "__main__":
                                       event_column_name="event",
                                       score_column_name="score",
                                       use_scoring_intervals=False)
+    print("Evaluation Time: {}".format(time.time() - ctime))
 
     print("Score: {}".format(score)) # this has data leakage since there is no train/test split. Just for bug catching
