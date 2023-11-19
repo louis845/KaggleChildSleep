@@ -119,7 +119,7 @@ if __name__ == "__main__":
     input_model_cfg_file = "competition_models_cfg.json"
     out_file_path = "submission.csv"
 
-    # Load the config and models
+    """# Load the config and models
     models_callable = competition_models.CompetitionModels(model_config_file=input_model_cfg_file,
                                                            models_root_dir=input_models_root_dir,
                                                            device=torch.device("cuda:0"))
@@ -131,15 +131,17 @@ if __name__ == "__main__":
     competition_inference.inference_all(out_file_path=out_file_path, log_debug=True, show_tqdm_bar=True)
 
     # Done. Garbage collect
-    gc.collect()
+    gc.collect()"""
 
     # Run the evaluation script
+    tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30]
+    tolerances = [tolerance * 12 for tolerance in tolerances]
     solution = pd.read_csv("../data/train_events.csv")
     submission = pd.read_csv(out_file_path)
     ctime = time.time()
     score = kaggle_ap_detection.score(solution, submission,
-                                      tolerances={"onset": [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30],
-                                                  "wakeup": [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30]},
+                                      tolerances={"onset": tolerances,
+                                                  "wakeup": tolerances},
                                       series_id_column_name="series_id",
                                       time_column_name="step",
                                       event_column_name="event",
