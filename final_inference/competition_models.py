@@ -91,7 +91,7 @@ class CompetitionModels:
             model.to(self.device)
             model.load_state_dict(torch.load(os.path.join(self.models_root_dir,
                                                           "{}.pt".format(confidence_cfg["model_name"])
-                                                          ), weights_only=True))
+                                                          ), weights_only=True, map_location=self.device))
             model.eval()
 
             model_pkg = {
