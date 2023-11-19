@@ -1,5 +1,6 @@
 import json
 import os
+import time
 
 import torch
 import numpy as np
@@ -22,7 +23,7 @@ class CompetitionModels:
     def load_regression_models(self):
         for cfg in self.model_config["regression_models"]:
             regression_cfg = {
-                "hidden_blocks": [2, 2, 2, 2, 2],
+                "hidden_blocks": [2, 2, 2, 2, 3],
                 "hidden_channels": [4, 4, 8, 16, 32],
                 "pred_width": 120,
                 "kernel_size": 9,
@@ -118,6 +119,7 @@ class CompetitionModels:
         pruning = 60
 
         ## find regression locations first
+        ctime = time.time()
         onset_kernel_values = None
         wakeup_kernel_values = None
         for regression_model_pkg in self.regression_models:
@@ -155,8 +157,10 @@ class CompetitionModels:
         # average
         onset_kernel_values /= len(self.regression_models)
         wakeup_kernel_values /= len(self.regression_models)
+        kernel_values_computation_time = time.time() - ctime
 
         # get the locations
+        ctime = time.time()
         onset_locs = (onset_kernel_values[1:-1] > onset_kernel_values[0:-2]) & (onset_kernel_values[1:-1] > onset_kernel_values[2:])
         onset_locs = np.argwhere(onset_locs).flatten() + 1
         wakeup_locs = (wakeup_kernel_values[1:-1] > wakeup_kernel_values[0:-2]) & (wakeup_kernel_values[1:-1] > wakeup_kernel_values[2:])
@@ -178,11 +182,13 @@ class CompetitionModels:
             onset_locs = postprocessing.align_predictions(onset_locs, onset_kernel_values, first_zero=first_zero)
         if len(wakeup_locs) > 0:
             wakeup_locs = postprocessing.align_predictions(wakeup_locs, wakeup_kernel_values, first_zero=first_zero)
+        first_postprocessing_time = time.time() - ctime
 
         ## cfg values for confidence
         batch_size = 512
 
         ## now compute confidence
+        ctime = time.time()
         onset_confidence_probas, wakeup_confidence_probas = None, None
         for confidence_model_pkg in self.confidence_models:
             model = confidence_model_pkg["model"]
@@ -212,8 +218,10 @@ class CompetitionModels:
                 wakeup_confidence_probas += preds[1, :]
         onset_confidence_probas /= len(self.confidence_models)
         wakeup_confidence_probas /= len(self.confidence_models)
+        confidence_computation_time = time.time() - ctime
 
         # convert to IOU score
+        ctime = time.time()
         onset_IOU_probas = self.iou_converter.convert(onset_confidence_probas)
         wakeup_IOU_probas = self.iou_converter.convert(wakeup_confidence_probas)
 
@@ -222,6 +230,19 @@ class CompetitionModels:
                                                                                 onset_IOU_probas, cutoff_thresh=0.01)
         wakeup_locs, wakeup_IOU_probas = postprocessing.get_augmented_predictions(wakeup_locs, wakeup_kernel_values,
                                                                                 wakeup_IOU_probas, cutoff_thresh=0.01)
+        second_postprocessing_time = time.time() - ctime
+
+        avg_kernel_values_time = kernel_values_computation_time / len(self.regression_models)
+        avg_confidence_time = confidence_computation_time / len(self.confidence_models)
+
+        time_elapsed_performance_metrics = {
+            "kernel_values_computation_time": kernel_values_computation_time,
+            "first_postprocessing_time": first_postprocessing_time,
+            "confidence_computation_time": confidence_computation_time,
+            "second_postprocessing_time": second_postprocessing_time,
+            "avg_kernel_values_time": avg_kernel_values_time,
+            "avg_confidence_time": avg_confidence_time,
+        }
 
         ## return
-        return onset_locs, onset_IOU_probas, wakeup_locs, wakeup_IOU_probas
+        return onset_locs, onset_IOU_probas, wakeup_locs, wakeup_IOU_probas, time_elapsed_performance_metrics
