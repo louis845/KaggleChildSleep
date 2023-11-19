@@ -40,6 +40,7 @@ if __name__ == "__main__":
         name = option["name"]
         conf_results = option["conf_results"]
         out_folder = option["out_folder"]
+        iou_averaging = "iou_averaging" in option and option["iou_averaging"]
         if os.path.isdir(os.path.join(FOLDER, out_folder)):
             continue
         os.mkdir(os.path.join(FOLDER, out_folder))
@@ -52,30 +53,58 @@ if __name__ == "__main__":
         print("Combining predictions with option {}...".format(name))
 
         for series_id in tqdm.tqdm(series_ids):
-            ensembled_onset_preds = None
-            ensembled_wakeup_preds = None
+            if iou_averaging:
+                for width in union_widths:
+                    ensembled_onset_IOU_score = None
+                    ensembled_wakeup_IOU_score = None
 
-            # ensemble predictions from different confidence models
-            for conf_results_folder in conf_results_folders:
-                onset_conf_preds = np.load(os.path.join(conf_results_folder, "{}_onset.npy".format(series_id)))
-                wakeup_conf_preds = np.load(os.path.join(conf_results_folder, "{}_wakeup.npy".format(series_id)))
+                    # ensemble predictions from different confidence models
+                    for conf_results_folder in conf_results_folders:
+                        onset_conf_preds = np.load(os.path.join(conf_results_folder, "{}_onset.npy".format(series_id)))
+                        wakeup_conf_preds = np.load(os.path.join(conf_results_folder, "{}_wakeup.npy".format(series_id)))
 
-                if ensembled_onset_preds is None:
-                    ensembled_onset_preds = onset_conf_preds
-                    ensembled_wakeup_preds = wakeup_conf_preds
-                else:
-                    ensembled_onset_preds = ensembled_onset_preds + onset_conf_preds
-                    ensembled_wakeup_preds = ensembled_wakeup_preds + wakeup_conf_preds
+                        onset_IOU_score = iou_score_converters[width].convert(onset_conf_preds)
+                        wakeup_IOU_score = iou_score_converters[width].convert(wakeup_conf_preds)
 
-            # average predictions
-            ensembled_onset_preds = ensembled_onset_preds / len(conf_results_folders)
-            ensembled_wakeup_preds = ensembled_wakeup_preds / len(conf_results_folders)
+                        if ensembled_onset_IOU_score is None:
+                            ensembled_onset_IOU_score = onset_IOU_score
+                            ensembled_wakeup_IOU_score = wakeup_IOU_score
+                        else:
+                            ensembled_onset_IOU_score = ensembled_onset_IOU_score + onset_IOU_score
+                            ensembled_wakeup_IOU_score = ensembled_wakeup_IOU_score + wakeup_IOU_score
 
-            for width in union_widths:
-                # convert to IOU score
-                onset_IOU_score = iou_score_converters[width].convert(ensembled_onset_preds)
-                wakeup_IOU_score = iou_score_converters[width].convert(ensembled_wakeup_preds)
+                    # average predictions
+                    ensembled_onset_IOU_score = ensembled_onset_IOU_score / len(conf_results_folders)
+                    ensembled_wakeup_IOU_score = ensembled_wakeup_IOU_score / len(conf_results_folders)
 
-                # save predictions
-                np.save(os.path.join(FOLDER, out_folder, "width{}".format(width), "{}_onset.npy".format(series_id)), onset_IOU_score)
-                np.save(os.path.join(FOLDER, out_folder, "width{}".format(width), "{}_wakeup.npy".format(series_id)), wakeup_IOU_score)
+                    # save predictions
+                    np.save(os.path.join(FOLDER, out_folder, "width{}".format(width), "{}_onset.npy".format(series_id)), ensembled_onset_IOU_score)
+                    np.save(os.path.join(FOLDER, out_folder, "width{}".format(width), "{}_wakeup.npy".format(series_id)), ensembled_wakeup_IOU_score)
+            else:
+                ensembled_onset_preds = None
+                ensembled_wakeup_preds = None
+
+                # ensemble predictions from different confidence models
+                for conf_results_folder in conf_results_folders:
+                    onset_conf_preds = np.load(os.path.join(conf_results_folder, "{}_onset.npy".format(series_id)))
+                    wakeup_conf_preds = np.load(os.path.join(conf_results_folder, "{}_wakeup.npy".format(series_id)))
+
+                    if ensembled_onset_preds is None:
+                        ensembled_onset_preds = onset_conf_preds
+                        ensembled_wakeup_preds = wakeup_conf_preds
+                    else:
+                        ensembled_onset_preds = ensembled_onset_preds + onset_conf_preds
+                        ensembled_wakeup_preds = ensembled_wakeup_preds + wakeup_conf_preds
+
+                # average predictions
+                ensembled_onset_preds = ensembled_onset_preds / len(conf_results_folders)
+                ensembled_wakeup_preds = ensembled_wakeup_preds / len(conf_results_folders)
+
+                for width in union_widths:
+                    # convert to IOU score
+                    onset_IOU_score = iou_score_converters[width].convert(ensembled_onset_preds)
+                    wakeup_IOU_score = iou_score_converters[width].convert(ensembled_wakeup_preds)
+
+                    # save predictions
+                    np.save(os.path.join(FOLDER, out_folder, "width{}".format(width), "{}_onset.npy".format(series_id)), onset_IOU_score)
+                    np.save(os.path.join(FOLDER, out_folder, "width{}".format(width), "{}_wakeup.npy".format(series_id)), wakeup_IOU_score)

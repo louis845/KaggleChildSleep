@@ -168,5 +168,29 @@
     "name": "3Length Time 2Length Ensemble (More Stride, Best)",
     "conf_results": ["event5fold_3length_ms_best", "event5fold_time_2length_ms_best"],
     "out_folder": "event5fold_3length_time_2length_ms_best"
+  },
+  {
+    "name": "3Length Time 2Length Ensemble (IOU Avg)",
+    "conf_results": ["event5fold_3length", "event5fold_time_2length"],
+    "out_folder": "event5fold_3length_time_2length_iouavg",
+    "iou_averaging": true
+  },
+  {
+    "name": "3Length Time 2Length Ensemble (More Stride, IOU Avg)",
+    "conf_results": ["event5fold_3length_ms", "event5fold_time_2length_ms"],
+    "out_folder": "event5fold_3length_time_2length_ms_iouavg",
+    "iou_averaging": true
+  },
+  {
+    "name": "3Length Time 2Length Ensemble (Best, IOU Avg)",
+    "conf_results": ["event5fold_3length_best", "event5fold_time_2length_best"],
+    "out_folder": "event5fold_3length_time_2length_best_iouavg",
+    "iou_averaging": true
+  },
+  {
+    "name": "3Length Time 2Length Ensemble (More Stride, Best, IOU Avg)",
+    "conf_results": ["event5fold_3length_ms_best", "event5fold_time_2length_ms_best"],
+    "out_folder": "event5fold_3length_time_2length_ms_best_iouavg",
+    "iou_averaging": true
   }
 ]
