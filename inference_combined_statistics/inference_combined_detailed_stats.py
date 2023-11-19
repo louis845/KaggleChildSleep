@@ -29,7 +29,9 @@ def plot_single_precision_recall_curve(ax, precisions, recalls, ap, proba, title
     ax.text(0.5, 0.5, "AP: {:.4f}".format(ap), horizontalalignment="center", verticalalignment="center")
 
 validation_AP_tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30][::-1]
-regression_labels_folder = os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV", "huber_kernel6")
+regression_labels_folders = [os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV", "gaussian_kernel9"),
+                             os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV_Mid", "gaussian_kernel9"),
+                             os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV_Wide", "gaussian_kernel9")]
 def validation_ap(fig: matplotlib.figure.Figure, predicted_events, gt_events, iou_probas_folder,
                   width, cutoff, augmentation):
     ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
@@ -47,14 +49,24 @@ def validation_ap(fig: matplotlib.figure.Figure, predicted_events, gt_events, io
 
         if augmentation:
             # load the kernel predictions
-            onset_kernel = np.load(os.path.join(regression_labels_folder, "{}_onset.npy".format(series_id)))
-            wakeup_kernel = np.load(os.path.join(regression_labels_folder, "{}_wakeup.npy".format(series_id)))
+            onset_kernel_ensembled, wakeup_kernel_ensembled = None, None
+            for k in range(len(regression_labels_folders)):
+                onset_kernel = np.load(os.path.join(regression_labels_folders[k], "{}_onset.npy".format(series_id)))
+                wakeup_kernel = np.load(os.path.join(regression_labels_folders[k], "{}_wakeup.npy".format(series_id)))
+                if k == 0:
+                    onset_kernel_ensembled = onset_kernel
+                    wakeup_kernel_ensembled = wakeup_kernel
+                else:
+                    onset_kernel_ensembled = onset_kernel_ensembled + onset_kernel
+                    wakeup_kernel_ensembled = wakeup_kernel_ensembled + wakeup_kernel
+            onset_kernel_ensembled = onset_kernel_ensembled / len(regression_labels_folders)
+            wakeup_kernel_ensembled = wakeup_kernel_ensembled / len(regression_labels_folders)
 
             # augment and restrict the probas
             preds_locs_onset, onset_IOU_probas = postprocessing.get_augmented_predictions(preds_locs_onset,
-                                                            onset_kernel, onset_IOU_probas, cutoff_thresh=cutoff)
+                                                            onset_kernel_ensembled, onset_IOU_probas, cutoff_thresh=cutoff)
             preds_locs_wakeup, wakeup_IOU_probas = postprocessing.get_augmented_predictions(preds_locs_wakeup,
-                                                            wakeup_kernel, wakeup_IOU_probas, cutoff_thresh=cutoff)
+                                                            wakeup_kernel_ensembled, wakeup_IOU_probas, cutoff_thresh=cutoff)
         else:
             # just restrict, without augmentation
             onset_IOU_probas = onset_IOU_probas[preds_locs_onset]
