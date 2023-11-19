@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import torch
 import pyarrow.parquet as pq
+import tqdm
 
 import competition_models
 import kaggle_ap_detection
@@ -25,7 +26,7 @@ class CompetitionInference:
         self.input_pq_file = input_pq_file
         self.models_callable = models_callable
 
-    def inference_all(self, out_file_path, log_debug=False):
+    def inference_all(self, out_file_path, log_debug=False, show_tqdm_bar=False):
         # Create output file
         out_file = open(out_file_path, "w")
         row_id = 0
@@ -45,6 +46,8 @@ class CompetitionInference:
         all_second_postprocessing_time = []
 
         # Iteratively read data for each "series_id"
+        if show_tqdm_bar:
+            series_ids = tqdm.tqdm(series_ids)
         for series_id in series_ids:
             ctime = time.time()
             df = pd.read_parquet(self.input_pq_file, columns=["step", "timestamp", "anglez"],
@@ -123,7 +126,7 @@ if __name__ == "__main__":
     # Load the data and run inference
     competition_inference = CompetitionInference(input_pq_file=input_pq_file,
                                                     models_callable=models_callable)
-    competition_inference.inference_all(out_file_path=out_file_path, log_debug=True)
+    competition_inference.inference_all(out_file_path=out_file_path, log_debug=True, show_tqdm_bar=True)
 
     # Done. Garbage collect
     gc.collect()
