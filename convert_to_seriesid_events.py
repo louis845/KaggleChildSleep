@@ -3,11 +3,12 @@ import os
 import numpy as np
 import pandas as pd
 
-def get_events_per_seriesid():
-    all_series_ids = [x.split(".")[0] for x in os.listdir("./individual_train_series")]
+def get_events_per_seriesid(train_events_file="./data/train_events.csv",
+                            series_ids_folder="./individual_train_series"):
+    all_series_ids = [x.split(".")[0] for x in os.listdir(series_ids_folder)]
     all_series_ids = np.array(all_series_ids, dtype="object")
 
-    events = pd.read_csv("./data/train_events.csv")
+    events = pd.read_csv(train_events_file)
     events = events.dropna()
     per_seriesid_events = {}
     for series_id in all_series_ids:

@@ -9,6 +9,7 @@ import tqdm
 
 import competition_models
 import kaggle_ap_detection
+import os
 
 def correct_time(secs: np.ndarray, mins: np.ndarray, hours: np.ndarray):
     daytime = secs.astype(np.int32) + mins.astype(np.int32) * 60 + hours.astype(np.int32) * 3600
@@ -119,7 +120,7 @@ if __name__ == "__main__":
     input_model_cfg_file = "competition_models_cfg.json"
     out_file_path = "submission.csv"
 
-    """# Load the config and models
+    # Load the config and models
     models_callable = competition_models.CompetitionModels(model_config_file=input_model_cfg_file,
                                                            models_root_dir=input_models_root_dir,
                                                            device=torch.device("cuda:0"))
@@ -131,12 +132,13 @@ if __name__ == "__main__":
     competition_inference.inference_all(out_file_path=out_file_path, log_debug=True, show_tqdm_bar=True)
 
     # Done. Garbage collect
-    gc.collect()"""
+    gc.collect()
 
     # Run the evaluation script
     tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30]
     tolerances = [tolerance * 12 for tolerance in tolerances]
     solution = pd.read_csv("../data/train_events.csv")
+    solution = solution.dropna()
     submission = pd.read_csv(out_file_path)
     ctime = time.time()
     score = kaggle_ap_detection.score(solution, submission,
@@ -150,3 +152,76 @@ if __name__ == "__main__":
     print("Evaluation Time: {}".format(time.time() - ctime))
 
     print("Score: {}".format(score)) # this has data leakage since there is no train/test split. Just for bug catching
+
+
+    """
+    Output:
+    Evaluation Time: 1083.2370390892029
+    Score: 0.8465210245523218
+    """
+
+
+    # for debugging and comparison with the kaggle script
+    """Onset Average Precision: 0.8474360766019181
+       Wakeup Average Precision: 0.8451342579179949
+       Combined Average Precision: 0.8462851672599565"""
+
+    """import sys
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import metrics_ap
+    import convert_to_seriesid_events
+    gt_events = convert_to_seriesid_events.get_events_per_seriesid("../data/train_events.csv", "../individual_train_series")
+
+    predicted_events = {}
+    for series_id in submission["series_id"].unique():
+        series_submission = submission.loc[submission["series_id"] == series_id]
+        series_onset = series_submission.loc[series_submission["event"] == "onset"]
+        series_wakeup = series_submission.loc[series_submission["event"] == "wakeup"]
+        predicted_events[series_id] = {
+            "onset": series_onset["step"].to_numpy(dtype=np.int32),
+            "onset_proba": series_onset["score"].to_numpy(dtype=np.float32),
+            "wakeup": series_wakeup["step"].to_numpy(dtype=np.int32),
+            "wakeup_proba": series_wakeup["score"].to_numpy(dtype=np.float32)
+        }
+
+
+    ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance) for tolerance in tolerances]
+    ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance) for tolerance in tolerances]
+
+    all_series_ids = [filename.split(".")[0] for filename in os.listdir("../individual_train_series")]
+
+    for series_id in all_series_ids:
+        # get the ground truth
+        gt_onset_locs = gt_events[series_id]["onset"]
+        gt_wakeup_locs = gt_events[series_id]["wakeup"]
+
+        # get the predictions
+        preds_onset = predicted_events[series_id]["onset"]
+        preds_wakeup = predicted_events[series_id]["wakeup"]
+        onset_IOU_probas = predicted_events[series_id]["onset_proba"]
+        wakeup_IOU_probas = predicted_events[series_id]["wakeup_proba"]
+
+        # add info
+        for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+            ap_onset_metric.add(pred_locs=preds_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
+            ap_wakeup_metric.add(pred_locs=preds_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
+
+    # compute average precision
+    ap_onset_precisions, ap_onset_recalls, ap_onset_average_precisions, ap_onset_probas = [], [], [], []
+    ap_wakeup_precisions, ap_wakeup_recalls, ap_wakeup_average_precisions, ap_wakeup_probas = [], [], [], []
+    for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+        ap_onset_precision, ap_onset_recall, ap_onset_average_precision, ap_onset_proba = ap_onset_metric.get()
+        ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision, ap_wakeup_proba = ap_wakeup_metric.get()
+        ap_onset_precisions.append(ap_onset_precision)
+        ap_onset_recalls.append(ap_onset_recall)
+        ap_onset_average_precisions.append(ap_onset_average_precision)
+        ap_onset_probas.append(ap_onset_proba)
+        ap_wakeup_precisions.append(ap_wakeup_precision)
+        ap_wakeup_recalls.append(ap_wakeup_recall)
+        ap_wakeup_average_precisions.append(ap_wakeup_average_precision)
+        ap_wakeup_probas.append(ap_wakeup_proba)
+
+    # print the mean of average precisions
+    print("Onset Average Precision: {}".format(np.mean(ap_onset_average_precisions)))
+    print("Wakeup Average Precision: {}".format(np.mean(ap_wakeup_average_precisions)))
+    print("Combined Average Precision: {}".format((np.mean(ap_onset_average_precisions) + np.mean(ap_wakeup_average_precisions)) / 2))"""
