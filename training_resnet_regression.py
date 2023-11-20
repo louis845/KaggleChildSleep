@@ -846,7 +846,7 @@ if __name__ == "__main__":
     torch.save(model.state_dict(), os.path.join(model_dir, "model.pt"))
     torch.save(optimizer.state_dict(), os.path.join(model_dir, "optimizer.pt"))
     if use_swa:
-        update_SWA_bn(model, swa_model)
+        update_SWA_bn(swa_model)
         torch.save(swa_model.state_dict(), os.path.join(model_dir, "swa_model.pt"))
         torch.save(swa_scheduler.state_dict(), os.path.join(model_dir, "swa_scheduler.pt"))
 
