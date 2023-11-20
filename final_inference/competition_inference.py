@@ -1,5 +1,6 @@
 import gc
 import time
+import json
 
 import numpy as np
 import pandas as pd
@@ -27,7 +28,7 @@ class CompetitionInference:
         self.input_pq_file = input_pq_file
         self.models_callable = models_callable
 
-    def inference_all(self, out_file_path, log_debug=False, show_tqdm_bar=False):
+    def inference_all(self, out_file_path, log_debug=False, show_tqdm_bar=False, model_filter=None):
         # Create output file
         out_file = open(out_file_path, "w")
         row_id = 0
@@ -67,8 +68,12 @@ class CompetitionInference:
 
             # Call the series inference callable
             ctime = time.time()
+            filtered_subset = None
+            if model_filter is not None:
+                filtered_subset = model_filter(series_id)
             onset_locs, onset_IOU_probas, wakeup_locs, wakeup_IOU_probas, time_elapsed_performance_metrics =\
-                self.models_callable.run_inference(series_id, accel_data, secs_corr, mins_corr, hours_corr)
+                self.models_callable.run_inference(series_id, accel_data, secs_corr, mins_corr, hours_corr,
+                                                   models_subset=filtered_subset)
             inference_time = time.time() - ctime
 
             # Save the results
@@ -120,16 +125,36 @@ if __name__ == "__main__":
     input_model_cfg_file = "competition_models_cfg.json"
     out_file_path = "submission.csv"
 
+    # For 5-fold like effect
+    def load_fold(fold):
+        assert 1 <= fold <= 5, "Fold must be between 1 and 5"
+        fold_json_file = "../folds/fold_{}_val_5cv.json".format(fold)
+        with open(fold_json_file, "r") as f:
+            fold_json = json.load(f)
+        return fold_json["dataset"]
+    folds_map = {}
+    for k in range(1, 6):
+        for series_id in load_fold(k):
+            folds_map[series_id] = k
+
+    with open(input_model_cfg_file, "r") as f:
+        model_cfg = json.load(f)
+    all_models = [x["model_name"] for x in model_cfg["regression_models"]] + [x["model_name"] for x in model_cfg["confidence_models"]]
+    print("All models: {}".format(all_models))
+    def model_filter_func(series_id):
+        belonging_fold = folds_map[series_id]
+        return [model_name for model_name in all_models if "fold{}".format(str(belonging_fold)) in model_name]
+
     # Load the config and models
     models_callable = competition_models.CompetitionModels(model_config_file=input_model_cfg_file,
                                                            models_root_dir=input_models_root_dir,
-                                                           device=torch.device("cuda:0"))
+                                                           device=torch.device("cuda:1"))
     models_callable.load_models()
 
     # Load the data and run inference
     competition_inference = CompetitionInference(input_pq_file=input_pq_file,
                                                     models_callable=models_callable)
-    competition_inference.inference_all(out_file_path=out_file_path, log_debug=True, show_tqdm_bar=True)
+    competition_inference.inference_all(out_file_path=out_file_path, log_debug=True, show_tqdm_bar=True, model_filter=model_filter_func)
 
     # Done. Garbage collect
     gc.collect()
@@ -140,7 +165,7 @@ if __name__ == "__main__":
     solution = pd.read_csv("../data/train_events.csv")
     solution = solution.dropna()
     submission = pd.read_csv(out_file_path)
-    ctime = time.time()
+    """ctime = time.time()
     score = kaggle_ap_detection.score(solution, submission,
                                       tolerances={"onset": tolerances,
                                                   "wakeup": tolerances},
@@ -151,7 +176,7 @@ if __name__ == "__main__":
                                       use_scoring_intervals=False)
     print("Evaluation Time: {}".format(time.time() - ctime))
 
-    print("Score: {}".format(score)) # this has data leakage since there is no train/test split. Just for bug catching
+    print("Score: {}".format(score)) # this has data leakage since there is no train/test split. Just for bug catching"""
 
 
     """
@@ -166,7 +191,7 @@ if __name__ == "__main__":
        Wakeup Average Precision: 0.8451342579179949
        Combined Average Precision: 0.8462851672599565"""
 
-    """import sys
+    import sys
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     import metrics_ap
     import convert_to_seriesid_events
@@ -224,4 +249,4 @@ if __name__ == "__main__":
     # print the mean of average precisions
     print("Onset Average Precision: {}".format(np.mean(ap_onset_average_precisions)))
     print("Wakeup Average Precision: {}".format(np.mean(ap_wakeup_average_precisions)))
-    print("Combined Average Precision: {}".format((np.mean(ap_onset_average_precisions) + np.mean(ap_wakeup_average_precisions)) / 2))"""
+    print("Combined Average Precision: {}".format((np.mean(ap_onset_average_precisions) + np.mean(ap_wakeup_average_precisions)) / 2))

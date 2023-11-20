@@ -53,6 +53,7 @@ class CompetitionModels:
 
             model_pkg = {
                 "model": model,
+                "model_name": regression_cfg["model_name"],
                 "pred_width": regression_cfg["pred_width"],
                 "kernel_size": regression_cfg["kernel_size"],
                 "use_sigmas": regression_cfg["use_sigmas"],
@@ -96,6 +97,7 @@ class CompetitionModels:
 
             model_pkg = {
                 "model": model,
+                "model_name": confidence_cfg["model_name"],
                 "prediction_length": 17280,
                 "expand": confidence_cfg["expand"],
                 "use_time_information": confidence_cfg["use_time_information"],
@@ -113,7 +115,8 @@ class CompetitionModels:
         self.initialize_IOU_converter()
 
     def run_inference(self, series_id: str, accel_data: np.ndarray,
-                      secs_corr: np.ndarray, mins_corr: np.ndarray, hours_corr: np.ndarray):
+                      secs_corr: np.ndarray, mins_corr: np.ndarray, hours_corr: np.ndarray,
+                      models_subset: list = None):
         ## cfg values for regression
         cutoff = 4.5
         pruning = 60
@@ -125,10 +128,14 @@ class CompetitionModels:
         for regression_model_pkg in self.regression_models:
             # ensemble the kernel values
             model = regression_model_pkg["model"]
+            model_name = regression_model_pkg["model_name"]
             pred_width = regression_model_pkg["pred_width"]
             kernel_size = regression_model_pkg["kernel_size"]
             use_sigmas = regression_model_pkg["use_sigmas"]
             target_multiple = regression_model_pkg["target_multiple"]
+
+            if models_subset is not None and model_name not in models_subset:
+                continue
 
             with torch.no_grad():
                 preds_raw = model_event_unet.event_regression_inference(model, accel_data, target_multiple=target_multiple, return_torch_tensor=True)
@@ -186,46 +193,93 @@ class CompetitionModels:
 
         ## cfg values for confidence
         batch_size = 512
+        iou_averaging = ("iou_averaging" in self.model_config) and self.model_config["iou_averaging"]
 
         ## now compute confidence
-        ctime = time.time()
-        onset_confidence_probas, wakeup_confidence_probas = None, None
-        for confidence_model_pkg in self.confidence_models:
-            model = confidence_model_pkg["model"]
-            prediction_length = confidence_model_pkg["prediction_length"]
-            expand = confidence_model_pkg["expand"]
-            use_time_information = confidence_model_pkg["use_time_information"]
-            stride_count = confidence_model_pkg["stride_count"]
+        if iou_averaging:
+            ctime = time.time()
+            onset_IOU_probas, wakeup_IOU_probas = None, None
+            for confidence_model_pkg in self.confidence_models:
+                model = confidence_model_pkg["model"]
+                model_name = confidence_model_pkg["model_name"]
+                prediction_length = confidence_model_pkg["prediction_length"]
+                expand = confidence_model_pkg["expand"]
+                use_time_information = confidence_model_pkg["use_time_information"]
+                stride_count = confidence_model_pkg["stride_count"]
 
-            with torch.no_grad():
-                if use_time_information:
-                    times = {"hours": hours_corr, "mins": mins_corr, "secs": secs_corr}
-                else:
-                    times = None
+                if models_subset is not None and model_name not in models_subset:
+                    continue
 
-                preds = model_event_unet.event_confidence_inference(model=model, time_series=accel_data,
-                                                                    batch_size=batch_size,
-                                                                    prediction_length=prediction_length,
-                                                                    expand=expand, times=times,
-                                                                    stride_count=stride_count,
-                                                                    flip_augmentation=False)
+                with torch.no_grad():
+                    if use_time_information:
+                        times = {"hours": hours_corr, "mins": mins_corr, "secs": secs_corr}
+                    else:
+                        times = None
 
-            if onset_confidence_probas is None:
+                    preds = model_event_unet.event_confidence_inference(model=model, time_series=accel_data,
+                                                                        batch_size=batch_size,
+                                                                        prediction_length=prediction_length,
+                                                                        expand=expand, times=times,
+                                                                        stride_count=stride_count,
+                                                                        flip_augmentation=False)
+
                 onset_confidence_probas = preds[0, :]
                 wakeup_confidence_probas = preds[1, :]
-            else:
-                onset_confidence_probas += preds[0, :]
-                wakeup_confidence_probas += preds[1, :]
-        onset_confidence_probas /= len(self.confidence_models)
-        wakeup_confidence_probas /= len(self.confidence_models)
-        confidence_computation_time = time.time() - ctime
 
-        # convert to IOU score
-        ctime = time.time()
-        onset_IOU_probas = self.iou_converter.convert(onset_confidence_probas)
-        wakeup_IOU_probas = self.iou_converter.convert(wakeup_confidence_probas)
+                # convert to IOU score
+                model_onset_IOU_probas = self.iou_converter.convert(onset_confidence_probas)
+                model_wakeup_IOU_probas = self.iou_converter.convert(wakeup_confidence_probas)
+
+                if onset_IOU_probas is None:
+                    onset_IOU_probas = model_onset_IOU_probas
+                    wakeup_IOU_probas = model_wakeup_IOU_probas
+                else:
+                    onset_IOU_probas += model_onset_IOU_probas
+                    wakeup_IOU_probas += model_wakeup_IOU_probas
+
+            onset_IOU_probas /= len(self.confidence_models)
+            wakeup_IOU_probas /= len(self.confidence_models)
+
+            confidence_computation_time = time.time() - ctime
+        else:
+            ctime = time.time()
+            onset_confidence_probas, wakeup_confidence_probas = None, None
+            for confidence_model_pkg in self.confidence_models:
+                model = confidence_model_pkg["model"]
+                prediction_length = confidence_model_pkg["prediction_length"]
+                expand = confidence_model_pkg["expand"]
+                use_time_information = confidence_model_pkg["use_time_information"]
+                stride_count = confidence_model_pkg["stride_count"]
+
+                with torch.no_grad():
+                    if use_time_information:
+                        times = {"hours": hours_corr, "mins": mins_corr, "secs": secs_corr}
+                    else:
+                        times = None
+
+                    preds = model_event_unet.event_confidence_inference(model=model, time_series=accel_data,
+                                                                        batch_size=batch_size,
+                                                                        prediction_length=prediction_length,
+                                                                        expand=expand, times=times,
+                                                                        stride_count=stride_count,
+                                                                        flip_augmentation=False)
+
+                if onset_confidence_probas is None:
+                    onset_confidence_probas = preds[0, :]
+                    wakeup_confidence_probas = preds[1, :]
+                else:
+                    onset_confidence_probas += preds[0, :]
+                    wakeup_confidence_probas += preds[1, :]
+            onset_confidence_probas /= len(self.confidence_models)
+            wakeup_confidence_probas /= len(self.confidence_models)
+
+            # convert to IOU score
+            onset_IOU_probas = self.iou_converter.convert(onset_confidence_probas)
+            wakeup_IOU_probas = self.iou_converter.convert(wakeup_confidence_probas)
+            confidence_computation_time = time.time() - ctime
 
         ## do augmentation now
+        ctime = time.time()
         onset_locs, onset_IOU_probas = postprocessing.get_augmented_predictions(onset_locs, onset_kernel_values,
                                                                                 onset_IOU_probas, cutoff_thresh=0.01)
         wakeup_locs, wakeup_IOU_probas = postprocessing.get_augmented_predictions(wakeup_locs, wakeup_kernel_values,

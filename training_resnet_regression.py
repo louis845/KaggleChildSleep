@@ -362,6 +362,8 @@ def single_validation_step_standard(model_: torch.nn.Module, accel_data_batch: t
         return loss, mask_num, preds
 
 def validation_step():
+    use_model = swa_model if (use_swa and (epoch > swa_start)) else model
+
     for key in val_metrics:
         val_metrics[key].reset()
 
@@ -384,11 +386,11 @@ def validation_step():
 
             # val model now
             if use_standard_model:
-                loss, mask_num, preds = single_validation_step_standard(model, accel_data_batch,
+                loss, mask_num, preds = single_validation_step_standard(use_model, accel_data_batch,
                                                                             event_regression_values, event_regression_masks)
             else:
                 small_loss, mid_loss, large_loss, small_mask_num, mid_mask_num, large_mask_num,\
-                    pred_small, pred_mid, pred_large = single_validation_step(model, accel_data_batch,
+                    pred_small, pred_mid, pred_large = single_validation_step(use_model, accel_data_batch,
                                                                                 event_regression_values, event_regression_masks)
 
             # record
@@ -470,6 +472,49 @@ def print_history(metrics_history):
     for key in metrics_history:
         print("{}      {}".format(key, metrics_history[key][-1]))
 
+def update_SWA_bn(swa_model):
+    # get previous momentum
+    momenta = {}
+    for module in swa_model.modules():
+        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            module.reset_running_stats()
+            momenta[module] = module.momentum
+
+    if not momenta:  # no batchnorm layers
+        return
+
+    # set to average over full batch
+    was_training = swa_model.training
+    swa_model.train()
+    for module in momenta.keys():
+        module.momentum = None
+
+    # forward pass to update batchnorm
+    training_sampler.shuffle()
+    with torch.no_grad():
+        with tqdm.tqdm(total=len(training_sampler)) as pbar:
+            while training_sampler.entries_remaining() > 0:
+                accel_data_batch, event_regression_values, event_regression_masks, increment =\
+                    training_sampler.sample(batch_size, target_length=target_length, elastic_deformation=use_elastic_deformation,
+                                            v_elastic_deformation=use_velastic_deformation, random_vflip=flip_value)
+
+                accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
+
+                if use_anglez_only:
+                    accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
+                elif use_enmo_only:
+                    accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
+
+                # forward pass
+                swa_model(accel_data_batch_torch, ret_type="deep")
+
+                pbar.update(increment)
+
+    # recover momentum
+    for bn_module in momenta.keys():
+        bn_module.momentum = momenta[bn_module]
+    swa_model.train(was_training)
+
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn")
 
@@ -481,7 +526,7 @@ if __name__ == "__main__":
     parser.add_argument("--regression_width", type=int, nargs="+", default=[60, 120, 240], help="Number of regression values to predict for each event. Default [60, 120, 240].")
     parser.add_argument("--regression_kernel", type=int, default=None, help="Kernel size for the regression layers. Default None, which means usual regression is performed.")
     parser.add_argument("--learning_rate", type=float, default=5e-3, help="Learning rate to use. Default 5e-3.")
-    parser.add_argument("--use_decay_schedule", action="store_true", help="Whether to use a decay schedule. Default False.")
+    parser.add_argument("--use_swa", action="store_true", help="Whether to use SWA. Default False.")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
     parser.add_argument("--second_momentum", type=float, default=0.999, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
     parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use. Default 0.0.")
@@ -529,7 +574,7 @@ if __name__ == "__main__":
     regression_width = args.regression_width
     regression_kernel = args.regression_kernel
     learning_rate = args.learning_rate
-    use_decay_schedule = args.use_decay_schedule
+    use_swa = args.use_swa
     momentum = args.momentum
     second_momentum = args.second_momentum
     weight_decay = args.weight_decay
@@ -645,6 +690,12 @@ if __name__ == "__main__":
             elif optimizer_type == "sgd":
                 g["momentum"] = momentum
 
+    # Create swa model
+    if use_swa:
+        swa_model = torch.optim.swa_utils.AveragedModel(model)
+        swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, swa_lr=5 * learning_rate, anneal_strategy="linear", anneal_epochs=5)
+        swa_start = 20
+
     model_config = {
         "model": "Unet with attention segmentation",
         "training_dataset": train_dset_name,
@@ -654,7 +705,7 @@ if __name__ == "__main__":
         "regression_width": regression_width,
         "regression_kernel": regression_kernel,
         "learning_rate": learning_rate,
-        "use_decay_schedule": use_decay_schedule,
+        "use_swa": use_swa,
         "momentum": momentum,
         "second_momentum": second_momentum,
         "weight_decay": weight_decay,
@@ -752,8 +803,16 @@ if __name__ == "__main__":
                 torch.save(model.state_dict(), os.path.join(model_dir, "latest_model.pt"))
                 torch.save(optimizer.state_dict(), os.path.join(model_dir, "latest_optimizer.pt"))
 
+            if use_swa and epoch > swa_start:
+                swa_model.update_parameters(model)
+                swa_scheduler.step()
+                if (epoch - swa_start) % 3 == 0:
+                    update_SWA_bn(swa_model)
+
             # switch model to eval mode, and fix all running stats for batchnorm layers
             model.eval()
+            if use_swa and (epoch > swa_start):
+                swa_model.eval()
             with torch.no_grad():
                 validation_step()
 
@@ -769,22 +828,11 @@ if __name__ == "__main__":
             if epoch % epochs_per_save == 0:
                 torch.save(model.state_dict(), os.path.join(model_dir, "model_{}.pt".format(epoch)))
                 torch.save(optimizer.state_dict(), os.path.join(model_dir, "optimizer_{}.pt".format(epoch)))
+                if use_swa and (epoch > swa_start):
+                    torch.save(swa_model.state_dict(), os.path.join(model_dir, "swa_model_{}.pt".format(epoch)))
+                    torch.save(swa_scheduler.state_dict(), os.path.join(model_dir, "swa_scheduler_{}.pt".format(epoch)))
 
             gc.collect()
-
-            # adjust learning rate
-            if warmup_steps > 0:
-                warmup_steps -= 1
-                if warmup_steps == 0:
-                    for g in optimizer.param_groups:
-                        g["lr"] = learning_rate
-            else:
-                if use_decay_schedule:
-                    if epoch > 100:
-                        new_rate = learning_rate * 0.98 * np.power(0.9, (epoch - 100)) + learning_rate * 0.02
-                        print("Setting learning rate to {:.5f}".format(new_rate))
-                        for g in optimizer.param_groups:
-                            g["lr"] = new_rate
 
         print("Training complete! Saving and finalizing...")
     except KeyboardInterrupt:
@@ -795,6 +843,10 @@ if __name__ == "__main__":
     # save model
     torch.save(model.state_dict(), os.path.join(model_dir, "model.pt"))
     torch.save(optimizer.state_dict(), os.path.join(model_dir, "optimizer.pt"))
+    if use_swa:
+        update_SWA_bn(model, swa_model)
+        torch.save(swa_model.state_dict(), os.path.join(model_dir, "swa_model.pt"))
+        torch.save(swa_scheduler.state_dict(), os.path.join(model_dir, "swa_scheduler.pt"))
 
     # save metrics
     if len(train_history) > 0:

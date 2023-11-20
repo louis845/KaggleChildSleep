@@ -21,6 +21,45 @@ def index_out_of_bounds(arr, indices):
     end = np.searchsorted(indices, len(arr), side="left")
     return np.pad(arr[indices[start:end]], (start, len(indices) - end), mode="constant", constant_values=-1)
 
+def edges_detect(preds):
+    assert preds.dtype == bool, "preds must be a boolean array"
+    assert len(preds.shape) == 1, "preds must be a 1D array"
+
+    start_edges = (~preds[:-1]) & preds[1:]
+    end_edges = preds[:-1] & (~preds[1:])
+
+    start_indices = np.argwhere(start_edges).flatten() + 1
+    end_indices = np.argwhere(end_edges).flatten() + 1
+
+    if preds[0]:
+        start_indices = np.insert(start_indices, 0, 0)
+    if preds[-1]:
+        end_indices = np.append(end_indices, len(preds))
+
+    return start_indices, end_indices
+
+def remove_short_gaps(start_indices, end_indices, gap_threshold=10):
+    assert len(start_indices.shape) == 1, "start_indices must be a 1D array"
+    assert len(end_indices.shape) == 1, "end_indices must be a 1D array"
+    assert len(start_indices) == len(end_indices), "start_indices and end_indices must have the same length"
+
+    if len(start_indices) <= 1:
+        return start_indices, end_indices
+
+    d = start_indices[1:] - end_indices[:-1]
+    good = d >= gap_threshold
+
+    start_indices = start_indices[np.concatenate([[True], good])]
+    end_indices = end_indices[np.concatenate([good, [True]])]
+    return start_indices, end_indices
+
+def index_probas_distance_based(locs, pred_probas, proba_threshold: float, dropoff_factor: float,
+                                preds_above_threshold: np.ndarray=None):
+    if preds_above_threshold is None:
+        preds_above_threshold = pred_probas >= proba_threshold
+
+
+
 def compute_first_zero(series_secs):
     return np.argwhere(series_secs == 0).flatten()[0]
 

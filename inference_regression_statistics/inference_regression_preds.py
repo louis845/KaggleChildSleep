@@ -14,10 +14,13 @@ import convert_to_npy_naive
 
 FOLDER = "./inference_regression_statistics/regression_labels"
 
-def inference(model_dir, out_folder, validation_entries, target_multiple, use_sigmas, hidden_channels, hidden_blocks, pred_width):
+def inference(model_dir, out_folder, validation_entries, target_multiple, use_sigmas, hidden_channels, hidden_blocks, pred_width,
+              use_swa):
     # init model
     model = model_event_unet.EventRegressorUnet(use_learnable_sigma=use_sigmas, hidden_channels=hidden_channels, blocks=hidden_blocks)
     model = model.to(config.device)
+    if use_swa:
+        model = torch.optim.swa_utils.AveragedModel(model)
 
     # specify folders, and create them if they don't exist
     FOLDERS_DICT = {
@@ -39,7 +42,10 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
             os.mkdir(FOLDERS_DICT[key])
 
     # load model
-    model.load_state_dict(torch.load(os.path.join(model_dir, "model.pt")))
+    if use_swa:
+        model.load_state_dict(torch.load(os.path.join(model_dir, "swa_model.pt")))
+    else:
+        model.load_state_dict(torch.load(os.path.join(model_dir, "model.pt")))
     model.eval()
 
     # inference
@@ -70,7 +76,8 @@ def inference(model_dir, out_folder, validation_entries, target_multiple, use_si
                             np.load(os.path.join(FOLDERS_DICT["regression"], "{}_wakeup.npy".format(series_id)))
                         ], axis=0), dtype=torch.float32, device=config.device)
                 else:
-                    preds = model_event_unet.event_regression_inference(model, accel_data, target_multiple=target_multiple, return_torch_tensor=True)
+                    preds = model_event_unet.event_regression_inference(model, accel_data, target_multiple=target_multiple, return_torch_tensor=True,
+                                                                        device=config.device, use_learnable_sigma=use_sigmas)
 
                     # save to folder
                     np.save(os.path.join(FOLDERS_DICT["regression"], "{}_onset.npy".format(series_id)), preds[0, :].cpu().numpy())
@@ -311,12 +318,15 @@ if __name__ == "__main__":
         hidden_channels = [4, 4, 8, 16, 32]
         hidden_blocks = [2, 2, 2, 2, 3]
         pred_width = 120
+        use_swa = False
         if "hidden_channels" in option:
             hidden_channels = option["hidden_channels"]
         if "hidden_blocks" in option:
             hidden_blocks = option["hidden_blocks"]
         if "pred_width" in option:
             pred_width = option["pred_width"]
+        if "use_swa" in option:
+            use_swa = option["use_swa"]
         blocks_length = len(hidden_channels)
         print("Running inference on {}".format(name))
 
@@ -339,4 +349,4 @@ if __name__ == "__main__":
             validation_entries = manager_folds.load_dataset(entry)
 
             inference(model_dir, out_folder, validation_entries, target_multiple, use_sigmas,
-                      hidden_channels=hidden_channels, hidden_blocks=hidden_blocks, pred_width=pred_width)
+                      hidden_channels=hidden_channels, hidden_blocks=hidden_blocks, pred_width=pred_width, use_swa=use_swa)
