@@ -341,6 +341,8 @@ if __name__ == "__main__":
             os.mkdir(out_folder)
             with open(os.path.join(out_folder, "name.txt"), "w") as f:
                 f.write(name)
+        else:
+            continue
         for k in range(len(models)):
             model_name = models[k]
             entry = entries[k]
