@@ -20,6 +20,8 @@ def inference(model_dir, validation_entries, all_data,
               expand, use_batch_norm, use_anglez_only, use_enmo_only,
               prediction_length, batch_size, use_time_information,
 
+              use_swa,
+
               stride_count=4, flip_augmentation=False, use_best_model=False,
               show_tqdm_bar=True):
     # init model
@@ -38,16 +40,26 @@ def inference(model_dir, validation_entries, all_data,
                                                  attention_mode=attention_mode,
                                                  use_time_input=use_time_information)
     model = model.to(config.device)
-    model.eval()
 
     # load model
     if use_best_model:
         val_metrics = pd.read_csv(os.path.join(model_dir, "val_metrics.csv"), index_col=0)
         val_mAP = val_metrics["val_onset_mAP"] + val_metrics["val_wakeup_mAP"] # take with grain of salt, using validation metrics to pick best model
-        best_model_idx = int(val_mAP.iloc[:30].idxmax())
-        model.load_state_dict(torch.load(os.path.join(model_dir, "model_{}.pt".format(best_model_idx))))
+        best_model_idx = int(val_mAP.idxmax())
+        if not os.path.isfile(os.path.join(model_dir, "swa_model_{}.pt".format(best_model_idx))):
+            use_swa = False
+        if use_swa:
+            model = torch.optim.swa_utils.AveragedModel(model)
+            model.load_state_dict(torch.load(os.path.join(model_dir, "swa_model_{}.pt".format(best_model_idx))))
+        else:
+            model.load_state_dict(torch.load(os.path.join(model_dir, "model_{}.pt".format(best_model_idx))))
     else:
-        model.load_state_dict(torch.load(os.path.join(model_dir, "model.pt")))
+        if use_swa:
+            model = torch.optim.swa_utils.AveragedModel(model)
+            model.load_state_dict(torch.load(os.path.join(model_dir, "swa_model.pt")))
+        else:
+            model.load_state_dict(torch.load(os.path.join(model_dir, "model.pt")))
+    model.eval()
 
     # inference
     all_preds = {}
@@ -76,7 +88,10 @@ def inference(model_dir, validation_entries, all_data,
                                                                 prediction_length=prediction_length,
                                                                 expand=expand, times=times,
                                                                 stride_count=stride_count,
-                                                                flip_augmentation=flip_augmentation)
+                                                                flip_augmentation=flip_augmentation,
+
+                                                                use_time_input=use_time_information,
+                                                                device=config.device)
 
             # save to dict
             all_preds[series_id] = {
@@ -153,7 +168,8 @@ if __name__ == "__main__":
         "use_time_information": use_time_information,
         "stride_count": 4,
         "flip_augmentation": False,
-        "use_best_model": False
+        "use_best_model": False,
+        "use_swa": False
     }
 
     # load data
@@ -207,7 +223,7 @@ if __name__ == "__main__":
                                     opt_args["prediction_length"], opt_args["batch_size"], opt_args["use_time_information"],
 
                                     stride_count=opt_args["stride_count"], flip_augmentation=opt_args["flip_augmentation"],
-                                    use_best_model=opt_args["use_best_model"])
+                                    use_best_model=opt_args["use_best_model"], use_swa=opt_args["use_swa"])
 
             for series_id in tqdm.tqdm(validation_entries):
                 preds = all_preds[series_id]

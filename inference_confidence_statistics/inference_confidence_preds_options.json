@@ -179,5 +179,49 @@
     "use_time_information": true,
     "stride_count": 24,
     "use_best_model": true
+  },
+  {
+    "name": "Expanded Predictions (Both, 3 Length)",
+    "folder_name": "event5fold_both_3length",
+    "models": ["event5fold_enmo_2elastic_length3_drop_model_fold1", "event5fold_enmo_2elastic_length3_drop_model_fold2",
+      "event5fold_enmo_2elastic_length3_drop_model_fold3", "event5fold_enmo_2elastic_length3_drop_model_fold4", "event5fold_enmo_2elastic_length3_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "both",
+    "attention_blocks": 3,
+    "attention_mode": "length"
+  },
+  {
+    "name": "Expanded Predictions (Both, 3 Length, More Stride)",
+    "folder_name": "event5fold_both_3length_ms",
+    "models": ["event5fold_enmo_2elastic_length3_drop_model_fold1", "event5fold_enmo_2elastic_length3_drop_model_fold2",
+      "event5fold_enmo_2elastic_length3_drop_model_fold3", "event5fold_enmo_2elastic_length3_drop_model_fold4", "event5fold_enmo_2elastic_length3_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "both",
+    "attention_blocks": 3,
+    "attention_mode": "length",
+    "stride_count": 24
+  },
+  {
+    "name": "Expanded Predictions (Both, 3 Length, Best)",
+    "folder_name": "event5fold_both_3length_best",
+    "models": ["event5fold_enmo_2elastic_length3_drop_model_fold1", "event5fold_enmo_2elastic_length3_drop_model_fold2",
+      "event5fold_enmo_2elastic_length3_drop_model_fold3", "event5fold_enmo_2elastic_length3_drop_model_fold4", "event5fold_enmo_2elastic_length3_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "both",
+    "attention_blocks": 3,
+    "attention_mode": "length",
+    "use_best_model": true
+  },
+  {
+    "name": "Expanded Predictions (Both, 3 Length, More Stride, Best)",
+    "folder_name": "event5fold_both_3length_ms_best",
+    "models": ["event5fold_enmo_2elastic_length3_drop_model_fold1", "event5fold_enmo_2elastic_length3_drop_model_fold2",
+      "event5fold_enmo_2elastic_length3_drop_model_fold3", "event5fold_enmo_2elastic_length3_drop_model_fold4", "event5fold_enmo_2elastic_length3_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "both",
+    "attention_blocks": 3,
+    "attention_mode": "length",
+    "stride_count": 24,
+    "use_best_model": true
   }
 ]

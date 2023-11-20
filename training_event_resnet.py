@@ -10,8 +10,8 @@ import collections
 import pandas as pd
 import numpy as np
 import tqdm
-import torch
 import matplotlib.pyplot as plt
+import torch
 
 import bad_series_list
 import config
@@ -188,6 +188,7 @@ def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tens
 def validation_step():
     for key in val_metrics:
         val_metrics[key].reset()
+    use_model = swa_model if (use_swa and (epoch > swa_start)) else model
 
     # validation
     val_sampler.shuffle()
@@ -208,7 +209,7 @@ def validation_step():
             labels_batch = labels_batch[:, :, expand:-expand]
 
             # val model now
-            loss, preds, small_loss, mid_loss, large_loss, num_events = single_validation_step(model, accel_data_batch, labels_batch, times_batch)
+            loss, preds, small_loss, mid_loss, large_loss, num_events = single_validation_step(use_model, accel_data_batch, labels_batch, times_batch)
 
             # record
             with torch.no_grad():
@@ -265,6 +266,8 @@ def plot_single_precision_recall_curve(ax, precisions, recalls, ap, title):
 
 validation_AP_tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30][::-1]
 def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
+    use_model = swa_model if (use_swa and (epoch > swa_start)) else model
+
     ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
     ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
 
@@ -285,10 +288,18 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
             else:
                 times = None
 
-            proba_preds = model_event_unet.event_confidence_inference(model=model, time_series=accel_data,
-                                                                    batch_size=batch_size * 5,
-                                                                    prediction_length=prediction_length,
-                                                                    expand=expand, times=times)
+            if use_swa and (epoch > swa_start):
+                proba_preds = model_event_unet.event_confidence_inference(model=use_model, time_series=accel_data,
+                                                                          batch_size=batch_size * 5,
+                                                                          prediction_length=prediction_length,
+                                                                          expand=expand, times=times,
+                                                                          device=config.device,
+                                                                          use_time_input=use_time_information)
+            else:
+                proba_preds = model_event_unet.event_confidence_inference(model=use_model, time_series=accel_data,
+                                                                        batch_size=batch_size * 5,
+                                                                        prediction_length=prediction_length,
+                                                                        expand=expand, times=times)
             onset_IOU_probas = iou_score_converter.convert(proba_preds[0, :])
             wakeup_IOU_probas = iou_score_converter.convert(proba_preds[1, :])
 
@@ -351,6 +362,62 @@ def print_history(metrics_history):
     for key in metrics_history:
         print("{}      {}".format(key, metrics_history[key][-1]))
 
+def update_SWA_bn(swa_model):
+    # get previous momentum
+    momenta = {}
+    for module in swa_model.modules():
+        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            module.reset_running_stats()
+            momenta[module] = module.momentum
+
+    if not momenta: # no batchnorm layers
+        return
+
+    # set to average over full batch
+    was_training = swa_model.training
+    swa_model.train()
+    for module in momenta.keys():
+        module.momentum = None
+
+    # forward pass to update batchnorm
+    training_sampler.shuffle()
+
+    with torch.no_grad():
+        with tqdm.tqdm(total=len(training_sampler)) as pbar:
+            while training_sampler.entries_remaining() > 0:
+                accel_data_batch, labels_batch, times_batch, increment = \
+                    training_sampler.sample(batch_size, random_shift=random_shift,
+                                            random_flip=random_flip, random_vflip=flip_value, always_flip=always_flip,
+                                            expand=expand, elastic_deformation=use_elastic_deformation,
+                                            v_elastic_deformation=use_velastic_deformation,
+                                            randomly_dropout_expanded_parts=random_exp_dropout)
+                assert labels_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(
+                    labels_batch.shape)
+                assert accel_data_batch.shape[-1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(
+                    accel_data_batch.shape)
+
+                accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
+                if use_anglez_only:
+                    accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
+                elif use_enmo_only:
+                    accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
+                elif mix_anglez_enmo:
+                    if np.random.rand() < 0.5:
+                        accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
+                    else:
+                        accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
+
+                # run forward pass
+                times_input = times_batch if use_time_information else None
+                pred_logits, _, _, _ = swa_model(accel_data_batch_torch, ret_type="attn", time=times_input)
+
+                pbar.update(increment)
+
+    # recover momentum
+    for bn_module in momenta.keys():
+        bn_module.momentum = momenta[bn_module]
+    swa_model.train(was_training)
+
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn")
 
@@ -394,6 +461,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_ce_iou_loss", action="store_true", help="Whether to use a combination of cross entropy and IOU loss. Default False.")
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
+    parser.add_argument("--use_swa", action="store_true", help="Whether to use SWA. Default False.")
     parser.add_argument("--mix_anglez_enmo", action="store_true", help="Whether to mix anglez and enmo. Default False.")
     parser.add_argument("--exclude_bad_series_from_training", action="store_true", help="Whether to exclude bad series from training. Default False.")
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
@@ -457,6 +525,7 @@ if __name__ == "__main__":
     use_ce_iou_loss = args.use_ce_iou_loss
     use_anglez_only = args.use_anglez_only
     use_enmo_only = args.use_enmo_only
+    use_swa = args.use_swa
     mix_anglez_enmo = args.mix_anglez_enmo
     exclude_bad_series_from_training = args.exclude_bad_series_from_training
     prediction_length = args.prediction_length
@@ -468,6 +537,7 @@ if __name__ == "__main__":
     assert not (use_iou_loss and use_ce_loss), "Cannot use both IOU loss and cross entropy loss."
     assert sum([use_anglez_only, use_enmo_only, mix_anglez_enmo]) <= 1, "Cannot use more than one of anglez only, enmo only, and mix anglez and enmo."
     assert not (use_time_information and random_flip), "Cannot use time information and random flip at the same time."
+    assert not (use_swa and use_decay_schedule), "Cannot use SWA and decay schedule at the same time."
     # all      - predict all parts of the interval, events only happen in the center, and the expanded parts will be predicted as negative (for both training and validation)
     # center   - predict only the center parts of the interval. No optimization and predictions will be made for the expanded parts (for both training and validation)
     # expanded - use the entire interval (expanded parts included) for optimization, and only the center part for prediction (validation)
@@ -507,6 +577,7 @@ if __name__ == "__main__":
     print("Attention bottleneck: " + str(attention_bottleneck))
     print("Attention mode: " + str(attention_mode))
     print("Upconv channels: " + str(upconv_channels_override))
+    print("Use SWA: " + str(use_swa))
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
@@ -562,6 +633,12 @@ if __name__ == "__main__":
             elif optimizer_type == "sgd":
                 g["momentum"] = momentum
 
+    # create SWA if necessary
+    if use_swa:
+        swa_model = torch.optim.swa_utils.AveragedModel(model)
+        swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, swa_lr=5 * learning_rate, anneal_strategy="linear", anneal_epochs=5)
+        swa_start = 10
+
     model_config = {
         "model": "Unet with attention segmentation",
         "training_dataset": train_dset_name,
@@ -602,6 +679,7 @@ if __name__ == "__main__":
         "use_ce_iou_loss": use_ce_iou_loss,
         "use_anglez_only": use_anglez_only,
         "use_enmo_only": use_enmo_only,
+        "use_swa": use_swa,
         "mix_anglez_enmo": mix_anglez_enmo,
         "exclude_bad_series_from_training": exclude_bad_series_from_training,
         "prediction_length": prediction_length,
@@ -682,8 +760,17 @@ if __name__ == "__main__":
                 torch.save(model.state_dict(), os.path.join(model_dir, "latest_model.pt"))
                 torch.save(optimizer.state_dict(), os.path.join(model_dir, "latest_optimizer.pt"))
 
-            # switch model to eval mode, and reset all running stats for batchnorm layers
+            # manage SWA
+            if use_swa and (epoch > swa_start):
+                swa_model.update_parameters(model)
+                swa_scheduler.step()
+                if (epoch - swa_start) % 3 == 0:
+                    update_SWA_bn(swa_model)
+
+            # switch model to eval mode
             model.eval()
+            if use_swa and (epoch > swa_start):
+                swa_model.eval()
             with torch.no_grad():
                 validation_step()
                 if log_average_precision:
@@ -702,22 +789,26 @@ if __name__ == "__main__":
             if epoch % epochs_per_save == 0:
                 torch.save(model.state_dict(), os.path.join(model_dir, "model_{}.pt".format(epoch)))
                 torch.save(optimizer.state_dict(), os.path.join(model_dir, "optimizer_{}.pt".format(epoch)))
+                if use_swa and (epoch > swa_start):
+                    torch.save(swa_model.state_dict(), os.path.join(model_dir, "swa_model_{}.pt".format(epoch)))
+                    torch.save(swa_scheduler.state_dict(), os.path.join(model_dir, "swa_scheduler_{}.pt".format(epoch)))
 
             gc.collect()
 
             # adjust learning rate
-            if warmup_steps > 0:
-                warmup_steps -= 1
-                if warmup_steps == 0:
-                    for g in optimizer.param_groups:
-                        g["lr"] = learning_rate
-            else:
-                if use_decay_schedule:
-                    if epoch > 25:
-                        new_rate = learning_rate * 0.98 * np.power(0.9, (epoch - 25)) + learning_rate * 0.02
-                        print("Setting learning rate to {:.5f}".format(new_rate))
+            if not use_swa:
+                if warmup_steps > 0:
+                    warmup_steps -= 1
+                    if warmup_steps == 0:
                         for g in optimizer.param_groups:
-                            g["lr"] = new_rate
+                            g["lr"] = learning_rate
+                else:
+                    if use_decay_schedule:
+                        if epoch > 25:
+                            new_rate = learning_rate * 0.98 * np.power(0.9, (epoch - 25)) + learning_rate * 0.02
+                            print("Setting learning rate to {:.5f}".format(new_rate))
+                            for g in optimizer.param_groups:
+                                g["lr"] = new_rate
 
         print("Training complete! Saving and finalizing...")
     except KeyboardInterrupt:
@@ -728,6 +819,10 @@ if __name__ == "__main__":
     # save model
     torch.save(model.state_dict(), os.path.join(model_dir, "model.pt"))
     torch.save(optimizer.state_dict(), os.path.join(model_dir, "optimizer.pt"))
+    if use_swa:
+        update_SWA_bn(swa_model)
+        torch.save(swa_model.state_dict(), os.path.join(model_dir, "swa_model.pt"))
+        torch.save(swa_scheduler.state_dict(), os.path.join(model_dir, "swa_scheduler.pt"))
 
     # save metrics
     if len(train_history) > 0:
