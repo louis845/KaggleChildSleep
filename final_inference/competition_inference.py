@@ -198,7 +198,8 @@ if __name__ == "__main__":
     gt_events = convert_to_seriesid_events.get_events_per_seriesid("../data/train_events.csv", "../individual_train_series")
 
     predicted_events = {}
-    for series_id in submission["series_id"].unique():
+    all_series_ids = [filename.split(".")[0] for filename in os.listdir("../individual_train_series")]
+    for series_id in all_series_ids:
         series_submission = submission.loc[submission["series_id"] == series_id]
         series_onset = series_submission.loc[series_submission["event"] == "onset"]
         series_wakeup = series_submission.loc[series_submission["event"] == "wakeup"]
@@ -212,8 +213,6 @@ if __name__ == "__main__":
 
     ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance) for tolerance in tolerances]
     ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance) for tolerance in tolerances]
-
-    all_series_ids = [filename.split(".")[0] for filename in os.listdir("../individual_train_series")]
 
     for series_id in all_series_ids:
         # get the ground truth

@@ -125,6 +125,7 @@ class CompetitionModels:
         ctime = time.time()
         onset_kernel_values = None
         wakeup_kernel_values = None
+        num_regression_models = 0
         for regression_model_pkg in self.regression_models:
             # ensemble the kernel values
             model = regression_model_pkg["model"]
@@ -136,6 +137,7 @@ class CompetitionModels:
 
             if models_subset is not None and model_name not in models_subset:
                 continue
+            num_regression_models += 1
 
             with torch.no_grad():
                 preds_raw = model_event_unet.event_regression_inference(model, accel_data, target_multiple=target_multiple, return_torch_tensor=True)
@@ -162,8 +164,8 @@ class CompetitionModels:
                 wakeup_kernel_values += model_wakeup_kernel_preds
 
         # average
-        onset_kernel_values /= len(self.regression_models)
-        wakeup_kernel_values /= len(self.regression_models)
+        onset_kernel_values /= num_regression_models
+        wakeup_kernel_values /= num_regression_models
         kernel_values_computation_time = time.time() - ctime
 
         # get the locations
@@ -199,6 +201,7 @@ class CompetitionModels:
         if iou_averaging:
             ctime = time.time()
             onset_IOU_probas, wakeup_IOU_probas = None, None
+            num_confidence_models = 0
             for confidence_model_pkg in self.confidence_models:
                 model = confidence_model_pkg["model"]
                 model_name = confidence_model_pkg["model_name"]
@@ -209,6 +212,7 @@ class CompetitionModels:
 
                 if models_subset is not None and model_name not in models_subset:
                     continue
+                num_confidence_models += 1
 
                 with torch.no_grad():
                     if use_time_information:
@@ -237,19 +241,25 @@ class CompetitionModels:
                     onset_IOU_probas += model_onset_IOU_probas
                     wakeup_IOU_probas += model_wakeup_IOU_probas
 
-            onset_IOU_probas /= len(self.confidence_models)
-            wakeup_IOU_probas /= len(self.confidence_models)
+            onset_IOU_probas /= num_confidence_models
+            wakeup_IOU_probas /= num_confidence_models
 
             confidence_computation_time = time.time() - ctime
         else:
             ctime = time.time()
             onset_confidence_probas, wakeup_confidence_probas = None, None
+            num_confidence_models = 0
             for confidence_model_pkg in self.confidence_models:
                 model = confidence_model_pkg["model"]
+                model_name = confidence_model_pkg["model_name"]
                 prediction_length = confidence_model_pkg["prediction_length"]
                 expand = confidence_model_pkg["expand"]
                 use_time_information = confidence_model_pkg["use_time_information"]
                 stride_count = confidence_model_pkg["stride_count"]
+
+                if models_subset is not None and model_name not in models_subset:
+                    continue
+                num_confidence_models += 1
 
                 with torch.no_grad():
                     if use_time_information:
@@ -270,8 +280,8 @@ class CompetitionModels:
                 else:
                     onset_confidence_probas += preds[0, :]
                     wakeup_confidence_probas += preds[1, :]
-            onset_confidence_probas /= len(self.confidence_models)
-            wakeup_confidence_probas /= len(self.confidence_models)
+            onset_confidence_probas /= num_confidence_models
+            wakeup_confidence_probas /= num_confidence_models
 
             # convert to IOU score
             onset_IOU_probas = self.iou_converter.convert(onset_confidence_probas)
@@ -286,8 +296,8 @@ class CompetitionModels:
                                                                                 wakeup_IOU_probas, cutoff_thresh=0.01)
         second_postprocessing_time = time.time() - ctime
 
-        avg_kernel_values_time = kernel_values_computation_time / len(self.regression_models)
-        avg_confidence_time = confidence_computation_time / len(self.confidence_models)
+        avg_kernel_values_time = kernel_values_computation_time / num_regression_models
+        avg_confidence_time = confidence_computation_time / num_confidence_models
 
         time_elapsed_performance_metrics = {
             "kernel_values_computation_time": kernel_values_computation_time,

@@ -531,7 +531,7 @@ if __name__ == "__main__":
     parser.add_argument("--second_momentum", type=float, default=0.999, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
     parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use. Default 0.0.")
     parser.add_argument("--optimizer", type=str, default="adam", help="Which optimizer to use. Available options: adam, sgd. Default adam.")
-    parser.add_argument("--epochs_per_save", type=int, default=2, help="Number of epochs between saves. Default 2.")
+    parser.add_argument("--epochs_per_save", type=int, default=1, help="Number of epochs between saves. Default 1.")
     parser.add_argument("--use_standard_model", action="store_true", help="Whether to use the standard model. Default False. This overrides the options below.")
     parser.add_argument("--hidden_blocks", type=int, nargs="+", default=[2, 2, 2, 2, 3],
                         help="Number of hidden 2d blocks for ResNet backbone.")
@@ -693,8 +693,8 @@ if __name__ == "__main__":
     # Create swa model
     if use_swa:
         swa_model = torch.optim.swa_utils.AveragedModel(model)
-        swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, swa_lr=5 * learning_rate, anneal_strategy="linear", anneal_epochs=5)
-        swa_start = 20
+        swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, swa_lr=10.0 * learning_rate, anneal_strategy="linear", anneal_epochs=5)
+        swa_start = 3
 
     model_config = {
         "model": "Unet with attention segmentation",
@@ -790,6 +790,9 @@ if __name__ == "__main__":
             model.train()
             print("Running {} extra steps of gradient descent.".format(num_extra_steps))
             for k in range(num_extra_steps):
+                if use_swa and epoch > swa_start:
+                    swa_model.update_parameters(model)
+                    swa_scheduler.step()
                 training_step(record=False)
 
             print("Running the usual step of gradient descent.")
@@ -806,8 +809,7 @@ if __name__ == "__main__":
             if use_swa and epoch > swa_start:
                 swa_model.update_parameters(model)
                 swa_scheduler.step()
-                if (epoch - swa_start) % 3 == 0:
-                    update_SWA_bn(swa_model)
+                update_SWA_bn(swa_model)
 
             # switch model to eval mode, and fix all running stats for batchnorm layers
             model.eval()
