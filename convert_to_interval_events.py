@@ -4,20 +4,24 @@ import pandas as pd
 import bad_series_list
 import transform_elastic_deformation
 
-def create_regression_range(mask: np.ndarray, values: np.ndarray, event_type: int, location: int, window_radius: int):
-    assert mask.shape == values.shape, "mask and values must have the same shape"
-    assert event_type in [0, 1], "event_type must be 0 or 1"
-    assert mask.shape[0] == 2
+def set_kernel_range(arr, idx, loc, kernel_shape, kernel_radius):
+    assert kernel_shape in ["gaussian", "laplace"]
 
-    window_max = location + window_radius + 1
-    window_min = location - window_radius
-    window_max = min(window_max, mask.shape[1])
-    window_min = max(window_min, 0)
+    if kernel_shape == "gaussian":
+        replace_radius = 3 * kernel_radius
+    elif kernel_shape == "laplace":
+        replace_radius = 5 * kernel_radius
 
-    mask[event_type, window_min:window_max] = 1.0
-    min_val = window_min - location
-    max_val = window_max - location
-    values[event_type, window_min:window_max] = np.arange(min_val, max_val)
+    replace_start = max(0, loc - replace_radius)
+    replace_end = min(arr.shape[1], loc + replace_radius + 1)
+
+    if kernel_shape == "gaussian":
+        kernel = np.exp(-np.square(np.arange(replace_start - loc, replace_end - loc, dtype=np.float32) / kernel_radius))
+    elif kernel_shape == "laplace":
+        kernel = np.exp(-np.abs(np.arange(replace_start - loc, replace_end - loc, dtype=np.float32) / kernel_radius))
+
+    arr[idx, replace_start:replace_end] = kernel
+
 
 def get_first_day_step(naive_all_data, series_id):
     hours = naive_all_data[series_id]["hours"]
@@ -82,7 +86,9 @@ class IntervalEventsSampler:
 
     def sample_single(self, index: int, random_shift: int=0, flip: bool=False, vflip=False, expand: int=0,
                       elastic_deformation=False, v_elastic_deformation=False, randomly_augment_time=False,
-                      randomly_dropout_expanded_parts=False):
+                      randomly_dropout_expanded_parts=False,
+
+                      kernel_mode="constant"):
         # index denotes the index in self.all_segmentations_list
         # vflip and v_elastic_deformation is applied to anglez only, not to enmo
         # returns (accel_data, event_segmentations), where event_segmentations[0, :] is onset, and event_segmentations[1, :] is wakeup
@@ -166,7 +172,7 @@ class IntervalEventsSampler:
         if (vflip or v_elastic_deformation) and (not elastic_deformation):
             accel_data = accel_data.copy()
         event_segmentations = np.zeros((2, end - start + 2 * expand), dtype=np.float32)
-        event_tolerance_width = 30 * 12 - 1
+        event_tolerance_width = 30 * 12
         for event in grouped_events:
             onset = (int(event["onset"] - start + expand)) if event["onset"] is not None else None
             wakeup = (int(event["wakeup"] - start + expand)) if event["wakeup"] is not None else None
@@ -179,12 +185,18 @@ class IntervalEventsSampler:
                 onset, wakeup = wakeup, onset
             if onset is not None:
                 if (not dropout_expanded_parts) or (onset >= left_dropout and onset <= (end - start + 2 * expand - right_dropout)):
-                    event_segmentations[0, max(0, onset - event_tolerance_width):min(event_segmentations.shape[1],
-                                                                                     onset + event_tolerance_width + 1)] = 1.0
+                    if kernel_mode == "constant":
+                        event_segmentations[0, max(0, onset - event_tolerance_width):min(event_segmentations.shape[1],
+                                                                                         onset + event_tolerance_width + 1)] = 1.0
+                    else:
+                        set_kernel_range(event_segmentations, 0, onset, kernel_mode, kernel_radius=event_tolerance_width)
             if wakeup is not None:
                 if (not dropout_expanded_parts) or (wakeup >= left_dropout and wakeup <= (end - start + 2 * expand - right_dropout)):
-                    event_segmentations[1, max(0, wakeup - event_tolerance_width):min(event_segmentations.shape[1],
-                                                                                      wakeup + event_tolerance_width + 1)] = 1.0
+                    if kernel_mode == "constant":
+                        event_segmentations[1, max(0, wakeup - event_tolerance_width):min(event_segmentations.shape[1],
+                                                                                          wakeup + event_tolerance_width + 1)] = 1.0
+                    else:
+                        set_kernel_range(event_segmentations, 1, wakeup, kernel_mode, kernel_radius=event_tolerance_width)
         if elastic_deformation:
             accel_data = transform_elastic_deformation.deform_time_series(accel_data, deformation_indices)
         if vflip:
@@ -214,7 +226,9 @@ class IntervalEventsSampler:
         return accel_data, event_segmentations, time
 
     def sample(self, batch_size: int, random_shift: int=0, random_flip: bool=False, always_flip: bool=False, random_vflip=False, expand: int=0,
-               elastic_deformation=False, v_elastic_deformation=False, randomly_dropout_expanded_parts=False):
+               elastic_deformation=False, v_elastic_deformation=False, randomly_dropout_expanded_parts=False, kernel_mode="constant"):
+        assert kernel_mode in ["constant", "gaussian", "laplace"]
+
         assert self.shuffle_indices is not None, "shuffle_indices is None, call shuffle() first"
 
         accel_datas = []
@@ -233,7 +247,8 @@ class IntervalEventsSampler:
                 vflip = np.random.randint(0, 2) == 1
 
             accel_data, event_segmentation, time = self.sample_single(self.shuffle_indices[k], random_shift=random_shift, flip=flip, vflip=vflip, expand=expand, elastic_deformation=elastic_deformation,
-                                                                      v_elastic_deformation=v_elastic_deformation, randomly_augment_time=self.train_or_test == "train", randomly_dropout_expanded_parts=randomly_dropout_expanded_parts)
+                                                                      v_elastic_deformation=v_elastic_deformation, randomly_augment_time=self.train_or_test == "train",
+                                                                      randomly_dropout_expanded_parts=randomly_dropout_expanded_parts, kernel_mode=kernel_mode)
             accel_datas.append(accel_data)
             event_segmentations.append(event_segmentation)
             times.append(time)
