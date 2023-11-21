@@ -54,5 +54,5 @@ if __name__ == "__main__":
             # best model (pick early stopped best epoch)
             val_metrics = pd.read_csv(os.path.join(model_dir, "val_metrics.csv"), index_col=0)
             val_mAP = val_metrics["val_onset_mAP"] + val_metrics["val_wakeup_mAP"]
-            best_model_idx = int(val_mAP.iloc[:30].idxmax())
+            best_model_idx = int(val_mAP.idxmax())
             shutil.copy(os.path.join(model_dir, "swa_model_{}.pt".format(best_model_idx)), os.path.join(out_folder, model_name + "_best.pt"))

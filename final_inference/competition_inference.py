@@ -28,7 +28,11 @@ class CompetitionInference:
         self.input_pq_file = input_pq_file
         self.models_callable = models_callable
 
-    def inference_all(self, out_file_path, log_debug=False, show_tqdm_bar=False, model_filter=None):
+    def inference_all(self, out_file_path, log_debug=False, show_tqdm_bar=False, model_filter=None, cache=False):
+        if cache:
+            if not os.path.isdir("cache"):
+                os.mkdir("cache")
+
         # Create output file
         out_file = open(out_file_path, "w")
         row_id = 0
@@ -53,17 +57,29 @@ class CompetitionInference:
         ctime2 = time.time()
         for series_id in series_ids:
             ctime = time.time()
-            df = pd.read_parquet(self.input_pq_file, columns=["step", "timestamp", "anglez"],
-                                 filters=[("series_id", "==", series_id)])
+            if cache and os.path.isfile("cache/{}.npy".format(series_id)):
+                accel_data = np.load("cache/{}.npy".format(series_id))
+                secs_corr = np.load("cache/{}_secs.npy".format(series_id))
+                mins_corr = np.load("cache/{}_mins.npy".format(series_id))
+                hours_corr = np.load("cache/{}_hours.npy".format(series_id))
+            else:
+                df = pd.read_parquet(self.input_pq_file, columns=["step", "timestamp", "anglez"],
+                                     filters=[("series_id", "==", series_id)])
 
-            accel_data = np.expand_dims(df["anglez"].to_numpy(dtype=np.float32) / 35.52, axis=0) # shape (1, T)
-            timestamps = pd.to_datetime(df["timestamp"]).apply(lambda dt: dt.tz_localize(None))
+                accel_data = np.expand_dims(df["anglez"].to_numpy(dtype=np.float32) / 35.52, axis=0) # shape (1, T)
+                timestamps = pd.to_datetime(df["timestamp"]).apply(lambda dt: dt.tz_localize(None))
 
-            secs = timestamps.dt.second.to_numpy(dtype=np.float32)
-            mins = timestamps.dt.minute.to_numpy(dtype=np.float32)
-            hours = timestamps.dt.hour.to_numpy(dtype=np.float32)
+                secs = timestamps.dt.second.to_numpy(dtype=np.float32)
+                mins = timestamps.dt.minute.to_numpy(dtype=np.float32)
+                hours = timestamps.dt.hour.to_numpy(dtype=np.float32)
 
-            secs_corr, mins_corr, hours_corr = correct_time(secs, mins, hours)
+                secs_corr, mins_corr, hours_corr = correct_time(secs, mins, hours)
+
+                if cache:
+                    np.save("cache/{}.npy".format(series_id), accel_data)
+                    np.save("cache/{}_secs.npy".format(series_id), secs_corr)
+                    np.save("cache/{}_mins.npy".format(series_id), mins_corr)
+                    np.save("cache/{}_hours.npy".format(series_id), hours_corr)
             preprocessing_time = time.time() - ctime
 
             # Call the series inference callable
@@ -154,7 +170,8 @@ if __name__ == "__main__":
     # Load the data and run inference
     competition_inference = CompetitionInference(input_pq_file=input_pq_file,
                                                     models_callable=models_callable)
-    competition_inference.inference_all(out_file_path=out_file_path, log_debug=True, show_tqdm_bar=True, model_filter=model_filter_func)
+    competition_inference.inference_all(out_file_path=out_file_path, log_debug=True, show_tqdm_bar=True, model_filter=model_filter_func,
+                                        cache=True)
 
     # Done. Garbage collect
     gc.collect()

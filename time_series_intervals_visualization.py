@@ -1,5 +1,6 @@
 import sys
 import os
+
 import pandas as pd
 import numpy as np
 from PySide2.QtWidgets import QApplication, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QListWidget, QSplitter, QSlider, QLabel
@@ -7,6 +8,7 @@ from PySide2.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+import stumpy
 
 
 class MatplotlibWidget(QWidget):
@@ -26,26 +28,30 @@ class MatplotlibWidget(QWidget):
         self.min_y = -10.0
 
 
-    def plot_data(self, title, anglez, enmo, extras, timestamp, events, start_loc):
+    def plot_data(self, title, anglez, enmo, matrix_profile, extras, timestamp, events, start_loc, is_profile=False):
         end_loc = start_loc + len(anglez)
 
         self.axis.clear()
         x = pd.to_datetime(timestamp)  # Automatically parses the timestamp
-        y1 = anglez / 35.52 # std computed by check_series_properties.py
-        y2 = enmo / 0.1018 # std computed by check_series_properties.py
         self.axis.set_ylim([self.min_y, self.max_y])
-        self.axis.plot(x, y1, label="anglez")
-        self.axis.plot(x, y2, label="enmo")
-        #self.axis.plot(x, extras["onset"] / 100.0, label="onset")
-        #self.axis.plot(x, extras["wakeup"] / 100.0, label="wakeup")
-        #self.axis.plot(x, extras["onset_kernel"], label="onset_kernel")
-        #self.axis.plot(x, extras["wakeup_kernel"], label="wakeup_kernel")
-        #self.axis.plot(x, extras["onset_conf"] * 10.0, label="onset_conf") # easier viewing
-        #self.axis.plot(x, extras["wakeup_conf"] * 10.0, label="wakeup_conf")
-        self.axis.plot(x, extras["onset_IOU_conf"] * 10.0, label="onset_IOU_conf")  # easier viewing
-        self.axis.plot(x, extras["wakeup_IOU_conf"] * 10.0, label="wakeup_IOU_conf")
-        self.axis.plot(x, extras["onset_IOU_conf2"] * 10.0, label="onset_IOU_conf2")
-        self.axis.plot(x, extras["wakeup_IOU_conf2"] * 10.0, label="wakeup_IOU_conf2")
+
+        if is_profile:
+            self.axis.plot(x, matrix_profile, label="matrix_profile")
+        else:
+            y1 = anglez / 35.52  # std computed by check_series_properties.py
+            y2 = enmo / 0.1018  # std computed by check_series_properties.py
+            self.axis.plot(x, y1, label="anglez")
+            self.axis.plot(x, y2, label="enmo")
+            #self.axis.plot(x, extras["onset"] / 100.0, label="onset")
+            #self.axis.plot(x, extras["wakeup"] / 100.0, label="wakeup")
+            #self.axis.plot(x, extras["onset_kernel"], label="onset_kernel")
+            #self.axis.plot(x, extras["wakeup_kernel"], label="wakeup_kernel")
+            #self.axis.plot(x, extras["onset_conf"] * 10.0, label="onset_conf") # easier viewing
+            #self.axis.plot(x, extras["wakeup_conf"] * 10.0, label="wakeup_conf")
+            self.axis.plot(x, extras["onset_IOU_conf"] * 10.0, label="onset_IOU_conf")  # easier viewing
+            self.axis.plot(x, extras["wakeup_IOU_conf"] * 10.0, label="wakeup_IOU_conf")
+            self.axis.plot(x, extras["onset_IOU_conf2"] * 10.0, label="onset_IOU_conf2")
+            self.axis.plot(x, extras["wakeup_IOU_conf2"] * 10.0, label="wakeup_IOU_conf2")
 
         for event_time, event_type in events:
             color = "blue" if event_type in [1, 3, 4] else "red"
@@ -87,6 +93,7 @@ class MainWidget(QWidget):
         self.main_layout = QVBoxLayout(self.main_widget)
 
         self.display_widget = MatplotlibWidget()
+        self.profile_widget = MatplotlibWidget()
 
         self.labels_widget = QWidget()
         self.labels_layout = QHBoxLayout(self.labels_widget)
@@ -104,6 +111,7 @@ class MainWidget(QWidget):
         self.selection_slider.setMaximum(10)
 
         self.main_layout.addWidget(self.display_widget)
+        self.main_layout.addWidget(self.profile_widget)
         self.main_layout.addWidget(self.labels_widget)
         self.main_layout.addWidget(self.selection_slider)
 
@@ -126,6 +134,7 @@ class MainWidget(QWidget):
         self.preloaded_intervals.clear()
 
         anglez, enmo, timestamp, extras = load_file(series_id)
+        matrix_profile = stumpy.stump(anglez.to_numpy(dtype=np.float64) / 35.52, 4320)[:, 0]
 
         total_length = len(anglez)
         stride = total_length // (total_length // 2160)
@@ -161,6 +170,7 @@ class MainWidget(QWidget):
             interval_anglez = anglez.iloc[start:end]
             interval_enmo = enmo.iloc[start:end]
             interval_timestamp = timestamp.iloc[start:end]
+            interval_matrix_profile = matrix_profile[start:end]
             local_extras = {}
             for key, value in extras.items():
                 if "_locs" not in key:
@@ -169,7 +179,7 @@ class MainWidget(QWidget):
                     local_extras[key] = value[np.searchsorted(value, start, side="left"):np.searchsorted(value, end, side="left")] - start
                     assert np.all(local_extras[key] >= 0) and np.all(local_extras[key] < end - start)
 
-            self.preloaded_intervals.append((series_id, start, end, interval_anglez, interval_enmo, local_extras, interval_timestamp, events))
+            self.preloaded_intervals.append((series_id, start, end, interval_anglez, interval_enmo, interval_matrix_profile, local_extras, interval_timestamp, events))
 
             k += stride
 
@@ -187,6 +197,16 @@ class MainWidget(QWidget):
 
         self.display_widget.min_y = min_y
         self.display_widget.max_y = max_y
+
+        # Set fixed height for matrix profile
+        min_y = matrix_profile.min()
+        max_y = matrix_profile.max()
+        length = max_y - min_y
+        min_y -= length * 0.1
+        max_y += length * 0.1
+
+        self.profile_widget.min_y = min_y
+        self.profile_widget.max_y = max_y
 
     def left_button_clicked(self):
         if self.preloaded_intervals is None:
@@ -208,8 +228,9 @@ class MainWidget(QWidget):
 
         selected_index = self.selection_slider.value()
         self.series_label.setText(str(selected_index))
-        series_id, start, end, anglez, enmo, extras, timestamp, events = self.preloaded_intervals[selected_index]
-        self.display_widget.plot_data(series_id, anglez, enmo, extras, timestamp, events, start)
+        series_id, start, end, anglez, enmo, matrix_profile, extras, timestamp, events = self.preloaded_intervals[selected_index]
+        self.display_widget.plot_data(series_id, anglez, enmo, matrix_profile, extras, timestamp, events, start)
+        self.profile_widget.plot_data(series_id, anglez, enmo, matrix_profile, extras, timestamp, events, start, is_profile=True)
 
 def load_file(item):
     filename = "./individual_train_series/" + item + ".parquet"
