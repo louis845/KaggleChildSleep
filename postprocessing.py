@@ -1,5 +1,18 @@
 import numpy as np
 
+def find_closest(Z: np.ndarray, x: np.ndarray):
+    """Given Z and x, find the indices i(j) such that Z[i(j)] is the closest element to x[j]"""
+    # find the indices i such that Z[i] is the first element greater than or equal to x
+    i = np.searchsorted(Z, x)
+    # Handle cases where x[j] is greater than all elements in Z
+    i[i == len(Z)] = len(Z) - 1
+    # For all locations (i > 0), if x[j] is closer to Z[i - 1] than Z[i], decrement i
+    # Note that when i = 0, then Z[i - 1] would be the last element, which doesn't make sense.
+    # But it will be masked out by the mask anyway.
+    mask = (i > 0) & ((np.abs(Z[i - 1] - x) <= np.abs(Z[i] - x)))
+    i[mask] -= 1
+    return i
+
 def prune(event_locs, event_vals, pruning_radius):
     # assumes the indices (event_locs) are sorted
     # event locs same length as event vals, prunes event locs according to radius
@@ -53,12 +66,38 @@ def remove_short_gaps(start_indices, end_indices, gap_threshold=10):
     end_indices = end_indices[np.concatenate([good, [True]])]
     return start_indices, end_indices
 
+def compute_distances(probas_array, cutoff, locs_array):
+    # The "good" locations are probas_array > cutoff.
+    # For each element in locs_array, find the closest "good" location, and compute the distance
+    good_locations = probas_array > cutoff
+    good_locs_edge_start, good_locs_edge_end = edges_detect(good_locations)
+
+    locs_is_good = good_locations[locs_array]
+    locs_start_diff = np.abs(locs_array - good_locs_edge_start[find_closest(good_locs_edge_start, locs_array)])
+    locs_end_diff = np.abs(locs_array - good_locs_edge_end[find_closest(good_locs_edge_end, locs_array)] + 1)
+    locs_diff = np.minimum(locs_start_diff, locs_end_diff)
+
+    return np.where(locs_is_good, 0, locs_diff)
+
+
 def index_probas_distance_based(locs, pred_probas, proba_threshold: float, dropoff_factor: float,
-                                preds_above_threshold: np.ndarray=None):
-    if preds_above_threshold is None:
-        preds_above_threshold = pred_probas >= proba_threshold
+                                prev_run_info: tuple=None):
+    # index pred_probas with locs, but also make it distance aware
+    if prev_run_info is None:
+        preds_above_threshold = pred_probas > proba_threshold
+        preds_above_edge_start, preds_above_edge_end = edges_detect(preds_above_threshold)
+    else:
+        preds_above_threshold, preds_above_edge_start, preds_above_edge_end = prev_run_info
 
+    locs_is_above_threshold = preds_above_threshold[locs]
+    locs_start_diff = np.abs(locs - preds_above_edge_start[find_closest(preds_above_edge_start, locs)])
+    locs_end_diff = np.abs(locs - preds_above_edge_end[find_closest(preds_above_edge_end, locs)] + 1)
+    locs_diff = np.minimum(locs_start_diff, locs_end_diff)
 
+    original_index_probas = pred_probas[locs]
+    locs_dropoff_probas = original_index_probas * np.exp(-locs_diff / dropoff_factor)
+
+    return np.where(locs_is_above_threshold, original_index_probas, locs_dropoff_probas)
 
 def compute_first_zero(series_secs):
     return np.argwhere(series_secs == 0).flatten()[0]

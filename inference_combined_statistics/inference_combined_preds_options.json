@@ -212,5 +212,35 @@
     "name": "3Length Time 2Length Ensemble (Both, Best)",
     "conf_results": ["event5fold_both_3length_best", "event5fold_time_2length_best"],
     "out_folder": "event5fold_3length_time_2length_both_best"
+  },
+  {
+    "name": "3Length (SWA, Best)",
+    "conf_results": ["event5fold_swa_3length_best"],
+    "out_folder": "event5fold_swa_3length_best"
+  },
+  {
+    "name": "Time 2Length (SWA, Best)",
+    "conf_results": ["event5fold_swa_time_2length_best"],
+    "out_folder": "event5fold_swa_time_2length_best"
+  },
+  {
+    "name": "3Length Time 2Length Ensemble (SWA, Best)",
+    "conf_results": ["event5fold_swa_3length_best", "event5fold_swa_time_2length_best"],
+    "out_folder": "event5fold_swa_3length_time_2length_best"
+  },
+  {
+    "name": "3Length (SWA, More Stride, Best)",
+    "conf_results": ["event5fold_swa_3length_ms_best"],
+    "out_folder": "event5fold_swa_3length_ms_best"
+  },
+  {
+    "name": "Time 2Length (SWA, More Stride, Best)",
+    "conf_results": ["event5fold_swa_time_2length_ms_best"],
+    "out_folder": "event5fold_swa_time_2length_ms_best"
+  },
+  {
+    "name": "3Length Time 2Length Ensemble (SWA, More Stride, Best)",
+    "conf_results": ["event5fold_swa_3length_ms_best", "event5fold_swa_time_2length_ms_best"],
+    "out_folder": "event5fold_swa_3length_time_2length_ms_best"
   }
 ]

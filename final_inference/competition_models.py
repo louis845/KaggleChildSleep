@@ -27,7 +27,8 @@ class CompetitionModels:
                 "hidden_channels": [4, 4, 8, 16, 32],
                 "pred_width": 120,
                 "kernel_size": 9,
-                "use_sigmas": False
+                "use_sigmas": False,
+                "use_swa": False
             }
             if "hidden_blocks" in cfg:
                 regression_cfg["hidden_blocks"] = cfg["hidden_blocks"]
@@ -37,6 +38,8 @@ class CompetitionModels:
                 regression_cfg["pred_width"] = cfg["pred_width"]
             if "use_sigmas" in cfg:
                 regression_cfg["use_sigmas"] = cfg["use_sigmas"]
+            if "use_swa" in cfg:
+                regression_cfg["use_swa"] = cfg["use_swa"]
             regression_cfg["model_name"] = cfg["model_name"]
 
             blocks_length = len(regression_cfg["hidden_blocks"])
@@ -46,6 +49,8 @@ class CompetitionModels:
                                                         blocks=regression_cfg["hidden_blocks"],
                                                         hidden_channels=regression_cfg["hidden_channels"])
             model.to(self.device)
+            if regression_cfg["use_swa"]:
+                model = torch.optim.swa_utils.AveragedModel(model)
             model.load_state_dict(torch.load(os.path.join(self.models_root_dir,
                                                           "{}.pt".format(regression_cfg["model_name"])
                                                           ), weights_only=True, map_location=self.device))
@@ -57,6 +62,7 @@ class CompetitionModels:
                 "pred_width": regression_cfg["pred_width"],
                 "kernel_size": regression_cfg["kernel_size"],
                 "use_sigmas": regression_cfg["use_sigmas"],
+                "use_swa": regression_cfg["use_swa"],
                 "target_multiple": target_multiple
             }
 
@@ -69,7 +75,8 @@ class CompetitionModels:
                 "attention_mode": "length",
                 "stride_count": 4,
                 "use_time_information": False,
-                "expand": 8640
+                "expand": 8640,
+                "use_swa": False
             }
 
             if "attention_blocks" in cfg:
@@ -82,6 +89,8 @@ class CompetitionModels:
                 confidence_cfg["use_time_information"] = cfg["use_time_information"]
             if "expand" in cfg:
                 confidence_cfg["expand"] = cfg["expand"]
+            if "use_swa" in cfg:
+                confidence_cfg["use_swa"] = cfg["use_swa"]
             confidence_cfg["model_name"] = cfg["model_name"]
 
             model = model_event_unet.EventConfidenceUnet(in_channels=1, # we use anglez only
@@ -90,6 +99,8 @@ class CompetitionModels:
                                                          use_time_input=confidence_cfg["use_time_information"],
                                                          expected_attn_input_length=17280 + 2 * confidence_cfg["expand"])
             model.to(self.device)
+            if confidence_cfg["use_swa"]:
+                model = torch.optim.swa_utils.AveragedModel(model)
             model.load_state_dict(torch.load(os.path.join(self.models_root_dir,
                                                           "{}.pt".format(confidence_cfg["model_name"])
                                                           ), weights_only=True, map_location=self.device))
@@ -101,6 +112,7 @@ class CompetitionModels:
                 "prediction_length": 17280,
                 "expand": confidence_cfg["expand"],
                 "use_time_information": confidence_cfg["use_time_information"],
+                "use_swa": confidence_cfg["use_swa"],
                 "stride_count": confidence_cfg["stride_count"]
             }
 
@@ -140,7 +152,8 @@ class CompetitionModels:
             num_regression_models += 1
 
             with torch.no_grad():
-                preds_raw = model_event_unet.event_regression_inference(model, accel_data, target_multiple=target_multiple, return_torch_tensor=True)
+                preds_raw = model_event_unet.event_regression_inference(model, accel_data, target_multiple=target_multiple, return_torch_tensor=True,
+                                                                        device=self.device, use_learnable_sigma=use_sigmas)
                 if use_sigmas:
                     model_onset_kernel_preds = kernel_utils.generate_kernel_preds_sigma_gpu(preds_raw[0, :], sigmas_array=preds_raw[2, :],
                                                                                             device=self.device,
@@ -225,7 +238,9 @@ class CompetitionModels:
                                                                         prediction_length=prediction_length,
                                                                         expand=expand, times=times,
                                                                         stride_count=stride_count,
-                                                                        flip_augmentation=False)
+                                                                        flip_augmentation=False,
+                                                                        use_time_input=use_time_information,
+                                                                        device=self.device)
 
                 onset_confidence_probas = preds[0, :]
                 wakeup_confidence_probas = preds[1, :]
@@ -272,7 +287,9 @@ class CompetitionModels:
                                                                         prediction_length=prediction_length,
                                                                         expand=expand, times=times,
                                                                         stride_count=stride_count,
-                                                                        flip_augmentation=False)
+                                                                        flip_augmentation=False,
+                                                                        use_time_input=use_time_information,
+                                                                        device=self.device)
 
                 if onset_confidence_probas is None:
                     onset_confidence_probas = preds[0, :]

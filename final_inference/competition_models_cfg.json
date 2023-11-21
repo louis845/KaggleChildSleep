@@ -129,64 +129,74 @@
   ],
   "confidence_models": [
     {
-      "model_name": "event5fold_2elastic_length3_drop_model_fold1_best",
+      "model_name": "event5fold_swa_2elastic_length3_drop_model_fold1_best",
       "attention_blocks": 3,
       "stride_count": 4,
-      "use_time_information": false
+      "use_time_information": false,
+      "use_swa": true
     },
     {
-      "model_name": "event5fold_2elastic_length2_time_drop_model_fold1_best",
+      "model_name": "event5fold_swa_2elastic_length2_time_drop_model_fold1_best",
       "attention_blocks": 2,
       "stride_count": 4,
-      "use_time_information": true
+      "use_time_information": true,
+      "use_swa": true
     },
     {
-      "model_name": "event5fold_2elastic_length3_drop_model_fold2_best",
+      "model_name": "event5fold_swa_2elastic_length3_drop_model_fold2_best",
       "attention_blocks": 3,
       "stride_count": 4,
-      "use_time_information": false
+      "use_time_information": false,
+      "use_swa": true
     },
     {
-      "model_name": "event5fold_2elastic_length2_time_drop_model_fold2_best",
+      "model_name": "event5fold_swa_2elastic_length2_time_drop_model_fold2_best",
       "attention_blocks": 2,
       "stride_count": 4,
-      "use_time_information": true
+      "use_time_information": true,
+      "use_swa": true
     },
     {
-      "model_name": "event5fold_2elastic_length3_drop_model_fold3_best",
+      "model_name": "event5fold_swa_2elastic_length3_drop_model_fold3_best",
       "attention_blocks": 3,
       "stride_count": 4,
-      "use_time_information": false
+      "use_time_information": false,
+      "use_swa": true
     },
     {
-      "model_name": "event5fold_2elastic_length2_time_drop_model_fold3_best",
+      "model_name": "event5fold_swa_2elastic_length2_time_drop_model_fold3_best",
       "attention_blocks": 2,
       "stride_count": 4,
-      "use_time_information": true
+      "use_time_information": true,
+      "use_swa": true
     },
     {
-      "model_name": "event5fold_2elastic_length3_drop_model_fold4_best",
+      "model_name": "event5fold_swa_2elastic_length3_drop_model_fold4_best",
       "attention_blocks": 3,
       "stride_count": 4,
-      "use_time_information": false
+      "use_time_information": false,
+      "use_swa": true
     },
     {
-      "model_name": "event5fold_2elastic_length2_time_drop_model_fold4_best",
+      "model_name": "event5fold_swa_2elastic_length2_time_drop_model_fold4_best",
       "attention_blocks": 2,
       "stride_count": 4,
-      "use_time_information": true
+      "use_time_information": true,
+      "use_swa": true
     },
     {
-      "model_name": "event5fold_2elastic_length3_drop_model_fold5_best",
+      "model_name": "event5fold_swa_2elastic_length3_drop_model_fold5_best",
       "attention_blocks": 3,
       "stride_count": 4,
-      "use_time_information": false
+      "use_time_information": false,
+      "use_swa": true
     },
     {
-      "model_name": "event5fold_2elastic_length2_time_drop_model_fold5_best",
+      "model_name": "event5fold_swa_2elastic_length2_time_drop_model_fold5_best",
       "attention_blocks": 2,
       "stride_count": 4,
-      "use_time_information": true
+      "use_time_information": true,
+      "use_swa": true
     }
   ]
 }
