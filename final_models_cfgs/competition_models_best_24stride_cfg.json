@@ -1,4 +1,5 @@
 {
+  "iou_averaging": true,
   "regression_models": [
     {
       "model_name": "regress_combined_model",
