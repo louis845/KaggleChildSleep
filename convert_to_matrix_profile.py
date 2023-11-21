@@ -40,6 +40,8 @@ if __name__ == "__main__":
         log_file.flush()
         all_times.append(time_elapsed)
 
+        time.sleep(180)
+
     log_file.write("Average Time Elapsed: {:.2f}s\n".format(np.mean(all_times)))
     log_file.write("Median Time Elapsed: {:.2f}s\n".format(np.median(all_times)))
     log_file.close()

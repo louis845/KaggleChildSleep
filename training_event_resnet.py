@@ -770,7 +770,7 @@ if __name__ == "__main__":
             if use_swa and (epoch > swa_start):
                 swa_model.update_parameters(model)
                 swa_scheduler.step()
-                if (epoch - swa_start) % 3 == 0:
+                if ((epoch - swa_start) % 3 == 0) and not args.train_all:
                     update_SWA_bn(swa_model)
 
             # switch model to eval mode
