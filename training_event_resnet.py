@@ -116,7 +116,7 @@ def training_step(record: bool):
                 training_sampler.sample(batch_size, random_shift=random_shift,
                                         random_flip=random_flip, random_vflip=flip_value, always_flip=always_flip,
                                         expand=expand, elastic_deformation=use_elastic_deformation, v_elastic_deformation=use_velastic_deformation,
-                                        randomly_dropout_expanded_parts=random_exp_dropout)
+                                        randomly_dropout_expanded_parts=random_exp_dropout, kernel_mode=prediction_kernel_mode)
             assert labels_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(labels_batch.shape)
             assert accel_data_batch.shape[-1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(accel_data_batch.shape)
 
@@ -288,20 +288,18 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
             else:
                 times = None
 
-            if use_swa and (epoch > swa_start):
-                proba_preds = model_event_unet.event_confidence_inference(model=use_model, time_series=accel_data,
-                                                                          batch_size=batch_size * 5,
-                                                                          prediction_length=prediction_length,
-                                                                          expand=expand, times=times,
-                                                                          device=config.device,
-                                                                          use_time_input=use_time_information)
+            proba_preds = model_event_unet.event_confidence_inference(model=use_model, time_series=accel_data,
+                                                                      batch_size=batch_size * 5,
+                                                                      prediction_length=prediction_length,
+                                                                      expand=expand, times=times,
+                                                                      device=config.device,
+                                                                      use_time_input=use_time_information)
+            if prediction_kernel_mode == "constant":
+                onset_IOU_probas = iou_score_converter.convert(proba_preds[0, :])
+                wakeup_IOU_probas = iou_score_converter.convert(proba_preds[1, :])
             else:
-                proba_preds = model_event_unet.event_confidence_inference(model=use_model, time_series=accel_data,
-                                                                        batch_size=batch_size * 5,
-                                                                        prediction_length=prediction_length,
-                                                                        expand=expand, times=times)
-            onset_IOU_probas = iou_score_converter.convert(proba_preds[0, :])
-            wakeup_IOU_probas = iou_score_converter.convert(proba_preds[1, :])
+                onset_IOU_probas = proba_preds[0, :]
+                wakeup_IOU_probas = proba_preds[1, :]
 
             # load the regression predictions
             preds_locs = predicted_events[series_id]
@@ -390,7 +388,8 @@ def update_SWA_bn(swa_model):
                                             random_flip=random_flip, random_vflip=flip_value, always_flip=always_flip,
                                             expand=expand, elastic_deformation=use_elastic_deformation,
                                             v_elastic_deformation=use_velastic_deformation,
-                                            randomly_dropout_expanded_parts=random_exp_dropout)
+                                            randomly_dropout_expanded_parts=random_exp_dropout,
+                                            kernel_mode=prediction_kernel_mode)
                 assert labels_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(
                     labels_batch.shape)
                 assert accel_data_batch.shape[-1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(
@@ -462,10 +461,12 @@ if __name__ == "__main__":
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
     parser.add_argument("--use_swa", action="store_true", help="Whether to use SWA. Default False.")
+    parser.add_argument("--swa_start", type=int, default=10, help="Epoch to start SWA. Default 10.")
     parser.add_argument("--mix_anglez_enmo", action="store_true", help="Whether to mix anglez and enmo. Default False.")
     parser.add_argument("--exclude_bad_series_from_training", action="store_true", help="Whether to exclude bad series from training. Default False.")
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
     parser.add_argument("--prediction_stride", type=int, default=4320, help="Number of timesteps to stride when predicting. Default 4320.")
+    parser.add_argument("--prediction_kernel_mode", type=str, default="constant", help="Kernel mode for prediction. Default 'constant'. Must be constant, gaussian, laplace.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     parser.add_argument("--log_average_precision", action="store_false", help="Whether to log the average precision. Default True.")
@@ -526,10 +527,12 @@ if __name__ == "__main__":
     use_anglez_only = args.use_anglez_only
     use_enmo_only = args.use_enmo_only
     use_swa = args.use_swa
+    swa_start = args.swa_start
     mix_anglez_enmo = args.mix_anglez_enmo
     exclude_bad_series_from_training = args.exclude_bad_series_from_training
     prediction_length = args.prediction_length
     prediction_stride = args.prediction_stride
+    prediction_kernel_mode = args.prediction_kernel_mode
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
     log_average_precision = args.log_average_precision
@@ -538,6 +541,7 @@ if __name__ == "__main__":
     assert sum([use_anglez_only, use_enmo_only, mix_anglez_enmo]) <= 1, "Cannot use more than one of anglez only, enmo only, and mix anglez and enmo."
     assert not (use_time_information and random_flip), "Cannot use time information and random flip at the same time."
     assert not (use_swa and use_decay_schedule), "Cannot use SWA and decay schedule at the same time."
+    assert prediction_kernel_mode in ["constant", "gaussian", "laplace"], "Invalid prediction kernel mode {}.".format(prediction_kernel_mode)
     # all      - predict all parts of the interval, events only happen in the center, and the expanded parts will be predicted as negative (for both training and validation)
     # center   - predict only the center parts of the interval. No optimization and predictions will be made for the expanded parts (for both training and validation)
     # expanded - use the entire interval (expanded parts included) for optimization, and only the center part for prediction (validation)
@@ -637,7 +641,7 @@ if __name__ == "__main__":
     if use_swa:
         swa_model = torch.optim.swa_utils.AveragedModel(model)
         swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, swa_lr=5 * learning_rate, anneal_strategy="linear", anneal_epochs=5)
-        swa_start = 10
+        swa_start = args.swa_start
 
     model_config = {
         "model": "Unet with attention segmentation",
@@ -680,10 +684,12 @@ if __name__ == "__main__":
         "use_anglez_only": use_anglez_only,
         "use_enmo_only": use_enmo_only,
         "use_swa": use_swa,
+        "swa_start": swa_start,
         "mix_anglez_enmo": mix_anglez_enmo,
         "exclude_bad_series_from_training": exclude_bad_series_from_training,
         "prediction_length": prediction_length,
         "prediction_stride": prediction_stride,
+        "prediction_kernel_mode": prediction_kernel_mode,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
         "log_average_precision": log_average_precision,
