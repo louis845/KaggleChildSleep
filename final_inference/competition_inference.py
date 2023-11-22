@@ -28,7 +28,8 @@ class CompetitionInference:
         self.input_pq_file = input_pq_file
         self.models_callable = models_callable
 
-    def inference_all(self, out_file_path, log_debug=False, show_tqdm_bar=False, model_filter=None, cache=False):
+    def inference_all(self, out_file_path, use_matrix_profile_pruning=False,
+                      log_debug=False, show_tqdm_bar=False, model_filter=None, cache=False):
         if cache:
             if not os.path.isdir("cache"):
                 os.mkdir("cache")
@@ -48,6 +49,7 @@ class CompetitionInference:
         all_inference_time = []
         all_avg_kernel_values_time = []
         all_avg_confidence_time = []
+        all_matrix_profile_pruning_time = []
         all_first_postprocessing_time = []
         all_second_postprocessing_time = []
 
@@ -89,7 +91,7 @@ class CompetitionInference:
                 filtered_subset = model_filter(series_id)
             onset_locs, onset_IOU_probas, wakeup_locs, wakeup_IOU_probas, time_elapsed_performance_metrics =\
                 self.models_callable.run_inference(series_id, accel_data, secs_corr, mins_corr, hours_corr,
-                                                   models_subset=filtered_subset)
+                                                   models_subset=filtered_subset, use_matrix_profile_pruning=use_matrix_profile_pruning)
             inference_time = time.time() - ctime
 
             # Save the results
@@ -112,6 +114,7 @@ class CompetitionInference:
                 print("Inference Time: {}".format(inference_time))
                 print("Kernel Values Time: {}".format(time_elapsed_performance_metrics["kernel_values_computation_time"]))
                 print("First postprocessing Time: {}".format(time_elapsed_performance_metrics["first_postprocessing_time"]))
+                print("Matrix profile pruning Time: {}".format(time_elapsed_performance_metrics["matrix_profile_pruning_time"]))
                 print("Confidence Time: {}".format(time_elapsed_performance_metrics["confidence_computation_time"]))
                 print("Second postprocessing Time: {}".format(time_elapsed_performance_metrics["second_postprocessing_time"]))
                 print("Avg Kernel Values Time: {}".format(time_elapsed_performance_metrics["avg_kernel_values_time"]))
@@ -121,6 +124,7 @@ class CompetitionInference:
                 all_inference_time.append(inference_time)
                 all_avg_kernel_values_time.append(time_elapsed_performance_metrics["avg_kernel_values_time"])
                 all_avg_confidence_time.append(time_elapsed_performance_metrics["avg_confidence_time"])
+                all_matrix_profile_pruning_time.append(time_elapsed_performance_metrics["matrix_profile_pruning_time"])
                 all_first_postprocessing_time.append(time_elapsed_performance_metrics["first_postprocessing_time"])
                 all_second_postprocessing_time.append(time_elapsed_performance_metrics["second_postprocessing_time"])
 
@@ -130,6 +134,7 @@ class CompetitionInference:
         print("Avg Inference Time: {}".format(np.mean(all_inference_time)))
         print("Avg Kernel Values Time: {}".format(np.mean(all_avg_kernel_values_time)))
         print("Avg Confidence Time: {}".format(np.mean(all_avg_confidence_time)))
+        print("Avg Matrix profile pruning Time: {}".format(np.mean(all_matrix_profile_pruning_time)))
         print("Avg First postprocessing Time: {}".format(np.mean(all_first_postprocessing_time)))
         print("Avg Second postprocessing Time: {}".format(np.mean(all_second_postprocessing_time)))
 

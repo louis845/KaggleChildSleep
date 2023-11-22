@@ -4,6 +4,9 @@ import time
 
 import torch
 import numpy as np
+import numba
+import numba.cuda
+import stumpy
 
 import postprocessing
 import model_event_unet
@@ -19,6 +22,7 @@ class CompetitionModels:
         self.regression_models = []
         self.confidence_models = []
         self.iou_converter = None
+        self.stumpy_device = None
 
     def load_regression_models(self):
         for cfg in self.model_config["regression_models"]:
@@ -128,7 +132,7 @@ class CompetitionModels:
 
     def run_inference(self, series_id: str, accel_data: np.ndarray,
                       secs_corr: np.ndarray, mins_corr: np.ndarray, hours_corr: np.ndarray,
-                      models_subset: list = None):
+                      models_subset: list = None, use_matrix_profile_pruning: bool = False):
         ## cfg values for regression
         cutoff = 4.5
         pruning = 60
@@ -205,6 +209,46 @@ class CompetitionModels:
         if len(wakeup_locs) > 0:
             wakeup_locs = postprocessing.align_predictions(wakeup_locs, wakeup_kernel_values, first_zero=first_zero)
         first_postprocessing_time = time.time() - ctime
+
+        ## matrix values prune if necessary
+        if use_matrix_profile_pruning:
+            ctime = time.time()
+            if len(onset_locs) > 0 or len(wakeup_locs) > 0:
+                # compute matrix values
+                downsampling_rate = 12
+                anglez = accel_data[0, :].astype(np.float64)
+
+                # compute left pad and downsample by pooling
+                original_length = len(anglez)
+                left_pad = original_length % downsampling_rate
+                if left_pad != 0:
+                    left_pad = downsampling_rate - left_pad
+                if left_pad > 0:
+                    anglez = np.pad(anglez, (left_pad, 0))
+                anglez = anglez.reshape(-1, downsampling_rate).mean(axis=1)
+
+                # compute matrix profile
+                if self.stumpy_device is None:
+                    self.stumpy_device = [device.id for device in numba.cuda.list_devices()]
+                matrix_profile = stumpy.gpu_stump(anglez.astype(np.float64), m=4320 // downsampling_rate,
+                                                  device_id=self.stumpy_device[0])[:, 0].astype(np.float32)
+                matrix_profile = np.pad(matrix_profile, (0, 4320 // downsampling_rate - 1), mode="constant",
+                                        constant_values=matrix_profile[-1])  # subsequence stride right
+
+                # upsample and revert
+                matrix_profile = np.repeat(matrix_profile, downsampling_rate)
+                if left_pad > 0:
+                    matrix_profile = matrix_profile[left_pad:]
+                assert len(matrix_profile) == original_length
+                assert matrix_profile.dtype == np.float32
+
+                if len(onset_locs) > 0:
+                    onset_locs = postprocessing.prune_matrix_profile(onset_locs, matrix_profile)
+                if len(wakeup_locs) > 0:
+                    wakeup_locs = postprocessing.prune_matrix_profile(wakeup_locs, matrix_profile)
+            matrix_profile_pruning_time = time.time() - ctime
+        else:
+            matrix_profile_pruning_time = 0.0
 
         ## cfg values for confidence
         batch_size = 512
@@ -319,6 +363,7 @@ class CompetitionModels:
         time_elapsed_performance_metrics = {
             "kernel_values_computation_time": kernel_values_computation_time,
             "first_postprocessing_time": first_postprocessing_time,
+            "matrix_profile_pruning_time": matrix_profile_pruning_time,
             "confidence_computation_time": confidence_computation_time,
             "second_postprocessing_time": second_postprocessing_time,
             "avg_kernel_values_time": avg_kernel_values_time,
