@@ -45,6 +45,10 @@ def ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor 
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
                                                                                                  ground_truth.shape)
     bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
+    if positive_weight != 1.0:
+        with torch.no_grad():
+            weights = 1 + (ground_truth * (positive_weight - 1))
+        bce = bce * weights
     if mask is None:
         return torch.sum(torch.mean(bce, dim=(1, 2)))
     else:
@@ -53,6 +57,10 @@ def ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor 
 def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
     bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
+    if positive_weight != 1.0:
+        with torch.no_grad():
+            weights = 1 + (ground_truth * (positive_weight - 1))
+        bce = bce * weights
     if mask is None:
         return torch.sum(torch.mean(((torch.sigmoid(preds) - ground_truth) ** 2) * bce, dim=(1, 2)))
     else:
@@ -295,7 +303,7 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
                                                                       expand=expand, times=times,
                                                                       device=config.device,
                                                                       use_time_input=use_time_information,
-                                                                      stride_count=24)
+                                                                      stride_count=8)
             if prediction_kernel_mode == "constant" and not disable_IOU_converter:
                 onset_IOU_probas = iou_score_converter.convert(proba_preds[0, :])
                 wakeup_IOU_probas = iou_score_converter.convert(proba_preds[1, :])
@@ -470,6 +478,7 @@ if __name__ == "__main__":
     parser.add_argument("--prediction_stride", type=int, default=4320, help="Number of timesteps to stride when predicting. Default 4320.")
     parser.add_argument("--prediction_kernel_mode", type=str, default="constant", help="Kernel mode for prediction. Default 'constant'. Must be constant, gaussian, laplace.")
     parser.add_argument("--prediction_tolerance_width", type=int, default=30 * 12, help="Width of the tolerance window for prediction. Default 30 * 12.")
+    parser.add_argument("--positive_weight", type=float, default=1.0, help="Weight for positive examples. Default 1.0.")
     parser.add_argument("--disable_IOU_converter", action="store_true", help="Whether to disable the IOU converter. Default False.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
@@ -538,6 +547,7 @@ if __name__ == "__main__":
     prediction_stride = args.prediction_stride
     prediction_kernel_mode = args.prediction_kernel_mode
     prediction_tolerance_width = args.prediction_tolerance_width
+    positive_weight = args.positive_weight
     disable_IOU_converter = args.disable_IOU_converter
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
@@ -697,6 +707,7 @@ if __name__ == "__main__":
         "prediction_stride": prediction_stride,
         "prediction_kernel_mode": prediction_kernel_mode,
         "prediction_tolerance_width": prediction_tolerance_width,
+        "positive_weight": positive_weight,
         "disable_IOU_converter": disable_IOU_converter,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
