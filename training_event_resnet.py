@@ -116,7 +116,8 @@ def training_step(record: bool):
                 training_sampler.sample(batch_size, random_shift=random_shift,
                                         random_flip=random_flip, random_vflip=flip_value, always_flip=always_flip,
                                         expand=expand, elastic_deformation=use_elastic_deformation, v_elastic_deformation=use_velastic_deformation,
-                                        randomly_dropout_expanded_parts=random_exp_dropout, kernel_mode=prediction_kernel_mode)
+                                        randomly_dropout_expanded_parts=random_exp_dropout, kernel_mode=prediction_kernel_mode,
+                                        event_tolerance_width=prediction_tolerance_width)
             assert labels_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(labels_batch.shape)
             assert accel_data_batch.shape[-1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(accel_data_batch.shape)
 
@@ -195,7 +196,7 @@ def validation_step():
     with (tqdm.tqdm(total=len(val_sampler)) as pbar):
         while val_sampler.entries_remaining() > 0:
             # load the batch
-            accel_data_batch, labels_batch, times_batch, increment = val_sampler.sample(batch_size, expand=expand)
+            accel_data_batch, labels_batch, times_batch, increment = val_sampler.sample(batch_size, expand=expand, event_tolerance_width=prediction_tolerance_width)
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
             labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
 
@@ -294,7 +295,7 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
                                                                       expand=expand, times=times,
                                                                       device=config.device,
                                                                       use_time_input=use_time_information)
-            if prediction_kernel_mode == "constant":
+            if prediction_kernel_mode == "constant" and not disable_IOU_converter:
                 onset_IOU_probas = iou_score_converter.convert(proba_preds[0, :])
                 wakeup_IOU_probas = iou_score_converter.convert(proba_preds[1, :])
             else:
@@ -389,7 +390,7 @@ def update_SWA_bn(swa_model):
                                             expand=expand, elastic_deformation=use_elastic_deformation,
                                             v_elastic_deformation=use_velastic_deformation,
                                             randomly_dropout_expanded_parts=random_exp_dropout,
-                                            kernel_mode=prediction_kernel_mode)
+                                            kernel_mode=prediction_kernel_mode, event_tolerance_width=prediction_tolerance_width)
                 assert labels_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(
                     labels_batch.shape)
                 assert accel_data_batch.shape[-1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(
@@ -467,6 +468,8 @@ if __name__ == "__main__":
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
     parser.add_argument("--prediction_stride", type=int, default=4320, help="Number of timesteps to stride when predicting. Default 4320.")
     parser.add_argument("--prediction_kernel_mode", type=str, default="constant", help="Kernel mode for prediction. Default 'constant'. Must be constant, gaussian, laplace.")
+    parser.add_argument("--prediction_tolerance_width", type=int, default=30 * 12, help="Width of the tolerance window for prediction. Default 30 * 12.")
+    parser.add_argument("--disable_IOU_converter", action="store_true", help="Whether to disable the IOU converter. Default False.")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
     parser.add_argument("--log_average_precision", action="store_false", help="Whether to log the average precision. Default True.")
@@ -533,6 +536,8 @@ if __name__ == "__main__":
     prediction_length = args.prediction_length
     prediction_stride = args.prediction_stride
     prediction_kernel_mode = args.prediction_kernel_mode
+    prediction_tolerance_width = args.prediction_tolerance_width
+    disable_IOU_converter = args.disable_IOU_converter
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
     log_average_precision = args.log_average_precision
@@ -690,6 +695,8 @@ if __name__ == "__main__":
         "prediction_length": prediction_length,
         "prediction_stride": prediction_stride,
         "prediction_kernel_mode": prediction_kernel_mode,
+        "prediction_tolerance_width": prediction_tolerance_width,
+        "disable_IOU_converter": disable_IOU_converter,
         "batch_size": batch_size,
         "num_extra_steps": num_extra_steps,
         "log_average_precision": log_average_precision,
