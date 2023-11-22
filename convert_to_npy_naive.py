@@ -90,6 +90,10 @@ if __name__ == "__main__":
         np.save(os.path.join(series_folder, "mins.npy"), mins_corr)
         np.save(os.path.join(series_folder, "hours.npy"), hours_corr)
 
+        np.save(os.path.join(series_folder, "secs_raw.npy"), secs)
+        np.save(os.path.join(series_folder, "mins_raw.npy"), mins)
+        np.save(os.path.join(series_folder, "hours_raw.npy"), hours)
+
     print(f"Total number of discrepancies: {num_discrepancy}/{num_time}")
     print(f"Percentage of discrepancies: {num_discrepancy / num_time * 100:.2f}%")
     print(f"Total number of series with discrepancies: {len(discrepancy_series)}")
