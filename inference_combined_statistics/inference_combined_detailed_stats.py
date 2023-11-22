@@ -33,7 +33,9 @@ regression_labels_folders = [os.path.join("./inference_regression_statistics", "
                              os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV_Mid", "gaussian_kernel9"),
                              os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV_Wide", "gaussian_kernel9")]
 def validation_ap(fig: matplotlib.figure.Figure, predicted_events, gt_events, iou_probas_folder,
-                  width, cutoff, augmentation, length_drop, length_threshold, length_dropoff_factor):
+                  width, cutoff, augmentation, matrix_values_pruning,
+                  probas_pruning, proba_pruning_radius, proba_pruning_inner_radius, proba_pruning_dropoff,
+                  linear_dropoff):
     ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
     ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
 
@@ -43,9 +45,24 @@ def validation_ap(fig: matplotlib.figure.Figure, predicted_events, gt_events, io
         preds_locs_onset = preds_locs["onset"]
         preds_locs_wakeup = preds_locs["wakeup"]
 
+        # prune using matrix values
+        if matrix_values_pruning:
+            matrix_values = np.load(os.path.join("./data_matrix_profile", "{}.npy".format(series_id)))
+            preds_locs_onset = postprocessing.prune_matrix_profile(preds_locs_onset, matrix_values)
+            preds_locs_wakeup = postprocessing.prune_matrix_profile(preds_locs_wakeup, matrix_values)
+
         # load the IOU probas
         onset_IOU_probas = np.load(os.path.join(iou_probas_folder, "{}_onset.npy".format(series_id)))
         wakeup_IOU_probas = np.load(os.path.join(iou_probas_folder, "{}_wakeup.npy".format(series_id)))
+        original_length = len(onset_IOU_probas)
+
+        if probas_pruning:
+            if len(preds_locs_onset) > 0:
+                preds_locs_onset = postprocessing.prune_ROI(preds_locs_onset, onset_IOU_probas[preds_locs_onset],
+                                                            proba_pruning_radius, proba_pruning_inner_radius, proba_pruning_dropoff)
+            if len(preds_locs_wakeup) > 0:
+                preds_locs_wakeup = postprocessing.prune_ROI(preds_locs_wakeup, wakeup_IOU_probas[preds_locs_wakeup],
+                                                            proba_pruning_radius, proba_pruning_inner_radius, proba_pruning_dropoff)
 
         if augmentation:
             # load the kernel predictions
@@ -69,28 +86,13 @@ def validation_ap(fig: matplotlib.figure.Figure, predicted_events, gt_events, io
                                                             wakeup_kernel_ensembled, wakeup_IOU_probas, cutoff_thresh=cutoff)
         else:
             # just restrict, without augmentation
-            if length_drop:
-                if len(preds_locs) > 0:
-                    if np.all(onset_IOU_probas <= length_threshold):
-                        onset_IOU_probas = np.full_like(preds_locs_onset, 1e-7, dtype=np.float32)
-                    else:
-                        onset_IOU_probas = postprocessing.index_probas_distance_based(preds_locs_onset, onset_IOU_probas,
-                                                                   proba_threshold=length_threshold,
-                                                                   dropoff_factor=length_dropoff_factor)
-                else:
-                    onset_IOU_probas = np.array([], dtype=np.float32)
-                if len(preds_locs) > 0:
-                    if np.all(wakeup_IOU_probas <= length_threshold):
-                        wakeup_IOU_probas = np.full_like(preds_locs_wakeup, 1e-7, dtype=np.float32)
-                    else:
-                        wakeup_IOU_probas = postprocessing.index_probas_distance_based(preds_locs_wakeup, wakeup_IOU_probas,
-                                                                   proba_threshold=length_threshold,
-                                                                   dropoff_factor=length_dropoff_factor)
-                else:
-                    wakeup_IOU_probas = np.array([], dtype=np.float32)
-            else:
-                onset_IOU_probas = onset_IOU_probas[preds_locs_onset]
-                wakeup_IOU_probas = wakeup_IOU_probas[preds_locs_wakeup]
+            onset_IOU_probas = onset_IOU_probas[preds_locs_onset]
+            wakeup_IOU_probas = wakeup_IOU_probas[preds_locs_wakeup]
+
+        if linear_dropoff:
+            # apply linear dropoff
+            onset_IOU_probas = onset_IOU_probas * (1 - preds_locs_onset.astype(np.float32) / original_length)
+            wakeup_IOU_probas = wakeup_IOU_probas * (1 - preds_locs_wakeup.astype(np.float32) / original_length)
 
         # get the ground truth
         gt_onset_locs = gt_events[series_id]["onset"]
@@ -173,11 +175,17 @@ class MainWindow(QMainWindow):
         # Create checkboxes
         self.checkbox_layout = QHBoxLayout()
         self.checkbox_augmentation = QCheckBox("Use Augmentation")
-        self.checkbox_length_drop = QCheckBox("Use Length Dropoff")
+        self.checkbox_matrix_values_pruning = QCheckBox("Use Matrix Values Pruning")
+        self.checkbox_probas_pruning = QCheckBox("Use Proba Pruning")
+        self.checkbox_linear_dropoff = QCheckBox("Use Linear Dropoff")
         self.checkbox_layout.addStretch(1)
         self.checkbox_layout.addWidget(self.checkbox_augmentation)
         self.checkbox_layout.addStretch(1)
-        self.checkbox_layout.addWidget(self.checkbox_length_drop)
+        self.checkbox_layout.addWidget(self.checkbox_matrix_values_pruning)
+        self.checkbox_layout.addStretch(1)
+        self.checkbox_layout.addWidget(self.checkbox_probas_pruning)
+        self.checkbox_layout.addStretch(1)
+        self.checkbox_layout.addWidget(self.checkbox_linear_dropoff)
         self.checkbox_layout.addStretch(1)
         self.main_layout.addLayout(self.checkbox_layout)
 
@@ -202,35 +210,47 @@ class MainWindow(QMainWindow):
         self.main_layout.addWidget(self.slider_cutoff_label)
 
         self.slider_cutoff = QSlider(Qt.Horizontal)
-        self.slider_cutoff.setMaximum(100)
+        self.slider_cutoff.setMaximum(1000)
         self.slider_cutoff.valueChanged.connect(self.update_cutoff_value)
         self.main_layout.addWidget(self.slider_cutoff)
 
 
-        self.slider_length_cutoff_label = QLabel("Length Cutoff: 0")
-        self.slider_length_cutoff_label.setAlignment(Qt.AlignCenter)  # Centered the text for the slider label
-        font_metrics = QFontMetrics(self.slider_length_cutoff_label.font())
-        self.slider_length_cutoff_label.setFixedHeight(
+        self.slider_pruning_radius_label = QLabel("Proba Pruning Radius: 0")
+        self.slider_pruning_radius_label.setAlignment(Qt.AlignCenter)  # Centered the text for the slider label
+        font_metrics = QFontMetrics(self.slider_pruning_radius_label.font())
+        self.slider_pruning_radius_label.setFixedHeight(
             font_metrics.height())  # Set the height of the label to the height of the text
-        self.main_layout.addWidget(self.slider_length_cutoff_label)
+        self.main_layout.addWidget(self.slider_pruning_radius_label)
 
-        self.slider_length_cutoff = QSlider(Qt.Horizontal)
-        self.slider_length_cutoff.setMaximum(100)
-        self.slider_length_cutoff.valueChanged.connect(self.update_length_cutoff_value)
-        self.main_layout.addWidget(self.slider_length_cutoff)
+        self.slider_pruning_radius = QSlider(Qt.Horizontal)
+        self.slider_pruning_radius.setMaximum(1440)
+        self.slider_pruning_radius.valueChanged.connect(self.update_pruning_radius_value)
+        self.main_layout.addWidget(self.slider_pruning_radius)
 
-
-        self.slider_length_dropoff_label = QLabel("Length Dropoff: 0")
-        self.slider_length_dropoff_label.setAlignment(Qt.AlignCenter)  # Centered the text for the slider label
-        font_metrics = QFontMetrics(self.slider_length_dropoff_label.font())
-        self.slider_length_dropoff_label.setFixedHeight(
+        self.slider_pruning_inner_radius_label = QLabel("Proba Pruning Inner Radius: 0")
+        self.slider_pruning_inner_radius_label.setAlignment(Qt.AlignCenter)  # Centered the text for the slider label
+        font_metrics = QFontMetrics(self.slider_pruning_inner_radius_label.font())
+        self.slider_pruning_inner_radius_label.setFixedHeight(
             font_metrics.height())  # Set the height of the label to the height of the text
-        self.main_layout.addWidget(self.slider_length_dropoff_label)
+        self.main_layout.addWidget(self.slider_pruning_inner_radius_label)
 
-        self.slider_length_dropoff = QSlider(Qt.Horizontal)
-        self.slider_length_dropoff.setMaximum(300)
-        self.slider_length_dropoff.valueChanged.connect(self.update_length_dropoff_value)
-        self.main_layout.addWidget(self.slider_length_dropoff)
+        self.slider_pruning_inner_radius = QSlider(Qt.Horizontal)
+        self.slider_pruning_inner_radius.setMaximum(360)
+        self.slider_pruning_inner_radius.valueChanged.connect(self.update_pruning_inner_radius_value)
+        self.main_layout.addWidget(self.slider_pruning_inner_radius)
+
+
+        self.slider_pruning_dropoff_label = QLabel("Proba Pruning Dropoff: 0")
+        self.slider_pruning_dropoff_label.setAlignment(Qt.AlignCenter)  # Centered the text for the slider label
+        font_metrics = QFontMetrics(self.slider_pruning_dropoff_label.font())
+        self.slider_pruning_dropoff_label.setFixedHeight(
+            font_metrics.height())  # Set the height of the label to the height of the text
+        self.main_layout.addWidget(self.slider_pruning_dropoff_label)
+
+        self.slider_pruning_dropoff = QSlider(Qt.Horizontal)
+        self.slider_pruning_dropoff.setMaximum(100)
+        self.slider_pruning_dropoff.valueChanged.connect(self.update_pruning_dropoff_value)
+        self.main_layout.addWidget(self.slider_pruning_dropoff)
 
         # Create a "Plot" button
         self.plot_button = QPushButton("Plot")
@@ -248,8 +268,10 @@ class MainWindow(QMainWindow):
 
         selected_folder = self.get_selected_folder()
         validation_ap(self.fig_plots, regression_predicted_events, per_series_id_events, selected_folder, self.get_union_width(), self.get_cutoff(),
-                      self.checkbox_augmentation.isChecked(), self.checkbox_length_drop.isChecked(),
-                      length_threshold=self.get_length_cutoff(), length_dropoff_factor=self.get_length_dropoff())
+                      self.checkbox_augmentation.isChecked(), self.checkbox_matrix_values_pruning.isChecked(),
+
+                      self.checkbox_probas_pruning.isChecked(), self.get_pruning_radius(), self.get_pruning_inner_radius(), self.get_pruning_dropoff(),
+                      self.checkbox_linear_dropoff.isChecked())
 
         self.canvas_plots.draw()
 
@@ -257,7 +279,7 @@ class MainWindow(QMainWindow):
         return self.union_width_values[self.slider_union_width.value()]
 
     def get_cutoff(self):
-        return self.slider_cutoff.value() / 100.0
+        return self.slider_cutoff.value() / 1000.0
 
     def update_union_width_value(self, value):
         self.slider_union_width_label.setText("Union width: " + str(self.get_union_width()))
@@ -267,18 +289,25 @@ class MainWindow(QMainWindow):
         self.slider_cutoff_label.setText("Cutoff: " + str(self.get_cutoff()))
         #self.update_plots()
 
-    def get_length_cutoff(self):
-        return self.slider_length_cutoff.value() / 100.0
+    def get_pruning_radius(self):
+        return self.slider_pruning_radius.value() * 12
 
-    def update_length_cutoff_value(self, value):
-        self.slider_length_cutoff_label.setText("Length Cutoff: " + str(self.get_length_cutoff()))
+    def update_pruning_radius_value(self, value):
+        self.slider_pruning_radius_label.setText("Proba Pruning Radius: " + str(self.get_pruning_radius()))
         #self.update_plots()
 
-    def get_length_dropoff(self):
-        return self.slider_length_dropoff.value() * 12
+    def get_pruning_inner_radius(self):
+        return self.slider_pruning_inner_radius.value() * 12
 
-    def update_length_dropoff_value(self, value):
-        self.slider_length_dropoff_label.setText("Length Dropoff: " + str(self.get_length_dropoff()))
+    def update_pruning_inner_radius_value(self, value):
+        self.slider_pruning_inner_radius_label.setText("Proba Pruning Inner Radius: " + str(self.get_pruning_inner_radius()))
+        #self.update_plots()
+
+    def get_pruning_dropoff(self):
+        return self.slider_pruning_dropoff.value() / 100.0
+
+    def update_pruning_dropoff_value(self, value):
+        self.slider_pruning_dropoff_label.setText("Proba Pruning Dropoff: " + str(self.get_pruning_dropoff()))
         #self.update_plots()
 
 if __name__ == "__main__":

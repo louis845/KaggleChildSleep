@@ -8,7 +8,6 @@ from PySide2.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-import stumpy
 
 
 class MatplotlibWidget(QWidget):
@@ -134,7 +133,7 @@ class MainWidget(QWidget):
         self.preloaded_intervals.clear()
 
         anglez, enmo, timestamp, extras = load_file(series_id)
-        matrix_profile = stumpy.stump(anglez.to_numpy(dtype=np.float64) / 35.52, 4320)[:, 0]
+        matrix_profile = np.load(os.path.join("data_matrix_profile", series_id + ".npy"))
 
         total_length = len(anglez)
         stride = total_length // (total_length // 2160)
@@ -241,11 +240,9 @@ def load_file(item):
     extras["onset_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_onset_locs.npy".format(item))
     extras["wakeup_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_wakeup_locs.npy".format(item))
 
-    confidence_pred_folder = "./inference_confidence_statistics/confidence_labels/event5fold_3length"
-    extras["onset_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_onset.npy"))
-    extras["wakeup_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_wakeup.npy"))
-    extras["onset_IOU_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_IOU_onset.npy"))
-    extras["wakeup_IOU_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_IOU_wakeup.npy"))
+    confidence_pred_folder = "./inference_combined_statistics/combined_predictions/event5fold_swa_3length_best/width50"
+    extras["onset_IOU_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_onset.npy"))
+    extras["wakeup_IOU_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_wakeup.npy"))
 
     confidence_pred_folder2 = "./inference_combined_statistics/combined_predictions/event5fold_3length_time_2length/width55"
     extras["onset_IOU_conf2"] = np.load(os.path.join(confidence_pred_folder2, item + "_onset.npy"))

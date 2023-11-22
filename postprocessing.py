@@ -28,6 +28,56 @@ def prune(event_locs, event_vals, pruning_radius):
                 keeps[descending_order[k]] = True
     return event_locs[keeps]
 
+def prune_ROI_possible_probas(keeps, event_probas, left_idx, right_idx, interest_idx, cutoff):
+    if right_idx - left_idx > 1:
+        inradius_probas = event_probas[left_idx:right_idx]
+        prunes = inradius_probas < cutoff
+        if np.any(prunes):
+            prunes_idx = np.argwhere(prunes).flatten() + left_idx
+            keeps[prunes_idx] = False
+            keeps[interest_idx] = True
+
+def prune_ROI(event_locs, event_probas, pruning_radius, pruning_inner_radius, pruning_dropoff_factor):
+    # assumes the indices (event_locs) are sorted
+    # event locs same length as event probas, prunes event locs according to radius
+    descending_order = np.argsort(event_probas)[::-1]
+    keeps = np.ones(len(event_locs), dtype=bool)
+
+    for k in range(len(event_locs)):
+        interest_idx = descending_order[k]
+        if keeps[interest_idx] and event_probas[interest_idx] > 0.5:
+            loc = event_locs[interest_idx]
+            if pruning_inner_radius == 0:
+                left_idx, right_idx = np.searchsorted(event_locs, [loc - pruning_radius + 1, loc + pruning_radius], side="left")
+                prune_ROI_possible_probas(keeps, event_probas, left_idx, right_idx, interest_idx, event_probas[interest_idx] * pruning_dropoff_factor)
+            else:
+                left_idx, right_idx = np.searchsorted(event_locs, [loc - pruning_radius + 1, loc - pruning_inner_radius], side="left")
+                prune_ROI_possible_probas(keeps, event_probas, left_idx, right_idx, interest_idx, event_probas[interest_idx] * pruning_dropoff_factor)
+                left_idx, right_idx = np.searchsorted(event_locs, [loc + 1 + pruning_inner_radius, loc + pruning_radius], side="left")
+                prune_ROI_possible_probas(keeps, event_probas, left_idx, right_idx, interest_idx, event_probas[interest_idx] * pruning_dropoff_factor)
+
+    return event_locs[keeps]
+
+
+def prune_matrix_profile(event_locs, matrix_profile_vals, matrix_profile_thresh=0.01, matrix_profile_stride=4320):
+    bad_locations = matrix_profile_vals < matrix_profile_thresh
+    if not np.any(bad_locations):
+        return event_locs
+    bad_locs_start, bad_locs_end = edges_detect(bad_locations)
+
+    locs_idx_start = np.searchsorted(event_locs, bad_locs_start[0], side="left")
+    locs_idx_end = np.searchsorted(event_locs, bad_locs_end[-1] + matrix_profile_stride, side="right")
+    if locs_idx_end - locs_idx_start == 0:
+        return event_locs
+
+    event_locs_of_interest = event_locs[locs_idx_start:locs_idx_end]
+
+    idxs = np.searchsorted(bad_locs_start, event_locs_of_interest, side="right") - 1
+    inside_bad_locs = (bad_locs_start[idxs] <= event_locs_of_interest) & (event_locs_of_interest < bad_locs_end[idxs] + matrix_profile_stride)
+    good_locs = np.pad(~inside_bad_locs, (locs_idx_start, len(event_locs) - locs_idx_end), mode="constant", constant_values=True)
+    return event_locs[good_locs]
+
+
 def index_out_of_bounds(arr, indices):
     # assumes that the indices are sorted
     start = np.searchsorted(indices, 0, side="left")
