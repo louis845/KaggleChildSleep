@@ -294,7 +294,8 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
                                                                       prediction_length=prediction_length,
                                                                       expand=expand, times=times,
                                                                       device=config.device,
-                                                                      use_time_input=use_time_information)
+                                                                      use_time_input=use_time_information,
+                                                                      stride_count=24)
             if prediction_kernel_mode == "constant" and not disable_IOU_converter:
                 onset_IOU_probas = iou_score_converter.convert(proba_preds[0, :])
                 wakeup_IOU_probas = iou_score_converter.convert(proba_preds[1, :])
