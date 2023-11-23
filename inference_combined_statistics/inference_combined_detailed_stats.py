@@ -35,7 +35,7 @@ regression_labels_folders = [os.path.join("./inference_regression_statistics", "
 def validation_ap(fig: matplotlib.figure.Figure, predicted_events, gt_events, iou_probas_folder,
                   width, cutoff, augmentation, matrix_values_pruning,
                   probas_pruning, proba_pruning_radius, proba_pruning_inner_radius, proba_pruning_dropoff,
-                  linear_dropoff):
+                  linear_dropoff, edges_probas_pruning):
     ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
     ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
 
@@ -55,6 +55,11 @@ def validation_ap(fig: matplotlib.figure.Figure, predicted_events, gt_events, io
         onset_IOU_probas = np.load(os.path.join(iou_probas_folder, "{}_onset.npy".format(series_id)))
         wakeup_IOU_probas = np.load(os.path.join(iou_probas_folder, "{}_wakeup.npy".format(series_id)))
         original_length = len(onset_IOU_probas)
+
+        # prune onset locs with wakeup IOU probas
+        if edges_probas_pruning:
+            if len(preds_locs_wakeup) > 0:
+                preds_locs_wakeup = postprocessing.prune_wakeup_at_heads(preds_locs_wakeup, onset_IOU_probas)
 
         if probas_pruning:
             if len(preds_locs_onset) > 0:
@@ -178,6 +183,7 @@ class MainWindow(QMainWindow):
         self.checkbox_matrix_values_pruning = QCheckBox("Use Matrix Values Pruning")
         self.checkbox_probas_pruning = QCheckBox("Use Proba Pruning")
         self.checkbox_linear_dropoff = QCheckBox("Use Linear Dropoff")
+        self.checkbox_edges_probas_pruning = QCheckBox("Use Edges Probas Pruning")
         self.checkbox_layout.addStretch(1)
         self.checkbox_layout.addWidget(self.checkbox_augmentation)
         self.checkbox_layout.addStretch(1)
@@ -186,6 +192,8 @@ class MainWindow(QMainWindow):
         self.checkbox_layout.addWidget(self.checkbox_probas_pruning)
         self.checkbox_layout.addStretch(1)
         self.checkbox_layout.addWidget(self.checkbox_linear_dropoff)
+        self.checkbox_layout.addStretch(1)
+        self.checkbox_layout.addWidget(self.checkbox_edges_probas_pruning)
         self.checkbox_layout.addStretch(1)
         self.main_layout.addLayout(self.checkbox_layout)
 
@@ -271,7 +279,7 @@ class MainWindow(QMainWindow):
                       self.checkbox_augmentation.isChecked(), self.checkbox_matrix_values_pruning.isChecked(),
 
                       self.checkbox_probas_pruning.isChecked(), self.get_pruning_radius(), self.get_pruning_inner_radius(), self.get_pruning_dropoff(),
-                      self.checkbox_linear_dropoff.isChecked())
+                      self.checkbox_linear_dropoff.isChecked(), self.checkbox_edges_probas_pruning.isChecked())
 
         self.canvas_plots.draw()
 

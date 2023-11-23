@@ -6,6 +6,7 @@ import sys
 import torch
 import tqdm
 import pandas as pd
+import numpy as np
 from PySide2.QtWidgets import QApplication
 
 import manager_folds
@@ -71,6 +72,9 @@ def obtain_statistics(model_path, entry, regression_width, is_regression=True, i
     wakeup_small_aes, wakeup_mid_aes, wakeup_large_aes = [], [], []
     onset_all_aes = [onset_small_aes, onset_mid_aes, onset_large_aes]
     wakeup_all_aes = [wakeup_small_aes, wakeup_mid_aes, wakeup_large_aes]
+
+    seriesid_onset_small_aes, seriesid_onset_mid_aes, seriesid_onset_large_aes = {}, {}, {}
+    seriesid_wakeup_small_aes, seriesid_wakeup_mid_aes, seriesid_wakeup_large_aes = {}, {}, {}
     with torch.no_grad():
         with tqdm.tqdm(total=len(validation_entries)) as pbar:
             for k in range(len(validation_entries)):
@@ -110,6 +114,9 @@ def obtain_statistics(model_path, entry, regression_width, is_regression=True, i
                     preds_np = [pred.cpu().numpy() for pred in preds]
 
 
+                onset_seriesid_aes = [[], [], []]
+                wakeup_seriesid_aes = [[], [], []]
+
                 # predict with events
                 for i in range(len(regression_width)):
                     width = int(regression_width[i])
@@ -131,9 +138,22 @@ def obtain_statistics(model_path, entry, regression_width, is_regression=True, i
                         onset_all_aes[i].append(int(onset_argmax_ae))
                         wakeup_all_aes[i].append(int(wakeup_argmax_ae))
 
+                        onset_seriesid_aes[i].append(int(onset_argmax_ae))
+                        wakeup_seriesid_aes[i].append(int(wakeup_argmax_ae))
+
+                for i in range(len(regression_width)):
+                    seriesid_onset_small_aes[series_id] = (np.percentile(onset_seriesid_aes[0], 50) + np.percentile(onset_seriesid_aes[0], 75)) / 2
+                    seriesid_onset_mid_aes[series_id] = (np.percentile(onset_seriesid_aes[1], 50) + np.percentile(onset_seriesid_aes[1], 75)) / 2
+                    seriesid_onset_large_aes[series_id] = (np.percentile(onset_seriesid_aes[2], 50) + np.percentile(onset_seriesid_aes[2], 75)) / 2
+                    seriesid_wakeup_small_aes[series_id] = (np.percentile(wakeup_seriesid_aes[0], 50) + np.percentile(wakeup_seriesid_aes[0], 75)) / 2
+                    seriesid_wakeup_mid_aes[series_id] = (np.percentile(wakeup_seriesid_aes[1], 50) + np.percentile(wakeup_seriesid_aes[1], 75)) / 2
+                    seriesid_wakeup_large_aes[series_id] = (np.percentile(wakeup_seriesid_aes[2], 50) + np.percentile(wakeup_seriesid_aes[2], 75)) / 2
+
                 pbar.update(1)
 
-    return onset_small_aes, onset_mid_aes, onset_large_aes, wakeup_small_aes, wakeup_mid_aes, wakeup_large_aes
+    return onset_small_aes, onset_mid_aes, onset_large_aes, wakeup_small_aes, wakeup_mid_aes, wakeup_large_aes,\
+                seriesid_onset_small_aes, seriesid_onset_mid_aes, seriesid_onset_large_aes,\
+                seriesid_wakeup_small_aes, seriesid_wakeup_mid_aes, seriesid_wakeup_large_aes
 
 
 
@@ -190,6 +210,7 @@ if __name__ == "__main__":
 
     # compute statistics
     all_stats = {}
+    all_stats_per_series_id = {}
     regression_names = []
     for k in range(len(options)):
         name = options[k]["name"]
@@ -212,13 +233,17 @@ if __name__ == "__main__":
 
         print("Computing statistics for {}".format(name))
         onset_small_aes, onset_mid_aes, onset_large_aes, wakeup_small_aes, wakeup_mid_aes, wakeup_large_aes = [], [], [], [], [], []
+        seriesid_onset_small_aes, seriesid_onset_mid_aes, seriesid_onset_large_aes = {}, {}, {}
+        seriesid_wakeup_small_aes, seriesid_wakeup_mid_aes, seriesid_wakeup_large_aes = {}, {}, {}
         for j in range(len(models)):
             model_dir = models[j]
             model_path = os.path.join("models", model_dir, "model.pt")
             entry = entries[j]
 
             result_onset_small_aes, result_onset_mid_aes, result_onset_large_aes,\
-                result_wakeup_small_aes, result_wakeup_mid_aes, result_wakeup_large_aes\
+                result_wakeup_small_aes, result_wakeup_mid_aes, result_wakeup_large_aes,\
+                result_seriesid_onset_small_aes, result_seriesid_onset_mid_aes, result_seriesid_onset_large_aes,\
+                result_seriesid_wakeup_small_aes, result_seriesid_wakeup_mid_aes, result_seriesid_wakeup_large_aes\
                     = obtain_statistics(model_path, entry, is_regression=is_regression, is_huber_regression=is_huber_regression,
                                         is_sigma_regression=is_sigma_regression, is_standard=is_standard, regression_width=regression_width)
 
@@ -229,6 +254,13 @@ if __name__ == "__main__":
             wakeup_mid_aes.extend(result_wakeup_mid_aes)
             wakeup_large_aes.extend(result_wakeup_large_aes)
 
+            seriesid_onset_small_aes.update(result_seriesid_onset_small_aes)
+            seriesid_onset_mid_aes.update(result_seriesid_onset_mid_aes)
+            seriesid_onset_large_aes.update(result_seriesid_onset_large_aes)
+            seriesid_wakeup_small_aes.update(result_seriesid_wakeup_small_aes)
+            seriesid_wakeup_mid_aes.update(result_seriesid_wakeup_mid_aes)
+            seriesid_wakeup_large_aes.update(result_seriesid_wakeup_large_aes)
+
         all_stats[name] = {
             "onset_small_aes": onset_small_aes,
             "onset_mid_aes": onset_mid_aes,
@@ -237,11 +269,23 @@ if __name__ == "__main__":
             "wakeup_mid_aes": wakeup_mid_aes,
             "wakeup_large_aes": wakeup_large_aes
         }
+
+        all_stats_per_series_id[name] = {
+            "onset_small_aes": seriesid_onset_small_aes,
+            "onset_mid_aes": seriesid_onset_mid_aes,
+            "onset_large_aes": seriesid_onset_large_aes,
+            "wakeup_small_aes": seriesid_wakeup_small_aes,
+            "wakeup_mid_aes": seriesid_wakeup_mid_aes,
+            "wakeup_large_aes": seriesid_wakeup_large_aes
+        }
         regression_names.append(name)
 
     # save statistics
     with open(os.path.join(FOLDER, "inference_regression_statistics.json"), "w") as f:
         json.dump(all_stats, f, indent=4)
+
+    with open(os.path.join(FOLDER, "inference_regression_statistics_per_series_id.json"), "w") as f:
+        json.dump(all_stats_per_series_id, f, indent=4)
 
     # visualize statistics
     app = QApplication(sys.argv)
