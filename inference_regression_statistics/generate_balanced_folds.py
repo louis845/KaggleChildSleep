@@ -32,7 +32,7 @@ for i in range(5):
     with open("../folds/balanced5cv_fold_{}_train.json".format(i + 1), "w") as f:
         json.dump({"dataset": train_series_ids}, f, indent=4)
 
-    with open("../folds/balanced5cv_fold_{}_test.json".format(i + 1), "w") as f:
+    with open("../folds/balanced5cv_fold_{}_val.json".format(i + 1), "w") as f:
         json.dump({"dataset": test_series_ids}, f, indent=4)
 
     print("Fold {} train size: {}".format(i, len(train_series_ids)))
