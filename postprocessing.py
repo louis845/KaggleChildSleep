@@ -77,6 +77,18 @@ def prune_matrix_profile(event_locs, matrix_profile_vals, matrix_profile_thresh=
     good_locs = np.pad(~inside_bad_locs, (locs_idx_start, len(event_locs) - locs_idx_end), mode="constant", constant_values=True)
     return event_locs[good_locs]
 
+def prune_wakeup_at_heads(wakeup_event_locs, onset_probas, cutoff=0.5):
+    assert np.all(wakeup_event_locs[:-1] <= wakeup_event_locs[1:]), "wakeup_event_locs must be sorted"
+
+    onset_happen_locs = onset_probas >= cutoff
+    if not np.any(onset_happen_locs):
+        return np.array([], dtype=wakeup_event_locs.dtype)
+
+    onset_first = np.argwhere(onset_happen_locs).flatten()[0]
+    cut_idx = np.searchsorted(wakeup_event_locs, onset_first, side="left")
+    if cut_idx == 0:
+        return wakeup_event_locs
+    return wakeup_event_locs[cut_idx:]
 
 def index_out_of_bounds(arr, indices):
     # assumes that the indices are sorted
