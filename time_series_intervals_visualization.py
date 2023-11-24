@@ -42,6 +42,7 @@ class MatplotlibWidget(QWidget):
         else:
             y1 = anglez / 35.52  # std computed by check_series_properties.py
             y2 = enmo / 0.1018  # std computed by check_series_properties.py
+            y2 = (y2 ** 0.6 - 1) / 0.6
             self.axis.plot(x, y1, label="anglez")
             self.axis.plot(x, y2, label="enmo")
             #self.axis.plot(x, extras["onset"] / 100.0, label="onset")

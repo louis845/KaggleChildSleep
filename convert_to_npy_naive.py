@@ -55,8 +55,9 @@ if __name__ == "__main__":
             os.mkdir(series_folder)
 
         data_frame = pd.read_parquet(os.path.join("individual_train_series", file))
+        enmo = data_frame["enmo"].to_numpy(dtype=np.float32) / 0.1018
         accel_data = np.stack([data_frame["anglez"].to_numpy(dtype=np.float32) / 35.52,
-                  data_frame["enmo"].to_numpy(dtype=np.float32) / 0.1018], axis=0) # shape (2, T)
+                  (enmo ** 0.6 - 1) / 0.6], axis=0) # shape (2, T)
 
         np.save(os.path.join(series_folder, "accel.npy"), accel_data)
 
