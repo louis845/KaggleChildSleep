@@ -222,13 +222,16 @@ def validation_ap(epoch, ap_log_dir, ap_log_dilated_dir, predicted_events, gt_ev
             else:
                 times = None
 
+            stride_count = 8
+            if use_swa and (epoch > swa_start) and ((epoch - swa_start) % 3 != 0):
+                stride_count = 1
             proba_preds = model_event_density_unet.event_density_inference(model=use_model, time_series=accel_data,
                                                                       batch_size=batch_size * 5,
                                                                       prediction_length=prediction_length,
                                                                       expand=expand, times=times,
                                                                       device=config.device,
                                                                       use_time_input=use_time_information,
-                                                                      stride_count=8)
+                                                                      stride_count=stride_count)
             onset_IOU_probas = proba_preds[0, :]
             wakeup_IOU_probas = proba_preds[1, :]
             onset_IOU_probas_dilated = dilation_converter.convert(onset_IOU_probas)
