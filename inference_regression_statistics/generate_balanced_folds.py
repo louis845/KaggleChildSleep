@@ -8,6 +8,8 @@ onset_aes = stats_per_seriesid["Standard 5CV"]["onset_small_aes"]
 wakeup_aes = stats_per_seriesid["Standard 5CV"]["wakeup_small_aes"]
 
 all_series_ids = list(onset_aes.keys())
+all_actual_series_ids = [x.split(".")[0] for x in os.listdir("../individual_train_series")]
+series_ids_set_diff = list(set(all_actual_series_ids).difference(set(all_series_ids)))
 
 mean_aes = {}
 for series_id in all_series_ids:
@@ -19,6 +21,8 @@ mean_aes = {k: v for k, v in sorted(mean_aes.items(), key=lambda item: item[1])}
 folds = [[], [], [], [], []]
 for i, series_id in enumerate(mean_aes.keys()):
     folds[i % 5].append(series_id)
+for j in range(len(series_ids_set_diff)):
+    folds[(i + j + 1) % 5].append(series_ids_set_diff[j])
 
 # Generate train/test splits
 for i in range(5):
