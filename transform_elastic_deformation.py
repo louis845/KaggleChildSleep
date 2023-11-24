@@ -63,6 +63,20 @@ def deform_v_time_series(time_series, deform_scale=True):
 
     return time_series
 
+def deform_v_time_series_enmo(time_series):
+    if np.random.rand() > 0.5:
+        strength = np.random.randint(1, 5)
+        strength_shift = np.random.randint(1, 2)
+        scale = 1.0
+        for k in range(strength):
+            scale = scale + 0.025 * np.random.rand() * np.sin(10 * (0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=len(time_series)) + np.random.rand() * 2 * np.pi)
+        shift = 0.0
+        for k in range(strength_shift):
+            shift = shift + 0.01 * np.random.rand() * np.sin(10 * (0.5 + np.random.rand()) * np.linspace(0, 2 * np.pi, num=len(time_series)) + np.random.rand() * 2 * np.pi)
+        time_series = time_series * scale + shift
+
+    return time_series
+
 def find_closest_index(x, val):
     idx = np.searchsorted(x, val, side="left")
 

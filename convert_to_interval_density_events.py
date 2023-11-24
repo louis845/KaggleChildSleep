@@ -8,7 +8,8 @@ import transform_elastic_deformation
 class IntervalDensityEventsSampler:
     def __init__(self, series_ids: list[str], naive_all_data: dict, train_or_test="train",
                  prediction_length=17280, # 24 hours
-                 prediction_stride=4320 # 6 hours
+                 prediction_stride=4320, # 6 hours
+                 is_enmo_only=False
                  ):
         self.series_ids = series_ids
         self.naive_all_data = naive_all_data
@@ -40,6 +41,7 @@ class IntervalDensityEventsSampler:
         self.sample_low = 0
 
         self.train_or_test = train_or_test
+        self.is_enmo_only = is_enmo_only
 
 
     def shuffle(self):
@@ -141,15 +143,15 @@ class IntervalDensityEventsSampler:
             if flip:
                 onset, wakeup = wakeup, onset
             if onset is not None:
-                event_segmentations[0, max(0, onset - event_tolerance_width):min(event_segmentations.shape[1],
-                                                                                 onset + event_tolerance_width + 1)] = 1.0
+                convert_to_interval_events.set_kernel_range(event_segmentations, idx=0, loc=onset,
+                                                            kernel_shape="gaussian", kernel_radius=30, replace_radius=event_tolerance_width)
                 if 0 <= onset < event_segmentations.shape[1]:
                     has_onset = True
                 if expand <= onset < event_segmentations.shape[1] - expand:
                     has_onset_in_center = True
             if wakeup is not None:
-                event_segmentations[1, max(0, wakeup - event_tolerance_width):min(event_segmentations.shape[1],
-                                                                                  wakeup + event_tolerance_width + 1)] = 1.0
+                convert_to_interval_events.set_kernel_range(event_segmentations, idx=1, loc=wakeup,
+                                                            kernel_shape="gaussian", kernel_radius=30, replace_radius=event_tolerance_width)
                 if 0 <= wakeup < event_segmentations.shape[1]:
                     has_wakeup = True
                 if expand <= wakeup < event_segmentations.shape[1] - expand:
@@ -160,7 +162,10 @@ class IntervalDensityEventsSampler:
             # flip anglez only
             accel_data[0, :] = -accel_data[0, :]
         if v_elastic_deformation:
-            accel_data[0, :] = transform_elastic_deformation.deform_v_time_series(accel_data[0, :])
+            if self.is_enmo_only:
+                accel_data[1, :] = transform_elastic_deformation.deform_v_time_series_enmo(accel_data[1, :])
+            else:
+                accel_data[0, :] = transform_elastic_deformation.deform_v_time_series(accel_data[0, :])
 
         if flip:
             accel_data = np.flip(accel_data, axis=1)

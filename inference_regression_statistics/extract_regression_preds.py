@@ -17,7 +17,7 @@ os.mkdir(out_folder)
 #kernel_shape = ["laplace"]
 #kernel_size = [6]
 #cutoff = 5.0
-PREDS = ["Standard_5CV_Bal", "Standard_5CV_Mid_Bal", "Standard_5CV_Wide_Bal"]
+PREDS = ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"]
 kernel_shape = ["gaussian", "gaussian", "gaussian"]
 kernel_size = [9, 9, 9]
 cutoff = 4.5

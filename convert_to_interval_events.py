@@ -4,13 +4,14 @@ import pandas as pd
 import bad_series_list
 import transform_elastic_deformation
 
-def set_kernel_range(arr, idx, loc, kernel_shape, kernel_radius):
+def set_kernel_range(arr, idx, loc, kernel_shape, kernel_radius, replace_radius=None):
     assert kernel_shape in ["gaussian", "laplace"]
 
-    if kernel_shape == "gaussian":
-        replace_radius = 3 * kernel_radius
-    elif kernel_shape == "laplace":
-        replace_radius = 5 * kernel_radius
+    if replace_radius is None:
+        if kernel_shape == "gaussian":
+            replace_radius = 3 * kernel_radius
+        elif kernel_shape == "laplace":
+            replace_radius = 5 * kernel_radius
 
     replace_start = max(0, loc - replace_radius)
     replace_end = min(arr.shape[1], loc + replace_radius + 1)
