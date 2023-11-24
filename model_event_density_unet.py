@@ -1,0 +1,356 @@
+import torch
+
+from model_event_unet import *
+
+class EventDensityUnet(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels=[2, 2, 4, 8, 16, 32, 32], kernel_size=3,
+                 blocks=[2, 2, 2, 2, 2, 2, 2],
+                 bottleneck_factor=4, dropout=0.0,  # settings for stem (backbone)
+
+                 # important input, output settings
+                 use_time_input=False, training_strategy="density_only",  # input and training mode
+                 input_interval_length=17280, input_expand_radius=8640,  # input settings
+
+                 attention_channels=128, attention_heads=4,  # settings for attention upsampling module
+                 attention_key_query_channels=64, attention_blocks=1,
+                 upconv_channels_override=8, attention_dropout=0.0,
+                 attention_mode="length"):
+        super(EventDensityUnet, self).__init__()
+        expected_attn_input_length = input_interval_length + 2 * input_expand_radius
+        assert kernel_size % 2 == 1, "kernel size must be odd"
+        assert len(blocks) >= 6, "blocks must have at least 6 elements"
+        assert isinstance(hidden_channels, list), "hidden_channels must be a list"
+        assert len(hidden_channels) == len(blocks), "hidden_channels must have the same length as blocks"
+        for channel in hidden_channels:
+            assert isinstance(channel, int), "hidden_channels must be a list of ints"
+        assert training_strategy in ["density_only",
+                                     "density_and_confidence"], "training_strategy must be one of ['density_only', 'density_and_confidence']"
+
+        self.input_length_multiple = 3 * (2 ** (len(blocks) - 2))
+
+        # modules for stem and deep supervision outputs
+        self.stem = ResNetBackbone(in_channels, hidden_channels, kernel_size, blocks, bottleneck_factor,
+                                   squeeze_excitation=False, squeeze_excitation_bottleneck_factor=1, dropout=dropout,
+                                   use_batch_norm=True, downsample_3f=True)
+        self.pyramid_height = len(blocks)
+        self.use_dropout = dropout > 0.0
+
+        # modules for attention and outconv
+        stem_final_layer_channels = hidden_channels[-1]
+
+        self.attention_blocks = torch.nn.ModuleList()
+        for i in range(attention_blocks):
+            self.attention_blocks.append(
+                AttentionBlock1DWithPositionalEncoding(channels=stem_final_layer_channels,
+                                                       hidden_channels=attention_channels,
+                                                       key_query_channels=attention_key_query_channels,
+                                                       heads=attention_heads,
+                                                       dropout=dropout,
+                                                       attention_mode=attention_mode,
+                                                       input_length=expected_attn_input_length // self.input_length_multiple,
+                                                       dropout_pos_embeddings=False,
+                                                       attn_dropout=attention_dropout,
+                                                       use_time_input=use_time_input)
+            )
+
+        self.no_contraction_head = UnetHead3f(self.pyramid_height, hidden_channels,
+                                              kernel_size=1, dropout=dropout, input_attn=True, use_batch_norm=False,
+                                              target_channels_override=upconv_channels_override)
+
+        self.out_presence_pool = torch.nn.AdaptiveMaxPool1d(1)
+        self.out_presence_conv = torch.nn.Conv1d(stem_final_layer_channels, 2, kernel_size=1, bias=True)
+
+        if upconv_channels_override is not None:
+            if training_strategy == "density_only":
+                self.outconv = torch.nn.Conv1d(upconv_channels_override,
+                                               2, kernel_size=1,
+                                               bias=True, padding="same", padding_mode="replicate")
+            else:
+                self.outconv_confidence = torch.nn.Conv1d(upconv_channels_override,
+                                                          2, kernel_size=1,
+                                                          bias=True, padding="same", padding_mode="replicate")
+                self.outconv_densityConv = torch.nn.Conv1d(upconv_channels_override,
+                                                           upconv_channels_override, kernel_size=1,
+                                                           bias=True, padding="same", padding_mode="replicate")
+                self.out_norm = torch.nn.GroupNorm(num_channels=upconv_channels_override, num_groups=4)
+                self.out_nonlin = torch.nn.GELU()
+                self.outconv_density = torch.nn.Conv1d(upconv_channels_override,
+                                                       2, kernel_size=1,
+                                                       bias=True, padding="same", padding_mode="replicate")
+        else:
+            if training_strategy == "density_only":
+                self.outconv = torch.nn.Conv1d(hidden_channels[-1],
+                                               2, kernel_size=1,
+                                               bias=True, padding="same", padding_mode="replicate")
+            else:
+                self.outconv_confidence = torch.nn.Conv1d(hidden_channels[-1],
+                                                          2, kernel_size=1,
+                                                          bias=True, padding="same", padding_mode="replicate")
+                self.outconv_densityConv = torch.nn.Conv1d(hidden_channels[-1],
+                                                           hidden_channels[-1], kernel_size=1,
+                                                           bias=True, padding="same", padding_mode="replicate")
+                self.out_norm = torch.nn.GroupNorm(num_channels=hidden_channels[-1], num_groups=4)
+                self.out_nonlin = torch.nn.GELU()
+                self.outconv_density = torch.nn.Conv1d(hidden_channels[-1],
+                                                       2, kernel_size=1,
+                                                       bias=True, padding="same", padding_mode="replicate")
+        self.expected_attn_input_length = expected_attn_input_length
+        self.num_attention_blocks = attention_blocks
+        self.use_time_input = use_time_input
+        self.stem_final_layer_channels = stem_final_layer_channels
+        self.training_strategy = training_strategy
+        self.input_interval_length = input_interval_length
+        self.input_expand_radius = input_expand_radius
+        if use_time_input:
+            self.period_length = 17280
+
+    def forward(self, x, time: Optional[np.ndarray] = None, return_as_training=False):
+        if self.use_time_input:
+            assert time is not None, "time must be provided if use_time_input is True"
+            assert isinstance(time, np.ndarray), "time must be a numpy array"
+            assert time.dtype == np.int32, "time must be a int32 array"
+            assert len(time.shape) == 1, "time must be a 1D array"
+            assert time.shape[0] == x.shape[0], "time must have the same length as x.shape[0]"
+        else:
+            assert time is None, "time must be None if use_time_input is False"
+
+        N, C, T = x.shape
+        # generate list of downsampling methods
+        downsampling_methods = [0] * self.pyramid_height
+        assert T % self.input_length_multiple == 0, "T must be divisible by {}".format(self.input_length_multiple)
+        assert T == self.expected_attn_input_length, "T: {}, self.expected_attn_input_length: {}".format(T,
+                                                                                                         self.expected_attn_input_length)
+
+        # run stem
+        ret = self.stem(x, downsampling_methods)
+
+        x = ret[-1]  # final layer from conv stem
+
+        if self.num_attention_blocks > 0:
+            time_tensor = None
+            if self.use_time_input:
+                with (torch.no_grad()):
+                    time_tensor = 2 * np.pi * torch.tensor(time, dtype=torch.float32,
+                                                           device=self.get_device()).unsqueeze(-1).unsqueeze(
+                        -1) / self.period_length
+                    length_time_tensor = 2 * np.pi * torch.arange(
+                        self.expected_attn_input_length // self.input_length_multiple, dtype=torch.float32,
+                        device=self.get_device()).unsqueeze(0).unsqueeze(0) / (
+                                                     self.period_length // self.input_length_multiple)
+                    channel_time_tensor = 2 * np.pi * torch.arange(self.stem_final_layer_channels // 2,
+                                                                   dtype=torch.float32,
+                                                                   device=self.get_device()).unsqueeze(0).unsqueeze(
+                        -1) / (self.stem_final_layer_channels // 2)
+                    time_tensor = torch.sin(time_tensor + length_time_tensor + channel_time_tensor)
+
+            for i in range(len(self.attention_blocks)):
+                x = self.attention_blocks[i](x, time_tensor)
+
+            attn_out = x
+            x = self.no_contraction_head(ret, x)
+        else:
+            attn_out = x
+            x = self.no_contraction_head(ret, torch.zeros_like(x))
+
+        attn_lvl_expand_radius = self.input_expand_radius // self.input_length_multiple
+        presence_vector = self.out_presence_pool(attn_out[:, :, attn_lvl_expand_radius:-attn_lvl_expand_radius])
+        event_presence = self.out_presence_conv(presence_vector)
+
+        if self.training or return_as_training:
+            if self.training_strategy == "density_only":
+                x = self.outconv(x)
+                x = torch.permute(x, [0, 2, 1])  # (N, 2, T) -> (N, T, 2)
+                event_presence = event_presence.squeeze(-1) # (N, 2, 1) -> (N, 2)
+                return x, event_presence
+            else:
+                confidence = self.outconv_confidence(x)
+                x = x[:, :, self.input_expand_radius:-self.input_expand_radius]
+                x = self.outconv_densityConv(x)
+                x = self.out_norm(x)
+                x = self.out_nonlin(x)
+                x = self.outconv_density(x)
+                x = torch.permute(x, [0, 2, 1])  # (N, 2, T) -> (N, T, 2)
+                event_presence = event_presence.squeeze(-1)  # (N, 2, 1) -> (N, 2)
+                return x, event_presence, confidence
+        else:
+            if self.training_strategy == "density_only":
+                x = self.outconv(x[:, :, self.input_expand_radius:-self.input_expand_radius])
+                x = torch.softmax(x, dim=-1)
+                event_presence = torch.sigmoid(event_presence) * 60.0
+                x = x * event_presence
+                return x
+            else:
+                x = x[:, :, self.input_expand_radius:-self.input_expand_radius]
+                x = self.outconv_densityConv(x)
+                x = self.out_norm(x)
+                x = self.out_nonlin(x)
+                x = self.outconv_density(x)
+                x = torch.softmax(x, dim=-1)
+                event_presence = torch.sigmoid(event_presence) * 60.0
+                x = x * event_presence
+                return x
+
+    def get_device(self) -> torch.device:
+        return next(self.parameters()).device
+
+
+def event_density_inference(model: EventDensityUnet, time_series: np.ndarray, batch_size=32,
+                               prediction_length=17280, expand=8640, times: Optional[dict[str, np.ndarray]]=None,
+                               stride_count=4, flip_augmentation=False, use_time_input=False, device=None):
+    model.eval()
+    if isinstance(model, EventDensityUnet):
+        use_time_input = model.use_time_input
+        device = model.get_device()
+    else:
+        # swa here. we override the parameters
+        assert device is not None, "device must be provided if model is not an EventConfidenceUnet"
+
+    if use_time_input:
+        assert times is not None, "times must be provided if model uses time input"
+        assert "hours" in times and "mins" in times and "secs" in times, "times must contain hours, mins, secs"
+        for key in ["hours", "mins", "secs"]:
+            assert isinstance(times[key], np.ndarray), f"times[{key}] must be a numpy array"
+            assert len(times[key].shape) == 1, f"times[{key}] must be a 1D array"
+            assert len(times[key]) == time_series.shape[1], f"times[{key}] must have the same length as time_series"
+        assert not flip_augmentation, "rotation_augmentation must be False if model uses time input"
+    else:
+        assert times is None, "times must not be provided if model does not use time input"
+
+    model.eval()
+
+    total_length = time_series.shape[1]
+    probas = np.zeros((2, total_length), dtype=np.float32)
+    multiplicities = np.zeros((total_length,), dtype=np.int32)
+
+    starts = []
+    for k in range(stride_count):
+        starts.append(k * prediction_length // stride_count)
+    for k in range(stride_count):
+        starts.append((total_length + k * prediction_length // stride_count) % prediction_length)
+
+    for start in starts:
+        event_density_single_inference(model, time_series, probas, multiplicities,
+                                          device=device, use_time_input=use_time_input,
+                                          batch_size=batch_size,
+                                          prediction_length=prediction_length, prediction_stride=prediction_length,
+                                          expand=expand, start=start, times=times)
+        if flip_augmentation:
+            event_density_single_inference(model, time_series, probas, multiplicities,
+                                              device=device, use_time_input=use_time_input,
+                                              batch_size=batch_size,
+                                              prediction_length=prediction_length, prediction_stride=prediction_length,
+                                              expand=expand, start=start, times=times, flipped=True)
+    multiplicities[multiplicities == 0] = 1 # avoid division by zero. the probas will be zero anyway
+    return probas / multiplicities # auto broadcast
+
+def event_density_single_inference(model: EventDensityUnet, time_series: np.ndarray,
+                                      probas: np.ndarray, multiplicities: np.ndarray,
+                                      device: torch.device, use_time_input: bool,
+                                      batch_size=32,
+                                      prediction_length=17280, prediction_stride=17280,
+                                      expand=8640, start=0, times=None,
+                                      flipped=False):
+    model.eval()
+
+    assert len(time_series.shape) == 2, "time_series must be a 2D array"
+    assert len(probas.shape) == 2, "probas must be a 2D array"
+    assert len(multiplicities.shape) == 1, "multiplicities must be a 1D array"
+
+    assert time_series.shape[1] == probas.shape[1], "time_series and probas must have the same length"
+    assert time_series.shape[1] == multiplicities.shape[0], "time_series and multiplicities must have the same length"
+
+    assert probas.dtype == np.float32, "probas must be a float32 array"
+    assert multiplicities.dtype == np.int32, "multiplicities must be an int32 array"
+
+    total_length = time_series.shape[1]
+
+    # compute batch end points
+    batches_starts = []
+    batches_ends = []
+    while start + prediction_length <= total_length:
+        end = start + prediction_length
+
+        batches_starts.append(start)
+        batches_ends.append(end)
+
+        start += prediction_stride
+
+    # compute batch predictions
+    batches_computed = 0
+    while batches_computed < len(batches_starts):
+        batches_compute_end = min(batches_computed + batch_size, len(batches_starts))
+
+        # create torch tensor
+        batches = []
+        for i in range(batches_computed, batches_compute_end):
+            batches.append(index_array(time_series, batches_starts[i] - expand, batches_ends[i] + expand))
+
+        batches = np.stack(batches, axis=0)
+        batches_torch = torch.tensor(batches, dtype=torch.float32, device=device)
+
+        # create time ndarray
+        if use_time_input:
+            batch_times = []
+            for i in range(batches_computed, batches_compute_end):
+                hour = times["hours"][batches_starts[i]]
+                minute = times["mins"][batches_starts[i]]
+                second = times["secs"][batches_starts[i]]
+                time = (hour * 3600 + minute * 60 + second) // 5
+                time -= expand
+                if time < 0:
+                    time += 17280
+                time = time % 17280
+                batch_times.append(time)
+            batch_times = np.array(batch_times, dtype=np.int32)
+        else:
+            batch_times = None
+
+        # run model
+        with torch.no_grad():
+            if flipped:
+                batches_out = model(torch.flip(batches_torch, dims=[-1,]), time=batch_times)
+                batches_out = torch.flip(batches_out, dims=[-1,])
+                batches_out = batches_out.cpu().numpy()
+            else:
+                batches_out = model(batches_torch, time=batch_times)
+                batches_out = batches_out.cpu().numpy()
+
+        # update probas
+        for i in range(batches_computed, batches_compute_end):
+            k = i - batches_computed
+            probas[:, batches_starts[i]:batches_ends[i]] += batches_out[k, :, :]
+            multiplicities[batches_starts[i]:batches_ends[i]] += 1
+
+        batches_computed = batches_compute_end
+
+class ProbasDilationConverter:
+    def __init__(self, sigma: int, device: torch.device):
+        """
+        Class for converting probas to dilated probas (akin to adding Gaussian random noise).
+        """
+        self.sigma = sigma
+        self.device = device
+
+        self.conv = torch.nn.Conv1d(1, 1, kernel_size=10 * sigma + 1,
+                                                 bias=False, padding="same", padding_mode="zeros")
+        # initialize weights
+        with torch.no_grad():
+            self.conv.weight.copy_(torch.tensor(
+                np.exp(-np.arange(-5 * sigma, 5 * sigma + 1) ** 2),
+            dtype=torch.float32, device="cpu"))
+        self.conv.to(device)
+
+    def convert(self, probas: np.ndarray):
+        """
+        Convert probas to IOU probas scores.
+        :param probas: The probas to convert
+        :return: The converted probas
+        """
+        assert len(probas.shape) == 1, "probas must be a 1D array"
+
+        with torch.no_grad():
+            probas_torch = torch.tensor(probas, dtype=torch.float32, device=self.device).unsqueeze(0).unsqueeze(0)
+            dilated_probas_torch = self.conv(probas_torch).squeeze(0).squeeze(0)
+            dilated_probas = dilated_probas_torch.cpu().numpy()
+
+        return dilated_probas

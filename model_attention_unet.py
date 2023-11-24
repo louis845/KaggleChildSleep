@@ -265,7 +265,7 @@ class UnetHead3f(torch.nn.Module):
             if use_batch_norm:
                 self.initial_norm = torch.nn.BatchNorm1d(target_channels_override)
             else:
-                self.initial_norm = torch.nn.GroupNorm(num_channels=target_channels_override, num_groups=1)
+                self.initial_norm = torch.nn.GroupNorm(num_channels=target_channels_override, num_groups=target_channels_override)
             stem_final_layer_channels = target_channels_override
         assert stem_final_layer_channels % 4 == 0, "stem_final_layer_channels must be divisible by 4"
 
@@ -289,7 +289,7 @@ class UnetHead3f(torch.nn.Module):
             if use_batch_norm:
                 self.upsample_norms.append(torch.nn.BatchNorm1d(stem_final_layer_channels))
             else:
-                self.upsample_norms.append(torch.nn.GroupNorm(num_channels=stem_final_layer_channels, num_groups=1))
+                self.upsample_norms.append(torch.nn.GroupNorm(num_channels=stem_final_layer_channels, num_groups=stem_final_layer_channels))
 
         self.cat_conv = torch.nn.ModuleList()
         self.cat_norms = torch.nn.ModuleList()
@@ -299,7 +299,7 @@ class UnetHead3f(torch.nn.Module):
             if use_batch_norm:
                 self.cat_norms.append(torch.nn.BatchNorm1d(stem_final_layer_channels))
             else:
-                self.cat_norms.append(torch.nn.GroupNorm(num_channels=stem_final_layer_channels, num_groups=1))
+                self.cat_norms.append(torch.nn.GroupNorm(num_channels=stem_final_layer_channels, num_groups=stem_final_layer_channels))
 
         self.nonlin = torch.nn.GELU()
         if dropout > 0.0:

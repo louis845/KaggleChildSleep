@@ -246,16 +246,18 @@ def single_training_step_standard(model_: torch.nn.Module, optimizer_: torch.opt
     optimizer_.zero_grad()
     preds = model_(accel_data_batch, ret_type="deep")
 
-    assert loss_type == "huber" or loss_type == "huber_sigma", "loss_type must be huber or huber_sigma"
+    assert loss_type == "huber" or loss_type == "huber_sigma" or loss_type == "mse", "loss_type must be huber or huber_sigma or mse"
     if loss_type == "huber":
         loss = masked_huber_loss(preds, event_regression_values[0], event_regression_masks[0])
     elif loss_type == "huber_sigma":
         loss = masked_huber_sigma_loss(preds, event_regression_values[0], event_regression_masks[0])
+    else:
+        loss = masked_mse_loss(preds, event_regression_values[0], event_regression_masks[0])
     loss.backward()
     optimizer_.step()
 
     with torch.no_grad():
-        if loss_type == "huber":
+        if loss_type == "huber" or loss_type == "mse":
             mae_loss = masked_mae_loss(preds, event_regression_values[0], event_regression_masks[0]).item()
         else:
             mae_loss = masked_mae_loss(preds[:, :2, :], event_regression_values[0], event_regression_masks[0]).item()
@@ -352,7 +354,7 @@ def single_validation_step_standard(model_: torch.nn.Module, accel_data_batch: t
                            event_regression_masks: list[torch.Tensor]):
     with torch.no_grad():
         preds = model_(accel_data_batch, ret_type="deep")
-        if loss_type == "huber":
+        if loss_type == "huber" or loss_type == "mse":
             loss = masked_mae_loss_raw(preds, event_regression_values[0], event_regression_masks[0]).item()
         else:
             loss = masked_mae_loss_raw(preds[:, :2, :], event_regression_values[0], event_regression_masks[0]).item()
@@ -405,7 +407,7 @@ def validation_step():
                         wakeup = event["wakeup"]
 
                         width = int(regression_width[0] * 1.0)
-                        if loss_type == "huber":
+                        if loss_type == "huber" or loss_type == "mse":
                             onset_argmax_ae = local_argmax_kernel_loss(pred_torch[0, :], onset, width)
                             wakeup_argmax_ae = local_argmax_kernel_loss(pred_torch[1, :], wakeup, width)
                         else:
@@ -608,7 +610,7 @@ if __name__ == "__main__":
         assert loss_type in ["huber", "mse", "huber_mse", "huber_sigma"], "Must use regression loss type if not using regression kernel."
     if use_standard_model:
         assert use_anglez_only, "Must use anglez only if using standard model."
-        assert loss_type == "huber" or loss_type == "huber_sigma", "Must use huber loss if using standard model."
+        assert loss_type == "huber" or loss_type == "huber_sigma" or loss_type == "mse", "Must use huber loss/MSE loss if using standard model."
     if loss_type == "huber_sigma":
         assert use_standard_model, "Must use standard model if using huber sigma loss."
 

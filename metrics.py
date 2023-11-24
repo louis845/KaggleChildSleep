@@ -139,3 +139,62 @@ class BinaryMetrics(Metrics):
         else:
             file.write("Accuracy: {:.4f}, Precision: {:.4f}, Recall: {:.4f}\n".format(accuracy, precision, recall))
 
+class BinaryMetricsTPRFPR(Metrics):
+    def __init__(self, name: str):
+        self.name = name
+        self.reset()
+
+    def reset(self):
+        self.tp = 0
+        self.tn = 0
+        self.fp = 0
+        self.fn = 0
+
+    def add(self, y_pred: torch.Tensor, y_true: torch.Tensor, mask: torch.Tensor = None):
+        """
+        y_pred and y_true must be tensors of the same shape. They contain binary values (0 or 1).
+        """
+        assert y_pred.shape == y_true.shape, "y_pred and y_true must have the same shape"
+        assert y_pred.dtype == torch.long and y_true.dtype == torch.long, "y_pred and y_true must be long tensors"
+        if mask is not None:
+            assert mask.shape == y_pred.shape, "mask must have the same shape as y_pred and y_true"
+            assert mask.dtype == torch.long, "mask must be a long tensor"
+
+        if mask is None:
+            self.tp += torch.sum(y_pred * y_true).cpu().item()
+            self.tn += torch.sum((1 - y_pred) * (1 - y_true)).cpu().item()
+            self.fp += torch.sum(y_pred * (1 - y_true)).cpu().item()
+            self.fn += torch.sum((1 - y_pred) * y_true).cpu().item()
+        else:
+            self.tp += torch.sum(y_pred * y_true * mask).cpu().item()
+            self.tn += torch.sum((1 - y_pred) * (1 - y_true) * mask).cpu().item()
+            self.fp += torch.sum(y_pred * (1 - y_true) * mask).cpu().item()
+            self.fn += torch.sum((1 - y_pred) * y_true * mask).cpu().item()
+
+    def add_direct(self, tp, tn, fp, fn):
+        self.tp += tp
+        self.tn += tn
+        self.fp += fp
+        self.fn += fn
+
+    def get(self):
+        """Compute the accuracy, TPR, FPR."""
+        if self.tp + self.tn + self.fp + self.fn == 0:
+            accuracy = -1.0
+        else:
+            accuracy = (self.tp + self.tn) / (self.tp + self.tn + self.fp + self.fn)
+        if self.tp + self.fn == 0:
+            tpr = -1.0
+        else:
+            tpr = self.tp / (self.tp + self.fn)
+        if self.fp + self.tn == 0:
+            fpr = -1.0
+        else:
+            fpr = self.fp / (self.fp + self.tn)
+        return accuracy, tpr, fpr
+
+    def write_to_dict(self, x: dict):
+        accuracy, tpr, fpr = self.get()
+        x[self.name + "_accuracy"] = accuracy
+        x[self.name + "_tpr"] = tpr
+        x[self.name + "_fpr"] = fpr

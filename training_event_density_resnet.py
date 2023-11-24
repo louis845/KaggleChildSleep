@@ -22,33 +22,16 @@ import metrics_ap
 import metrics_iou
 import logging_memory_utils
 import convert_to_npy_naive
-import convert_to_interval_events
+import convert_to_interval_density_events
 import convert_to_pred_events
 import convert_to_seriesid_events
 import model_unet
-import model_event_unet
-
-# same as training_clean_data.py, but with 3 factor downsampling at the first layer
-
-def log_t(x, t=0.2):
-    return ((x + 1e-6) ** (1.0 - t) - 1.0) / (1.0 - t)
-
-def elementwise_bounded_ce_loss(preds, gt, t=0.2):
-    # see Robust Bi-Tempered Logistic Loss
-    # Based on Bregman Divergences paper
-    log_t_part = -torch.where(gt == 1, log_t(preds, t), log_t(1 - preds, t))
-    additional_part = (1 - preds ** (2 - t) - (1 - preds) ** (2 - t)) / (t - 2)
-
-    return log_t_part + additional_part
+import model_event_density_unet
 
 def ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
                                                                                                  ground_truth.shape)
     bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
-    if positive_weight != 1.0:
-        with torch.no_grad():
-            weights = 1 + (ground_truth * (positive_weight - 1))
-        bce = bce * weights
     if mask is None:
         return torch.sum(torch.mean(bce, dim=(1, 2)))
     else:
@@ -57,57 +40,29 @@ def ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor 
 def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
     bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
-    if positive_weight != 1.0:
-        with torch.no_grad():
-            weights = 1 + (ground_truth * (positive_weight - 1))
-        bce = bce * weights
     if mask is None:
         return torch.sum(torch.mean(((torch.sigmoid(preds) - ground_truth) ** 2) * bce, dim=(1, 2)))
     else:
         return torch.sum(torch.mean(((torch.sigmoid(preds) - ground_truth) ** 2) * bce * mask, dim=(1, 2)))
 
-def dice_loss(preds: torch.Tensor, ground_truth: torch.Tensor, eps=1e-5):
-    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
-                                                                                                 ground_truth.shape)
-    pred_probas = torch.sigmoid(preds)
-    intersection = torch.sum(pred_probas * ground_truth, dim=(1, 2))
-    union = torch.sum(pred_probas + ground_truth, dim=(1, 2))
-    return torch.sum(1 - (2 * intersection + eps) / (union + eps))
-
-def bounded_ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
-    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
-                                                                                                 ground_truth.shape)
-    pred_probas = torch.sigmoid(preds)
-    bce = elementwise_bounded_ce_loss(pred_probas, ground_truth)
-    if mask is None:
-        return torch.sum(torch.mean(bce, dim=(1, 2)))
-    else:
-        return torch.sum(torch.mean(bce * mask, dim=(1, 2)))
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
-                            accel_data_batch: torch.Tensor, labels_batch: torch.Tensor, times_batch: np.ndarray):
+                            accel_data_batch: torch.Tensor, labels_density_batch: torch.Tensor,
+                            labels_occurrence_batch: torch.Tensor, times_batch: np.ndarray):
     optimizer_.zero_grad()
     times_input = times_batch if use_time_information else None
-    pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn", time=times_input)
-    if use_ce_loss:
-        loss = ce_loss(pred_logits, labels_batch)
-    elif use_iou_loss:
-        loss = 0.01 * dice_loss(pred_logits, labels_batch) + focal_loss(pred_logits, labels_batch)
-    elif use_ce_iou_loss:
-        loss = ce_loss(pred_logits, labels_batch) + 0.01 * dice_loss(pred_logits, labels_batch)
-    elif use_bounded_ce_loss:
-        loss = bounded_ce_loss(pred_logits, labels_batch)
-    else:
-        loss = focal_loss(pred_logits, labels_batch)
+    pred_density_logits, pred_occurences = model_(accel_data_batch, time=times_input)
+    entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
+    class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch, reduction="none").mean(dim=-1).sum()
+    loss = entropy_loss + class_loss
 
     loss.backward()
     optimizer_.step()
 
     with torch.no_grad():
-        preds = pred_logits > 0.0
-        small_loss = mid_loss = large_loss = num_events = None
+        pred_occurences = pred_occurences > 0.0
 
-    return loss.item(), preds.to(torch.long), small_loss, mid_loss, large_loss, num_events
+    return loss.item(), class_loss.item(), pred_occurences.to(torch.long), entropy_loss.item()
 
 def training_step(record: bool):
     if record:
@@ -120,47 +75,46 @@ def training_step(record: bool):
     # training
     with tqdm.tqdm(total=len(training_sampler)) as pbar:
         while training_sampler.entries_remaining() > 0:
-            accel_data_batch, labels_batch, times_batch, increment =\
+            accel_data_batch, event_infos, times_batch, increment =\
                 training_sampler.sample(batch_size, random_shift=random_shift,
                                         random_flip=random_flip, random_vflip=flip_value, always_flip=always_flip,
                                         expand=expand, elastic_deformation=use_elastic_deformation, v_elastic_deformation=use_velastic_deformation,
-                                        randomly_dropout_expanded_parts=random_exp_dropout, kernel_mode=prediction_kernel_mode,
-                                        event_tolerance_width=prediction_tolerance_width)
-            assert labels_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(labels_batch.shape)
+
+                                        return_mode="expanded_interval_density")
+            labels_density_batch = event_infos["density"]
+            labels_occurrence_batch = event_infos["occurrence"]
+            assert labels_density_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(labels_density_batch.shape)
+            assert labels_density_batch.shape[-2] == 2, "labels_batch.shape = {}".format(labels_density_batch.shape)
+            assert len(labels_occurrence_batch.shape) == 2, "labels_occurrence_batch.shape = {}".format(labels_occurrence_batch.shape)
+            assert labels_occurrence_batch.shape[-1] == 2, "labels_occurrence_batch.shape = {}".format(labels_occurrence_batch.shape)
             assert accel_data_batch.shape[-1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(accel_data_batch.shape)
 
             accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
-            labels_batch_torch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
+            labels_density_batch_torch = torch.tensor(labels_density_batch, dtype=torch.float32, device=config.device)
+            labels_occurrence_batch_torch = torch.tensor(labels_occurrence_batch, dtype=torch.float32, device=config.device)
+            with torch.no_grad():
+                labels_density_batch_torch = labels_density_batch_torch.permute(0, 2, 1)
 
             if use_anglez_only:
                 accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
             elif use_enmo_only:
                 accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
-            elif mix_anglez_enmo:
-                if np.random.rand() < 0.5:
-                    accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
-                else:
-                    accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
 
             # train model now
-            loss, preds, small_loss, mid_loss, large_loss, num_events = single_training_step(model, optimizer,
+            loss, class_loss, pred_occurences, entropy_loss = single_training_step(model, optimizer,
                                                                            accel_data_batch_torch,
-                                                                           labels_batch_torch, times_batch)
+                                                                           labels_density_batch_torch,
+                                                                           labels_occurrence_batch_torch, times_batch)
             #time.sleep(0.2)
 
             # record
             if record:
                 with torch.no_grad():
-                    labels_long = (labels_batch_torch > 0.5).to(torch.long)
+                    labels_occurrence_long = (labels_occurrence_batch_torch > 0.5).to(torch.long)
                     train_metrics["loss"].add(loss, increment)
-                    train_metrics["metric"].add(preds, labels_long)
-                    true_positives, false_positives, true_negatives, false_negatives =\
-                        metrics_iou.compute_iou_metrics(labels_long[:, 0:1, :], preds[:, 0:1, :])
-                    train_metrics["onset_iou_metric"].add_direct(true_positives, true_negatives, false_positives, false_negatives)
-                    true_positives, false_positives, true_negatives, false_negatives = \
-                        metrics_iou.compute_iou_metrics(labels_long[:, 1:2, :], preds[:, 1:2, :])
-                    train_metrics["wakeup_iou_metric"].add_direct(true_positives, true_negatives, false_positives,
-                                                                 false_negatives)
+                    train_metrics["class_loss"].add(class_loss, increment)
+                    train_metrics["class_metric"].add(pred_occurences, labels_occurrence_long)
+                    train_metrics["entropy_loss"].add(entropy_loss, increment)
 
             pbar.update(increment)
 
@@ -173,26 +127,18 @@ def training_step(record: bool):
             train_history[key].append(current_metrics[key])
 
 def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tensor,
-                           labels_batch: torch.Tensor, times_batch: np.ndarray):
+                           labels_density_batch: torch.Tensor, labels_occurrence_batch: torch.Tensor,
+                           times_batch: np.ndarray):
     with torch.no_grad():
         times_input = times_batch if use_time_information else None
-        pred_logits, _, _, _ = model_(accel_data_batch, ret_type="attn", time=times_input)
-        pred_logits = pred_logits[:, :, expand:-expand]
-        if use_ce_loss:
-            loss = ce_loss(pred_logits, labels_batch)
-        elif use_iou_loss:
-            loss = 0.01 * dice_loss(pred_logits, labels_batch) + focal_loss(pred_logits, labels_batch)
-        elif use_ce_iou_loss:
-            loss = ce_loss(pred_logits, labels_batch) + 0.01 * dice_loss(pred_logits, labels_batch)
-        elif use_bounded_ce_loss:
-            loss = bounded_ce_loss(pred_logits, labels_batch)
-        else:
-            loss = focal_loss(pred_logits, labels_batch)
-
-        preds = pred_logits > 0.0
-        small_loss = mid_loss = large_loss = num_events = None
-
-        return loss.item(), preds.to(torch.long), small_loss, mid_loss, large_loss, num_events
+        pred_density_logits, pred_occurences = model_(accel_data_batch, time=times_input, return_as_training=True)
+        entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch,
+                                                         reduction="none").mean(dim=-1).sum()
+        class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch,
+                                                                          reduction="none").mean(dim=-1).sum()
+        loss = entropy_loss + class_loss
+        pred_occurences = pred_occurences > 0.0
+        return loss.item(), class_loss.item(), pred_occurences.to(torch.long), entropy_loss.item()
 
 def validation_step():
     for key in val_metrics:
@@ -204,56 +150,35 @@ def validation_step():
     with (tqdm.tqdm(total=len(val_sampler)) as pbar):
         while val_sampler.entries_remaining() > 0:
             # load the batch
-            accel_data_batch, labels_batch, times_batch, increment = val_sampler.sample(batch_size, expand=expand, event_tolerance_width=prediction_tolerance_width)
+            accel_data_batch, event_infos, times_batch, increment = val_sampler.sample(batch_size, expand=expand,
+                                                                                        return_mode="expanded_interval_density")
+            labels_density_batch = event_infos["density"]
+            labels_occurrence_batch = event_infos["occurrence"]
+
             accel_data_batch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
-            labels_batch = torch.tensor(labels_batch, dtype=torch.float32, device=config.device)
+            labels_density_batch = torch.tensor(labels_density_batch, dtype=torch.float32, device=config.device)
+            labels_occurrence_batch = torch.tensor(labels_occurrence_batch, dtype=torch.float32, device=config.device)
+            with torch.no_grad():
+                labels_density_batch = labels_density_batch.permute(0, 2, 1)
 
             if use_anglez_only:
                 accel_data_batch = accel_data_batch[:, 0:1, :]
             elif use_enmo_only:
                 accel_data_batch = accel_data_batch[:, 1:2, :]
-            elif mix_anglez_enmo:
-                accel_data_batch = accel_data_batch[:, 0:1, :]
-
-            labels_batch = labels_batch[:, :, expand:-expand]
 
             # val model now
-            loss, preds, small_loss, mid_loss, large_loss, num_events = single_validation_step(use_model, accel_data_batch, labels_batch, times_batch)
+            loss, class_loss, pred_occurences, entropy_loss = single_validation_step(use_model, accel_data_batch,
+                                                                                     labels_density_batch,
+                                                                                     labels_occurrence_batch,
+                                                                                     times_batch)
 
             # record
             with torch.no_grad():
-                labels_long = labels_batch.to(torch.long)
+                labels_occurrence_long = (labels_occurrence_batch > 0.5).to(torch.long)
                 val_metrics["loss"].add(loss, increment)
-                val_metrics["metric"].add(preds, labels_long)
-                val_metrics["onset_metric"].add(preds[:, 0, :], labels_long[:, 0, :])
-                val_metrics["wakeup_metric"].add(preds[:, 1, :], labels_long[:, 1, :])
-
-                true_positives, false_positives, true_negatives, false_negatives = \
-                    metrics_iou.compute_iou_metrics(labels_long[:, 0:1, :], preds[:, 0:1, :], iou_threshold=0.1)
-                val_metrics["onset_iou_metric1"].add_direct(true_positives, true_negatives, false_positives,
-                                                            false_negatives)
-                true_positives, false_positives, true_negatives, false_negatives = \
-                    metrics_iou.compute_iou_metrics(labels_long[:, 1:2, :], preds[:, 1:2, :], iou_threshold=0.1)
-                val_metrics["wakeup_iou_metric1"].add_direct(true_positives, true_negatives, false_positives,
-                                                             false_negatives)
-
-                true_positives, false_positives, true_negatives, false_negatives = \
-                    metrics_iou.compute_iou_metrics(labels_long[:, 0:1, :], preds[:, 0:1, :], iou_threshold=0.3)
-                val_metrics["onset_iou_metric3"].add_direct(true_positives, true_negatives, false_positives,
-                                                            false_negatives)
-                true_positives, false_positives, true_negatives, false_negatives = \
-                    metrics_iou.compute_iou_metrics(labels_long[:, 1:2, :], preds[:, 1:2, :], iou_threshold=0.3)
-                val_metrics["wakeup_iou_metric3"].add_direct(true_positives, true_negatives, false_positives,
-                                                             false_negatives)
-
-                true_positives, false_positives, true_negatives, false_negatives = \
-                    metrics_iou.compute_iou_metrics(labels_long[:, 0:1, :], preds[:, 0:1, :])
-                val_metrics["onset_iou_metric5"].add_direct(true_positives, true_negatives, false_positives,
-                                                             false_negatives)
-                true_positives, false_positives, true_negatives, false_negatives = \
-                    metrics_iou.compute_iou_metrics(labels_long[:, 1:2, :], preds[:, 1:2, :])
-                val_metrics["wakeup_iou_metric5"].add_direct(true_positives, true_negatives, false_positives,
-                                                              false_negatives)
+                val_metrics["class_loss"].add(class_loss, increment)
+                val_metrics["class_metric"].add(pred_occurences, labels_occurrence_long)
+                val_metrics["entropy_loss"].add(entropy_loss, increment)
 
             pbar.update(increment)
 
@@ -274,11 +199,13 @@ def plot_single_precision_recall_curve(ax, precisions, recalls, ap, title):
     ax.text(0.5, 0.5, "AP: {:.4f}".format(ap), horizontalalignment="center", verticalalignment="center")
 
 validation_AP_tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30][::-1]
-def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
+def validation_ap(epoch, ap_log_dir, ap_log_dilated_dir, predicted_events, gt_events):
     use_model = swa_model if (use_swa and (epoch > swa_start)) else model
 
     ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
     ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+    ap_onset_metrics_dilated = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+    ap_wakeup_metrics_dilated = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
 
     with torch.no_grad():
         for series_id in tqdm.tqdm(validation_entries):
@@ -288,8 +215,6 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
                 accel_data = accel_data[0:1, :]
             elif use_enmo_only:
                 accel_data = accel_data[1:2, :]
-            elif mix_anglez_enmo:
-                accel_data = accel_data[0:1, :]
 
             # load the times if required
             if use_time_information:
@@ -297,19 +222,17 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
             else:
                 times = None
 
-            proba_preds = model_event_unet.event_confidence_inference(model=use_model, time_series=accel_data,
+            proba_preds = model_event_density_unet.event_density_inference(model=use_model, time_series=accel_data,
                                                                       batch_size=batch_size * 5,
                                                                       prediction_length=prediction_length,
                                                                       expand=expand, times=times,
                                                                       device=config.device,
                                                                       use_time_input=use_time_information,
                                                                       stride_count=8)
-            if prediction_kernel_mode == "constant" and not disable_IOU_converter:
-                onset_IOU_probas = iou_score_converter.convert(proba_preds[0, :])
-                wakeup_IOU_probas = iou_score_converter.convert(proba_preds[1, :])
-            else:
-                onset_IOU_probas = proba_preds[0, :]
-                wakeup_IOU_probas = proba_preds[1, :]
+            onset_IOU_probas = proba_preds[0, :]
+            wakeup_IOU_probas = proba_preds[1, :]
+            onset_IOU_probas_dilated = dilation_converter.convert(onset_IOU_probas)
+            wakeup_IOU_probas_dilated = dilation_converter.convert(wakeup_IOU_probas)
 
             # load the regression predictions
             preds_locs = predicted_events[series_id]
@@ -319,20 +242,28 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
             # restrict
             onset_IOU_probas = onset_IOU_probas[preds_locs_onset]
             wakeup_IOU_probas = wakeup_IOU_probas[preds_locs_wakeup]
+            onset_IOU_probas_dilated = onset_IOU_probas_dilated[preds_locs_onset]
+            wakeup_IOU_probas_dilated = wakeup_IOU_probas_dilated[preds_locs_wakeup]
 
             # get the ground truth
             gt_onset_locs = gt_events[series_id]["onset"]
             gt_wakeup_locs = gt_events[series_id]["wakeup"]
 
             # add info
-            for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+            for ap_onset_metric, ap_wakeup_metric, ap_onset_metric_dilated, ap_wakeup_metric_dilated \
+                    in zip(ap_onset_metrics, ap_wakeup_metrics, ap_onset_metrics_dilated, ap_wakeup_metrics_dilated):
                 ap_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
                 ap_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
+                ap_onset_metric_dilated.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas_dilated, gt_locs=gt_onset_locs)
+                ap_wakeup_metric_dilated.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas_dilated, gt_locs=gt_wakeup_locs)
+
 
     # compute average precision
     ctime = time.time()
     ap_onset_precisions, ap_onset_recalls, ap_onset_average_precisions = [], [], []
     ap_wakeup_precisions, ap_wakeup_recalls, ap_wakeup_average_precisions = [], [], []
+    ap_onset_dilated_precisions, ap_onset_dilated_recalls, ap_onset_dilated_average_precisions = [], [], []
+    ap_wakeup_dilated_precisions, ap_wakeup_dilated_recalls, ap_wakeup_dilated_average_precisions = [], [], []
     for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
         ap_onset_precision, ap_onset_recall, ap_onset_average_precision, _ = ap_onset_metric.get()
         ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision, _ = ap_wakeup_metric.get()
@@ -342,18 +273,27 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
         ap_wakeup_precisions.append(ap_wakeup_precision)
         ap_wakeup_recalls.append(ap_wakeup_recall)
         ap_wakeup_average_precisions.append(ap_wakeup_average_precision)
+
+    for ap_onset_metric_dilated, ap_wakeup_metric_dilated in zip(ap_onset_metrics_dilated, ap_wakeup_metrics_dilated):
+        ap_onset_dilated_precision, ap_onset_dilated_recall, ap_onset_dilated_average_precision, _ = ap_onset_metric_dilated.get()
+        ap_wakeup_dilated_precision, ap_wakeup_dilated_recall, ap_wakeup_dilated_average_precision, _ = ap_wakeup_metric_dilated.get()
+        ap_onset_dilated_precisions.append(ap_onset_dilated_precision)
+        ap_onset_dilated_recalls.append(ap_onset_dilated_recall)
+        ap_onset_dilated_average_precisions.append(ap_onset_dilated_average_precision)
+        ap_wakeup_dilated_precisions.append(ap_wakeup_dilated_precision)
+        ap_wakeup_dilated_recalls.append(ap_wakeup_dilated_recall)
+        ap_wakeup_dilated_average_precisions.append(ap_wakeup_dilated_average_precision)
     print("AP computation time: {:.2f} seconds".format(time.time() - ctime))
 
     # write to dict
     ctime = time.time()
-    for k in range(len(validation_AP_tolerances)):
-        val_history["val_onset_ap{}".format(validation_AP_tolerances[k])].append(ap_onset_average_precisions[k])
-        val_history["val_wakeup_ap{}".format(validation_AP_tolerances[k])].append(ap_wakeup_average_precisions[k])
     val_history["val_onset_mAP"].append(np.mean(ap_onset_average_precisions))
     val_history["val_wakeup_mAP"].append(np.mean(ap_wakeup_average_precisions))
+    val_history["val_onset_dilated_mAP"].append(np.mean(ap_onset_dilated_average_precisions))
+    val_history["val_wakeup_dilated_mAP"].append(np.mean(ap_wakeup_dilated_average_precisions))
 
     # draw the precision-recall curve using matplotlib onto file "epoch{}_AP.png".format(epoch) inside the ap_log_dir
-    fig, axes=  plt.subplots(4, 5, figsize=(20, 16))
+    fig, axes = plt.subplots(4, 5, figsize=(20, 16))
     fig.suptitle("Epoch {} (Onset mAP: {}, Wakeup mAP: {})".format(epoch, np.mean(ap_onset_average_precisions), np.mean(ap_wakeup_average_precisions)))
     for k in range(len(validation_AP_tolerances)):
         ax = axes[k // 5, k % 5]
@@ -362,6 +302,17 @@ def validation_ap(epoch, ap_log_dir, predicted_events, gt_events):
         plot_single_precision_recall_curve(ax, ap_wakeup_precisions[k], ap_wakeup_recalls[k], ap_wakeup_average_precisions[k], "Wakeup AP{}".format(validation_AP_tolerances[k]))
     plt.subplots_adjust(wspace=0.3, hspace=0.3)
     plt.savefig(os.path.join(ap_log_dir, "epoch{}_AP.png".format(epoch)))
+    plt.close()
+
+    fig, axes = plt.subplots(4, 5, figsize=(20, 16))
+    fig.suptitle("Epoch {} (Onset Dilated mAP: {}, Wakeup Dilated mAP: {})".format(epoch, np.mean(ap_onset_dilated_average_precisions), np.mean(ap_wakeup_dilated_average_precisions)))
+    for k in range(len(validation_AP_tolerances)):
+        ax = axes[k // 5, k % 5]
+        plot_single_precision_recall_curve(ax, ap_onset_dilated_precisions[k], ap_onset_dilated_recalls[k], ap_onset_dilated_average_precisions[k], "Onset Dilated AP{}".format(validation_AP_tolerances[k]))
+        ax = axes[(k + 10) // 5, (k + 10) % 5]
+        plot_single_precision_recall_curve(ax, ap_wakeup_dilated_precisions[k], ap_wakeup_dilated_recalls[k], ap_wakeup_dilated_average_precisions[k], "Wakeup Dilated AP{}".format(validation_AP_tolerances[k]))
+    plt.subplots_adjust(wspace=0.3, hspace=0.3)
+    plt.savefig(os.path.join(ap_log_dilated_dir, "epoch{}_AP.png".format(epoch)))
     plt.close()
 
     print("Plotting time: {:.2f} seconds".format(time.time() - ctime))
@@ -393,32 +344,27 @@ def update_SWA_bn(swa_model):
     with torch.no_grad():
         with tqdm.tqdm(total=len(training_sampler)) as pbar:
             while training_sampler.entries_remaining() > 0:
-                accel_data_batch, labels_batch, times_batch, increment = \
+                accel_data_batch, event_infos, times_batch, increment = \
                     training_sampler.sample(batch_size, random_shift=random_shift,
                                             random_flip=random_flip, random_vflip=flip_value, always_flip=always_flip,
                                             expand=expand, elastic_deformation=use_elastic_deformation,
                                             v_elastic_deformation=use_velastic_deformation,
-                                            randomly_dropout_expanded_parts=random_exp_dropout,
-                                            kernel_mode=prediction_kernel_mode, event_tolerance_width=prediction_tolerance_width)
-                assert labels_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(
-                    labels_batch.shape)
-                assert accel_data_batch.shape[-1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(
+
+                                            return_mode="expanded_interval_density")
+                assert accel_data_batch.shape[
+                           -1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(
                     accel_data_batch.shape)
 
                 accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
+
                 if use_anglez_only:
                     accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
                 elif use_enmo_only:
                     accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
-                elif mix_anglez_enmo:
-                    if np.random.rand() < 0.5:
-                        accel_data_batch_torch = accel_data_batch_torch[:, 0:1, :]
-                    else:
-                        accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
 
                 # run forward pass
                 times_input = times_batch if use_time_information else None
-                pred_logits, _, _, _ = swa_model(accel_data_batch_torch, ret_type="attn", time=times_input)
+                swa_model(accel_data_batch_torch, time=times_input)
 
                 pbar.update(increment)
 
@@ -435,7 +381,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a sleeping prediction model with only clean data.")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for. Default 50.")
     parser.add_argument("--learning_rate", type=float, default=5e-3, help="Learning rate to use. Default 5e-3.")
-    parser.add_argument("--use_decay_schedule", action="store_true", help="Whether to use a decay schedule. Default False.")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum to use. Default 0.9. This would be the momentum for SGD, and beta1 for Adam.")
     parser.add_argument("--second_momentum", type=float, default=0.999, help="Second momentum to use. Default 0.999. This would be beta2 for Adam. Ignored if SGD.")
     parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use. Default 0.0.")
@@ -445,44 +390,28 @@ if __name__ == "__main__":
                         help="Number of hidden 2d blocks for ResNet backbone.")
     parser.add_argument("--hidden_channels", type=int, nargs="+", default=[2], help="Number of hidden channels. Default 2. Can be a list to specify num channels in each downsampled layer.")
     parser.add_argument("--bottleneck_factor", type=int, default=4, help="The bottleneck factor of the ResNet backbone. Default 4.")
-    parser.add_argument("--squeeze_excitation", action="store_false", help="Whether to use squeeze and excitation. Default True.")
-    parser.add_argument("--kernel_size", type=int, default=11, help="Kernel size for the first layer. Default 11.")
+    parser.add_argument("--kernel_size", type=int, default=3, help="Kernel size for the first layer. Default 3.")
     parser.add_argument("--attention_blocks", type=int, default=4, help="Number of attention blocks to use. Default 4.")
-    parser.add_argument("--attention_bottleneck", type=int, default=None, help="The bottleneck factor of the attention module. Default None.")
-    parser.add_argument("--attention_mode", type=str, default="learned", help="Attention mode. Default 'learned'. Must be 'learned', 'length' or 'nosym_length'.")
-    parser.add_argument("--upconv_channels_override", type=int, default=None, help="Number of fixed channels for the upsampling path. Default None, do not override.")
+    parser.add_argument("--upconv_channels_override", type=int, default=8, help="Number of fixed channels for the upsampling path. Default 8. If None, do not override.")
     parser.add_argument("--random_shift", type=int, default=0, help="Randomly shift the intervals by at most this amount. Default 0.")
     parser.add_argument("--random_flip", action="store_true", help="Randomly flip the intervals. Default False.")
-    parser.add_argument("--random_exp_dropout", action="store_true", help="Randomly dropout the expanded parts of the intervals. Default False.")
     parser.add_argument("--always_flip", action="store_true", help="Always flip the intervals. Default False.")
     parser.add_argument("--flip_value", action="store_true", help="Whether to flip the value of the intervals. Default False.")
-    parser.add_argument("--expand", type=int, default=0, help="Expand the intervals by this amount. Default 0.")
-    parser.add_argument("--use_batch_norm", action="store_true", help="Whether to use batch norm. Default False.")
-    parser.add_argument("--dropout", type=float, default=0.0, help="Dropout rate. Default 0.0.")
-    parser.add_argument("--dropout_pos_embeddings", action="store_true", help="Whether to dropout the positional embeddings. Default False.")
-    parser.add_argument("--attn_dropout", type=float, default=0.0, help="Attention dropout rate. Default 0.0.")
+    parser.add_argument("--expand", type=int, default=8640, help="Expand the intervals by this amount. Default 8640.")
+    parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate. Default 0.1.")
+    parser.add_argument("--attn_dropout", type=float, default=0.1, help="Attention dropout rate. Default 0.1.")
     parser.add_argument("--use_time_information", action="store_true", help="Whether to use time information. Default False.")
     parser.add_argument("--use_elastic_deformation", action="store_true", help="Whether to use elastic deformation. Default False.")
     parser.add_argument("--use_velastic_deformation", action="store_true", help="Whether to use velastic deformation (only available for anglez). Default False.")
-    parser.add_argument("--use_bounded_ce_loss", action="store_true", help="Whether to use bounded cross entropy loss. Default False.")
-    parser.add_argument("--use_ce_loss", action="store_true", help="Whether to use cross entropy loss. Default False.")
-    parser.add_argument("--use_iou_loss", action="store_true", help="Whether to use IOU loss. Default False.")
-    parser.add_argument("--use_ce_iou_loss", action="store_true", help="Whether to use a combination of cross entropy and IOU loss. Default False.")
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
     parser.add_argument("--use_swa", action="store_true", help="Whether to use SWA. Default False.")
     parser.add_argument("--swa_start", type=int, default=10, help="Epoch to start SWA. Default 10.")
-    parser.add_argument("--mix_anglez_enmo", action="store_true", help="Whether to mix anglez and enmo. Default False.")
-    parser.add_argument("--exclude_bad_series_from_training", action="store_true", help="Whether to exclude bad series from training. Default False.")
+    parser.add_argument("--donot_exclude_bad_series_from_training", action="store_true", help="Whether to not exclude bad series from training. Default False.")
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
     parser.add_argument("--prediction_stride", type=int, default=4320, help="Number of timesteps to stride when predicting. Default 4320.")
-    parser.add_argument("--prediction_kernel_mode", type=str, default="constant", help="Kernel mode for prediction. Default 'constant'. Must be constant, gaussian, laplace.")
-    parser.add_argument("--prediction_tolerance_width", type=int, default=30 * 12, help="Width of the tolerance window for prediction. Default 30 * 12.")
-    parser.add_argument("--positive_weight", type=float, default=1.0, help="Weight for positive examples. Default 1.0.")
-    parser.add_argument("--disable_IOU_converter", action="store_true", help="Whether to disable the IOU converter. Default False.")
-    parser.add_argument("--batch_size", type=int, default=512, help="Batch size. Default 512.")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size. Default 32.")
     parser.add_argument("--num_extra_steps", type=int, default=0, help="Extra steps of gradient descent before the usual step in an epoch. Default 0.")
-    parser.add_argument("--log_average_precision", action="store_false", help="Whether to log the average precision. Default True.")
     manager_folds.add_argparse_arguments(parser)
     manager_models.add_argparse_arguments(parser)
     config.add_argparse_arguments(parser)
@@ -505,7 +434,6 @@ if __name__ == "__main__":
     # obtain model and training parameters
     epochs = args.epochs
     learning_rate = args.learning_rate
-    use_decay_schedule = args.use_decay_schedule
     momentum = args.momentum
     second_momentum = args.second_momentum
     weight_decay = args.weight_decay
@@ -514,64 +442,42 @@ if __name__ == "__main__":
     hidden_blocks = args.hidden_blocks
     hidden_channels = args.hidden_channels
     bottleneck_factor = args.bottleneck_factor
-    squeeze_excitation = args.squeeze_excitation
     kernel_size = args.kernel_size
     attention_blocks = args.attention_blocks
-    attention_bottleneck = args.attention_bottleneck
-    attention_mode = args.attention_mode
     upconv_channels_override = args.upconv_channels_override
     random_shift = args.random_shift
     random_flip = args.random_flip
-    random_exp_dropout = args.random_exp_dropout
     always_flip = args.always_flip
     flip_value = args.flip_value
     expand = args.expand
-    use_batch_norm = args.use_batch_norm
     dropout = args.dropout
-    dropout_pos_embeddings = args.dropout_pos_embeddings
     attn_dropout = args.attn_dropout
     use_time_information = args.use_time_information
     use_elastic_deformation = args.use_elastic_deformation
     use_velastic_deformation = args.use_velastic_deformation
-    use_bounded_ce_loss = args.use_bounded_ce_loss
-    use_ce_loss = args.use_ce_loss
-    use_iou_loss = args.use_iou_loss
-    use_ce_iou_loss = args.use_ce_iou_loss
     use_anglez_only = args.use_anglez_only
     use_enmo_only = args.use_enmo_only
     use_swa = args.use_swa
     swa_start = args.swa_start
-    mix_anglez_enmo = args.mix_anglez_enmo
-    exclude_bad_series_from_training = args.exclude_bad_series_from_training
+    donot_exclude_bad_series_from_training = args.donot_exclude_bad_series_from_training
     prediction_length = args.prediction_length
     prediction_stride = args.prediction_stride
-    prediction_kernel_mode = args.prediction_kernel_mode
-    prediction_tolerance_width = args.prediction_tolerance_width
-    positive_weight = args.positive_weight
-    disable_IOU_converter = args.disable_IOU_converter
     batch_size = args.batch_size
     num_extra_steps = args.num_extra_steps
-    log_average_precision = args.log_average_precision
 
-    assert not (use_iou_loss and use_ce_loss), "Cannot use both IOU loss and cross entropy loss."
-    assert sum([use_anglez_only, use_enmo_only, mix_anglez_enmo]) <= 1, "Cannot use more than one of anglez only, enmo only, and mix anglez and enmo."
+    assert sum([use_anglez_only, use_enmo_only]) <= 1, "Cannot use more than one of anglez only, enmo only"
     assert not (use_time_information and random_flip), "Cannot use time information and random flip at the same time."
-    assert not (use_swa and use_decay_schedule), "Cannot use SWA and decay schedule at the same time."
-    assert prediction_kernel_mode in ["constant", "gaussian", "laplace"], "Invalid prediction kernel mode {}.".format(prediction_kernel_mode)
-    if exclude_bad_series_from_training:
+    if not donot_exclude_bad_series_from_training:
         training_entries = [series_id for series_id in training_entries if series_id not in bad_series_list.noisy_bad_segmentations]
-    if log_average_precision:
-        assert os.path.isdir("./inference_regression_statistics/regression_preds/"), "Must generate regression predictions first. See inference_regression_statistics folder."
-        per_series_id_events = convert_to_seriesid_events.get_events_per_seriesid()
-        regression_predicted_events = convert_to_pred_events.load_all_pred_events_into_dict()
-        iou_score_converter = model_event_unet.ProbasIOUScoreConverter(intersection_width=30 * 12, union_width=60 * 12, device=config.device)
-        ap_log_dir = os.path.join(model_dir, "ap_log")
-        os.mkdir(ap_log_dir)
-    else:
-        per_series_id_events = None
-        regression_predicted_events = None
-        iou_score_converter = None
-        ap_log_dir = None
+
+    assert os.path.isdir("./inference_regression_statistics/regression_preds/"), "Must generate regression predictions first. See inference_regression_statistics folder."
+    per_series_id_events = convert_to_seriesid_events.get_events_per_seriesid()
+    regression_predicted_events = convert_to_pred_events.load_all_pred_events_into_dict()
+    dilation_converter = model_event_density_unet.ProbasDilationConverter(sigma=30 * 12, device=config.device)
+    ap_log_dir = os.path.join(model_dir, "ap_log")
+    ap_log_dilated_dir = os.path.join(model_dir, "ap_log_dilated")
+    os.mkdir(ap_log_dir)
+    os.mkdir(ap_log_dilated_dir)
 
     if isinstance(hidden_channels, int):
         hidden_channels = [hidden_channels]
@@ -583,37 +489,29 @@ if __name__ == "__main__":
 
     print("Epochs: " + str(epochs))
     print("Dropout: " + str(dropout))
-    print("Dropout pos embeddings: " + str(dropout_pos_embeddings))
     print("Attention dropout: " + str(attn_dropout))
-    print("Batch norm: " + str(use_batch_norm))
-    print("Squeeze excitation: " + str(squeeze_excitation))
     print("Bottleneck factor: " + str(bottleneck_factor))
     print("Hidden channels: " + str(hidden_channels))
     print("Hidden blocks: " + str(hidden_blocks))
     print("Kernel size: " + str(kernel_size))
-    print("Attention bottleneck: " + str(attention_bottleneck))
-    print("Attention mode: " + str(attention_mode))
     print("Upconv channels: " + str(upconv_channels_override))
     print("Use SWA: " + str(use_swa))
     model_unet.BATCH_NORM_MOMENTUM = 1 - momentum
 
     # initialize model
-    in_channels = 1 if (use_anglez_only or use_enmo_only or mix_anglez_enmo) else 2
-    model = model_event_unet.EventConfidenceUnet(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
-                            bottleneck_factor=bottleneck_factor, squeeze_excitation=squeeze_excitation,
-                            squeeze_excitation_bottleneck_factor=4,
-                            dropout=dropout, dropout_pos_embeddings=dropout_pos_embeddings,
-                            use_batch_norm=use_batch_norm, attn_out_channels=2, attention_bottleneck=attention_bottleneck,
-                            expected_attn_input_length=17280 + (2 * expand), attention_blocks=attention_blocks,
-                            upconv_channels_override=upconv_channels_override, attention_mode=attention_mode,
-                            attention_dropout=attn_dropout, use_time_input=use_time_information)
+    in_channels = 1 if (use_anglez_only or use_enmo_only) else 2
+    model = model_event_density_unet.EventDensityUnet(in_channels, hidden_channels, kernel_size=kernel_size, blocks=hidden_blocks,
+                            bottleneck_factor=bottleneck_factor, dropout=dropout,
+                            attention_blocks=attention_blocks,
+                            upconv_channels_override=upconv_channels_override, attention_mode="length",
+                            attention_dropout=attn_dropout,
+
+                            use_time_input=use_time_information, training_strategy="density_only",
+                            input_interval_length=prediction_length, input_expand_radius=expand)
     model = model.to(config.device)
 
     # initialize optimizer
-    loss_print = "Cross entropy" if use_ce_loss else ("IOU" if use_iou_loss else ("Cross entropy + IOU" if use_ce_iou_loss else (
-        "Bounded cross entropy" if use_bounded_ce_loss else "Focal"
-    )))
-    print("Loss: " + loss_print)
+    print("Loss: Day KL Divergence")
     print("Learning rate: " + str(learning_rate))
     print("Momentum: " + str(momentum))
     print("Second momentum: " + str(second_momentum))
@@ -657,12 +555,11 @@ if __name__ == "__main__":
         swa_start = args.swa_start
 
     model_config = {
-        "model": "Unet with attention segmentation",
+        "model": "Unet with attention density",
         "training_dataset": train_dset_name,
         "validation_dataset": val_dset_name,
         "epochs": epochs,
         "learning_rate": learning_rate,
-        "use_decay_schedule": use_decay_schedule,
         "momentum": momentum,
         "second_momentum": second_momentum,
         "weight_decay": weight_decay,
@@ -671,44 +568,27 @@ if __name__ == "__main__":
         "hidden_blocks": hidden_blocks,
         "hidden_channels": hidden_channels,
         "bottleneck_factor": bottleneck_factor,
-        "squeeze_excitation": squeeze_excitation,
         "kernel_size": kernel_size,
         "attention_blocks": attention_blocks,
-        "attention_bottleneck": attention_bottleneck,
-        "attention_mode": attention_mode,
         "upconv_channels_override": upconv_channels_override,
         "random_shift": random_shift,
         "random_flip": random_flip,
-        "random_exp_dropout": random_exp_dropout,
         "always_flip": always_flip,
         "flip_value": flip_value,
         "expand": expand,
-        "use_batch_norm": use_batch_norm,
         "dropout": dropout,
-        "dropout_pos_embeddings": dropout_pos_embeddings,
         "attn_dropout": attn_dropout,
         "use_time_information": use_time_information,
         "use_elastic_deformation": use_elastic_deformation,
         "use_velastic_deformation": use_velastic_deformation,
-        "use_bounded_ce_loss": use_bounded_ce_loss,
-        "use_ce_loss": use_ce_loss,
-        "use_iou_loss": use_iou_loss,
-        "use_ce_iou_loss": use_ce_iou_loss,
         "use_anglez_only": use_anglez_only,
         "use_enmo_only": use_enmo_only,
         "use_swa": use_swa,
         "swa_start": swa_start,
-        "mix_anglez_enmo": mix_anglez_enmo,
-        "exclude_bad_series_from_training": exclude_bad_series_from_training,
         "prediction_length": prediction_length,
         "prediction_stride": prediction_stride,
-        "prediction_kernel_mode": prediction_kernel_mode,
-        "prediction_tolerance_width": prediction_tolerance_width,
-        "positive_weight": positive_weight,
-        "disable_IOU_converter": disable_IOU_converter,
         "batch_size": batch_size,
-        "num_extra_steps": num_extra_steps,
-        "log_average_precision": log_average_precision,
+        "num_extra_steps": num_extra_steps
     }
 
     # Save the model config
@@ -721,19 +601,13 @@ if __name__ == "__main__":
     val_history = collections.defaultdict(list)
     val_metrics = {}
     train_metrics["loss"] = metrics.NumericalMetric("train_loss")
-    train_metrics["metric"] = metrics.BinaryMetrics("train_metric")
-    train_metrics["onset_iou_metric"] = metrics.BinaryMetrics("train_onset_iou_metric")
-    train_metrics["wakeup_iou_metric"] = metrics.BinaryMetrics("train_wakeup_iou_metric")
+    train_metrics["class_loss"] = metrics.NumericalMetric("train_class_loss")
+    train_metrics["class_metric"] = metrics.BinaryMetricsTPRFPR("train_class_metric")
+    train_metrics["entropy_loss"] = metrics.NumericalMetric("train_entropy_loss")
     val_metrics["loss"] = metrics.NumericalMetric("val_loss")
-    val_metrics["metric"] = metrics.BinaryMetrics("val_metric")
-    val_metrics["onset_metric"] = metrics.BinaryMetrics("val_onset_metric")
-    val_metrics["wakeup_metric"] = metrics.BinaryMetrics("val_wakeup_metric")
-    val_metrics["onset_iou_metric1"] = metrics.BinaryMetrics("val_onset_iou_metric1")
-    val_metrics["wakeup_iou_metric1"] = metrics.BinaryMetrics("val_wakeup_iou_metric1")
-    val_metrics["onset_iou_metric3"] = metrics.BinaryMetrics("val_onset_iou_metric3")
-    val_metrics["wakeup_iou_metric3"] = metrics.BinaryMetrics("val_wakeup_iou_metric3")
-    val_metrics["onset_iou_metric5"] = metrics.BinaryMetrics("val_onset_iou_metric5")
-    val_metrics["wakeup_iou_metric5"] = metrics.BinaryMetrics("val_wakeup_iou_metric5")
+    val_metrics["class_loss"] = metrics.NumericalMetric("val_class_loss")
+    val_metrics["class_metric"] = metrics.BinaryMetricsTPRFPR("val_class_metric")
+    val_metrics["entropy_loss"] = metrics.NumericalMetric("val_entropy_loss")
 
     # Compile
     #single_training_step_compile = torch.compile(single_training_step)
@@ -748,12 +622,11 @@ if __name__ == "__main__":
     print("Expand: " + str(expand))
     print("Use anglez only: " + str(use_anglez_only))
     print("Use enmo only: " + str(use_enmo_only))
-    print("Mix anglez and enmo: " + str(mix_anglez_enmo))
-    training_sampler = convert_to_interval_events.IntervalEventsSampler(training_entries, all_data,
+    training_sampler = convert_to_interval_density_events.IntervalDensityEventsSampler(training_entries, all_data,
                                                                         train_or_test="train",
                                                                         prediction_length=prediction_length,
                                                                         prediction_stride=prediction_stride)
-    val_sampler = convert_to_interval_events.IntervalEventsSampler(validation_entries, all_data,
+    val_sampler = convert_to_interval_density_events.IntervalDensityEventsSampler(validation_entries, all_data,
                                                                         train_or_test="val",
                                                                         prediction_length=prediction_length,
                                                                         prediction_stride=prediction_stride)
@@ -795,9 +668,8 @@ if __name__ == "__main__":
                 swa_model.eval()
             with torch.no_grad():
                 validation_step()
-                if log_average_precision:
-                    validation_ap(epoch=epoch, ap_log_dir=ap_log_dir, predicted_events=regression_predicted_events,
-                                  gt_events=per_series_id_events)
+                validation_ap(epoch=epoch, ap_log_dir=ap_log_dir, ap_log_dilated_dir=ap_log_dilated_dir,
+                              predicted_events=regression_predicted_events, gt_events=per_series_id_events)
 
             print()
             print_history(train_history)
@@ -816,21 +688,6 @@ if __name__ == "__main__":
                     torch.save(swa_scheduler.state_dict(), os.path.join(model_dir, "swa_scheduler_{}.pt".format(epoch)))
 
             gc.collect()
-
-            # adjust learning rate
-            if not use_swa:
-                if warmup_steps > 0:
-                    warmup_steps -= 1
-                    if warmup_steps == 0:
-                        for g in optimizer.param_groups:
-                            g["lr"] = learning_rate
-                else:
-                    if use_decay_schedule:
-                        if epoch > 25:
-                            new_rate = learning_rate * 0.98 * np.power(0.9, (epoch - 25)) + learning_rate * 0.02
-                            print("Setting learning rate to {:.5f}".format(new_rate))
-                            for g in optimizer.param_groups:
-                                g["lr"] = new_rate
 
         print("Training complete! Saving and finalizing...")
     except KeyboardInterrupt:

@@ -1,7 +1,5 @@
 from typing import Optional
 
-import torch
-from model_unet import *
 from model_attention_unet import *
 
 class UnetAttnHead(torch.nn.Module):
@@ -270,6 +268,7 @@ class EventConfidenceUnet(torch.nn.Module):
 
     def get_device(self) -> torch.device:
         return next(self.parameters()).device
+
 
 def index_array(arr: np.ndarray, low: int, high: int):
     # index select arr along the last axis, from low to high
