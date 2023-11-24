@@ -628,7 +628,8 @@ if __name__ == "__main__":
     training_sampler = convert_to_interval_density_events.IntervalDensityEventsSampler(training_entries, all_data,
                                                                         train_or_test="train",
                                                                         prediction_length=prediction_length,
-                                                                        prediction_stride=prediction_stride)
+                                                                        prediction_stride=prediction_stride,
+                                                                        is_enmo_only=use_enmo_only)
     val_sampler = convert_to_interval_density_events.IntervalDensityEventsSampler(validation_entries, all_data,
                                                                         train_or_test="val",
                                                                         prediction_length=prediction_length,
