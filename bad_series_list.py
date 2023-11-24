@@ -5,7 +5,7 @@ bad_segmentations_tail = bad_segmentations_tail + [
 ] # partial, with some non-completed segmentations at the end, followed by really taking off watch. still excluded since the contents of taking off watch are not much
 
 noisy_bad_segmentations = [
-    "13b4d6a01d27", "4feda0596965", "60d31b0bec3b", "e4500e7e19e1", "f56824b503a0"
+    "13b4d6a01d27", "4feda0596965", "60d31b0bec3b", "e4500e7e19e1", "f56824b503a0", "cf13ed7e457a"
 ] # see bad_series_notes.txt
 
-#cf13ed7e457a
+#cf13ed7e457a, many repeating segments with unlabelled events. can be removed with matrix profile
