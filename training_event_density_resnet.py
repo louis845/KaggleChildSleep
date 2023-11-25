@@ -94,10 +94,13 @@ def training_step(record: bool):
                                         random_flip=random_flip, random_vflip=flip_value, always_flip=always_flip,
                                         expand=expand, elastic_deformation=use_elastic_deformation, v_elastic_deformation=use_velastic_deformation,
 
-                                        return_mode="expanded_interval_density")
+                                        return_mode="interval_density_and_expanded_events" if use_center_softmax else "expanded_interval_density")
             labels_density_batch = event_infos["density"]
             labels_occurrence_batch = event_infos["occurrence"]
-            assert labels_density_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(labels_density_batch.shape)
+            if use_center_softmax:
+                assert labels_density_batch.shape[-1] == prediction_length, "labels_batch.shape = {}".format(labels_density_batch.shape)
+            else:
+                assert labels_density_batch.shape[-1] == 2 * expand + prediction_length, "labels_batch.shape = {}".format(labels_density_batch.shape)
             assert labels_density_batch.shape[-2] == 2, "labels_batch.shape = {}".format(labels_density_batch.shape)
             assert len(labels_occurrence_batch.shape) == 2, "labels_occurrence_batch.shape = {}".format(labels_occurrence_batch.shape)
             assert labels_occurrence_batch.shape[-1] == 2, "labels_occurrence_batch.shape = {}".format(labels_occurrence_batch.shape)
@@ -191,7 +194,7 @@ def validation_step():
         while val_sampler.entries_remaining() > 0:
             # load the batch
             accel_data_batch, event_infos, times_batch, increment = val_sampler.sample(batch_size, expand=expand,
-                                                                                        return_mode="expanded_interval_density")
+                return_mode="interval_density_and_expanded_events" if use_center_softmax else "expanded_interval_density")
             labels_density_batch = event_infos["density"]
             labels_occurrence_batch = event_infos["occurrence"]
 
@@ -495,10 +498,8 @@ def update_SWA_bn(swa_model): # modified from PyTorch swa_utils source code.
                                             expand=expand, elastic_deformation=use_elastic_deformation,
                                             v_elastic_deformation=use_velastic_deformation,
 
-                                            return_mode="expanded_interval_density")
-                assert accel_data_batch.shape[
-                           -1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(
-                    accel_data_batch.shape)
+                                            return_mode="interval_density_and_expanded_events" if use_center_softmax else "expanded_interval_density")
+                assert accel_data_batch.shape[-1] == 2 * expand + prediction_length, "accel_data_batch.shape = {}".format(accel_data_batch.shape)
 
                 accel_data_batch_torch = torch.tensor(accel_data_batch, dtype=torch.float32, device=config.device)
 
@@ -865,11 +866,11 @@ if __name__ == "__main__":
         torch.save(swa_model.state_dict(), os.path.join(model_dir, "swa_model.pt"))
         torch.save(swa_scheduler.state_dict(), os.path.join(model_dir, "swa_scheduler.pt"))
 
+    memory_logger.close()
+
     # save metrics
     if len(train_history) > 0:
         train_df = pd.DataFrame(train_history)
         val_df = pd.DataFrame(val_history)
         train_df.to_csv(os.path.join(model_dir, "train_metrics.csv"), index=True)
         val_df.to_csv(os.path.join(model_dir, "val_metrics.csv"), index=True)
-
-    memory_logger.close()
