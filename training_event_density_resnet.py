@@ -252,9 +252,9 @@ def validation_ap(epoch, ap_log_dir, ap_log_dilated_dir, ap_log_aligned_dir, ap_
             preds_locs_wakeup_aug = (wakeup_IOU_probas[1:-1] >= wakeup_IOU_probas[0:-2]) & (wakeup_IOU_probas[1:-1] >= wakeup_IOU_probas[2:])
             preds_locs_wakeup_aug = np.argwhere(preds_locs_wakeup_aug).flatten() + 1
             if len(preds_locs_onset_aug) > 0:
-                preds_locs_onset_aug = postprocessing.prune(preds_locs_onset_aug, onset_IOU_probas, pruning_radius=60)
+                preds_locs_onset_aug = postprocessing.prune(preds_locs_onset_aug, onset_IOU_probas[preds_locs_onset_aug], pruning_radius=60)
             if len(preds_locs_wakeup_aug) > 0:
-                preds_locs_wakeup_aug = postprocessing.prune(preds_locs_wakeup_aug, wakeup_IOU_probas, pruning_radius=60)
+                preds_locs_wakeup_aug = postprocessing.prune(preds_locs_wakeup_aug, wakeup_IOU_probas[preds_locs_wakeup_aug], pruning_radius=60)
             if len(preds_locs_onset_aug) > 0:
                 onset_relative_locs = postprocessing.prune_relative(preds_locs_onset_aug, preds_locs_onset, pruning_radius=60)
                 preds_locs_onset_augpruned = np.unique(np.concatenate((preds_locs_onset_aug, onset_relative_locs)))
@@ -289,12 +289,12 @@ def validation_ap(epoch, ap_log_dir, ap_log_dilated_dir, ap_log_aligned_dir, ap_
                 ap_wakeup_metric_dilated.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas_dilated, gt_locs=gt_wakeup_locs)
 
             # add aligned and augmented pruned info
-            for ap_onset_metrics_aligned, ap_wakeup_metrics_aligned, ap_onset_metrics_augpruned, ap_wakeup_metrics_augpruned \
+            for ap_onset_metric_aligned, ap_wakeup_metric_aligned, ap_onset_metric_augpruned, ap_wakeup_metric_augpruned \
                     in zip(ap_onset_metrics_aligned, ap_wakeup_metrics_aligned, ap_onset_metrics_augpruned, ap_wakeup_metrics_augpruned):
-                ap_onset_metrics_aligned.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_aligned_probas, gt_locs=gt_onset_locs)
-                ap_wakeup_metrics_aligned.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_aligned_probas, gt_locs=gt_wakeup_locs)
-                ap_onset_metrics_augpruned.add(pred_locs=preds_locs_onset_augpruned, pred_probas=onset_IOU_augpruned_probas, gt_locs=gt_onset_locs)
-                ap_wakeup_metrics_augpruned.add(pred_locs=preds_locs_wakeup_augpruned, pred_probas=wakeup_IOU_augpruned_probas, gt_locs=gt_wakeup_locs)
+                ap_onset_metric_aligned.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_aligned_probas, gt_locs=gt_onset_locs)
+                ap_wakeup_metric_aligned.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_aligned_probas, gt_locs=gt_wakeup_locs)
+                ap_onset_metric_augpruned.add(pred_locs=preds_locs_onset_augpruned, pred_probas=onset_IOU_augpruned_probas, gt_locs=gt_onset_locs)
+                ap_wakeup_metric_augpruned.add(pred_locs=preds_locs_wakeup_augpruned, pred_probas=wakeup_IOU_augpruned_probas, gt_locs=gt_wakeup_locs)
 
 
 
