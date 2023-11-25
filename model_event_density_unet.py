@@ -226,11 +226,13 @@ def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
         assert set(predicted_locations.keys()) == {"onset", "wakeup"}, "predicted_locations must contain onset and wakeup"
         assert isinstance(predicted_locations["onset"], np.ndarray), "predicted_locations[onset] must be a numpy array"
         assert isinstance(predicted_locations["wakeup"], np.ndarray), "predicted_locations[wakeup] must be a numpy array"
-        assert predicted_locations["onset"].dtype == np.int32, "predicted_locations[onset] must be int32"
-        assert predicted_locations["wakeup"].dtype == np.int32, "predicted_locations[wakeup] must be int32"
+        assert predicted_locations["onset"].dtype == np.int32 or predicted_locations["onset"].dtype == np.int64,\
+            "predicted_locations[onset] must be int32. Found type: {}".format(predicted_locations["onset"].dtype)
+        assert predicted_locations["wakeup"].dtype == np.int32 or predicted_locations["wakeup"].dtype == np.int64,\
+            "predicted_locations[wakeup] must be int32. Found type: {}".format(predicted_locations["wakeup"].dtype)
 
-        assert predicted_locations["onset"][1:] > predicted_locations["onset"][:-1], "predicted_locations[onset] must be sorted"
-        assert predicted_locations["wakeup"][1:] > predicted_locations["wakeup"][:-1], "predicted_locations[wakeup] must be sorted"
+        assert np.all(predicted_locations["onset"][1:] > predicted_locations["onset"][:-1]), "predicted_locations[onset] must be sorted"
+        assert np.all(predicted_locations["wakeup"][1:] > predicted_locations["wakeup"][:-1]), "predicted_locations[wakeup] must be sorted"
 
         onset_locs_probas = np.zeros((len(predicted_locations["onset"]),), dtype=np.float32)
         wakeup_locs_probas = np.zeros((len(predicted_locations["wakeup"]),), dtype=np.float32)
