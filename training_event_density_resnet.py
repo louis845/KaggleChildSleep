@@ -36,9 +36,10 @@ def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor):
     ce = torch.nn.functional.cross_entropy(preds, ground_truth, reduction="none")
     kl = ce + entropy
 
-    l2 = torch.sum((preds - ground_truth) ** 2, dim=1)
+    preds_probas = torch.softmax(preds, dim=1)
+    l2 = torch.sum((preds_probas - ground_truth) ** 2, dim=1)
 
-    return 10.0 * (l2 * kl).mean(dim=-1).sum()
+    return 200.0 * (l2 * kl).mean(dim=-1).sum()
 
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
@@ -53,11 +54,11 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
         deep_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_token_confidence, labels_segmentation_batch, reduction="none").mean(dim=-1).sum()
     else:
         pred_density_logits, pred_occurences = model_(accel_data_batch, time=times_input)
-    entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
     if use_focal_loss:
-        class_loss = focal_loss(pred_occurences, labels_occurrence_batch)
+        entropy_loss = focal_loss(pred_density_logits, labels_density_batch)
     else:
-        class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch, reduction="none").mean(dim=-1).sum()
+        entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
+    class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch, reduction="none").mean(dim=-1).sum()
     if use_center_softmax:
         loss = entropy_loss + class_loss + deep_loss
         deep_loss_ret = deep_loss.item()
@@ -546,13 +547,17 @@ if __name__ == "__main__":
     regression_dense_predicted_events = convert_to_pred_events.load_all_pred_events_into_dict("regression_preds_dense")
     dilation_converter = model_event_density_unet.ProbasDilationConverter(sigma=30 * 12, device=config.device)
     ap_log_dir = os.path.join(model_dir, "ap_log")
-    ap_log_dilated_dir = os.path.join(model_dir, "ap_log_dilated")
     ap_log_aligned_dir = os.path.join(model_dir, "ap_log_aligned")
     ap_log_loc_softmax_dir = os.path.join(model_dir, "ap_log_loc_softmax")
+    ap_dense_log_dir = os.path.join(model_dir, "ap_dense_log")
+    ap_dense_log_aligned_dir = os.path.join(model_dir, "ap_dense_log_aligned")
+    ap_dense_log_loc_softmax_dir = os.path.join(model_dir, "ap_dense_log_loc_softmax")
     os.mkdir(ap_log_dir)
-    os.mkdir(ap_log_dilated_dir)
     os.mkdir(ap_log_aligned_dir)
     os.mkdir(ap_log_loc_softmax_dir)
+    os.mkdir(ap_dense_log_dir)
+    os.mkdir(ap_dense_log_aligned_dir)
+    os.mkdir(ap_dense_log_loc_softmax_dir)
 
     if isinstance(hidden_channels, int):
         hidden_channels = [hidden_channels]
@@ -754,8 +759,9 @@ if __name__ == "__main__":
                 swa_model.eval()
             with torch.no_grad():
                 validation_step()
-                validation_ap(epoch=epoch, ap_log_dir=ap_log_dir, ap_log_dilated_dir=ap_log_dilated_dir,
-                              ap_log_aligned_dir=ap_log_aligned_dir, ap_log_loc_softmax_dir=ap_log_loc_softmax_dir,
+                validation_ap(epoch=epoch, ap_log_dir=ap_log_dir,  ap_log_aligned_dir=ap_log_aligned_dir, ap_log_loc_softmax_dir=ap_log_loc_softmax_dir,
+                              ap_dense_log_dir=ap_dense_log_dir, ap_dense_log_aligned_dir=ap_dense_log_aligned_dir,
+                              ap_dense_log_loc_softmax_dir=ap_dense_log_loc_softmax_dir,
                               predicted_events=regression_predicted_events,
                               dense_predicted_events=regression_dense_predicted_events,
                               gt_events=per_series_id_events)
