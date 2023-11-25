@@ -144,14 +144,14 @@ class IntervalDensityEventsSampler:
                 onset, wakeup = wakeup, onset
             if onset is not None:
                 convert_to_interval_events.set_kernel_range(event_segmentations, idx=0, loc=onset,
-                                                            kernel_shape="gaussian", kernel_radius=30, replace_radius=event_tolerance_width)
+                                                            kernel_shape="laplace", kernel_radius=30, replace_radius=event_tolerance_width)
                 if 0 <= onset < event_segmentations.shape[1]:
                     has_onset = True
                 if expand <= onset < event_segmentations.shape[1] - expand:
                     has_onset_in_center = True
             if wakeup is not None:
                 convert_to_interval_events.set_kernel_range(event_segmentations, idx=1, loc=wakeup,
-                                                            kernel_shape="gaussian", kernel_radius=30, replace_radius=event_tolerance_width)
+                                                            kernel_shape="laplace", kernel_radius=30, replace_radius=event_tolerance_width)
                 if 0 <= wakeup < event_segmentations.shape[1]:
                     has_wakeup = True
                 if expand <= wakeup < event_segmentations.shape[1] - expand:

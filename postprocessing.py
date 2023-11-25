@@ -28,6 +28,32 @@ def prune(event_locs, event_vals, pruning_radius):
                 keeps[descending_order[k]] = True
     return event_locs[keeps]
 
+def prune_relative(reference_event_locs, event_locs, pruning_radius=60):
+    prune_low = reference_event_locs - pruning_radius + 1
+    prune_high = reference_event_locs + pruning_radius
+    d = prune_low[1:] - prune_high[:-1]
+    prune_low = prune_low[np.concatenate([[True], d > 0], axis=0)]
+    prune_high = prune_high[np.concatenate([d > 0, [True]], axis=0)]
+
+    low_idx = np.searchsorted(prune_low, event_locs, side="left")
+    high_idx = np.searchsorted(prune_high, event_locs, side="right")
+
+    return event_locs[low_idx != high_idx]
+
+def align_index_probas(event_locs, probas_array, align_radius=60):
+    event_probas = np.zeros(len(event_locs), dtype=np.float32)
+    for k in range(len(event_locs)):
+        low = max(event_locs[k] - align_radius + 1, 0)
+        high = min(event_locs[k] + align_radius, len(probas_array))
+        probas_of_interest = probas_array[low:high]
+        idxmax = np.argmax(probas_of_interest)
+        if 0 < idxmax < len(probas_of_interest) - 1:
+            event_probas[k] = probas_of_interest[idxmax]
+        else:
+            event_probas[k] = probas_array[event_locs[k]]
+
+    return event_probas
+
 def prune_ROI_possible_probas(keeps, event_probas, left_idx, right_idx, interest_idx, cutoff):
     if right_idx - left_idx > 1:
         inradius_probas = event_probas[left_idx:right_idx]
