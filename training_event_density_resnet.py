@@ -48,13 +48,27 @@ def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tens
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
                             accel_data_batch: torch.Tensor, labels_density_batch: torch.Tensor,
-                            labels_occurrence_batch: torch.Tensor, times_batch: np.ndarray):
+                            labels_occurrence_batch: torch.Tensor,
+                            labels_segmentation_batch: torch.Tensor,
+                            times_batch: np.ndarray):
     optimizer_.zero_grad()
     times_input = times_batch if use_time_information else None
-    pred_density_logits, pred_occurences = model_(accel_data_batch, time=times_input)
+    if use_center_softmax:
+        pred_density_logits, pred_occurences, pred_token_confidence = model_(accel_data_batch, time=times_input)
+        deep_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_token_confidence, labels_segmentation_batch, reduction="none").mean(dim=-1).sum()
+    else:
+        pred_density_logits, pred_occurences = model_(accel_data_batch, time=times_input)
     entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
     class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch, reduction="none").mean(dim=-1).sum()
-    loss = entropy_loss + class_loss
+    if use_center_softmax:
+        loss = entropy_loss + class_loss + deep_loss
+        deep_loss_ret = deep_loss.item()
+        with torch.no_grad():
+            pred_token_confidence_ret = (pred_token_confidence > 0.0).to(torch.long)
+    else:
+        loss = entropy_loss + class_loss
+        deep_loss_ret = None
+        pred_token_confidence_ret = None
 
     loss.backward()
     optimizer_.step()
@@ -62,7 +76,7 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
     with torch.no_grad():
         pred_occurences = pred_occurences > 0.0
 
-    return loss.item(), class_loss.item(), pred_occurences.to(torch.long), entropy_loss.item()
+    return loss.item(), class_loss.item(), deep_loss_ret, pred_occurences.to(torch.long), pred_token_confidence_ret, entropy_loss.item()
 
 def training_step(record: bool):
     if record:
@@ -100,11 +114,22 @@ def training_step(record: bool):
             elif use_enmo_only:
                 accel_data_batch_torch = accel_data_batch_torch[:, 1:2, :]
 
+            if use_center_softmax:
+                labels_segmentation_batch = event_infos["segmentation"]
+                assert labels_segmentation_batch.shape[-1] == (2 * expand + prediction_length) // model.input_length_multiple, "labels_segmentation_batch.shape = {}".format(labels_segmentation_batch.shape)
+                assert labels_segmentation_batch.shape[-2] == 2, "labels_segmentation_batch.shape = {}".format(labels_segmentation_batch.shape)
+                labels_segmentation_batch_torch = torch.tensor(labels_segmentation_batch, dtype=torch.float32, device=config.device)
+            else:
+                labels_segmentation_batch_torch = None
+
             # train model now
-            loss, class_loss, pred_occurences, entropy_loss = single_training_step(model, optimizer,
-                                                                           accel_data_batch_torch,
-                                                                           labels_density_batch_torch,
-                                                                           labels_occurrence_batch_torch, times_batch)
+            loss, class_loss, deep_loss, pred_occurences, pred_token_confidence, entropy_loss =\
+                single_training_step(model, optimizer,
+                                       accel_data_batch_torch,
+                                       labels_density_batch_torch,
+                                       labels_occurrence_batch_torch,
+                                       labels_segmentation_batch_torch,
+                                       times_batch)
             #time.sleep(0.2)
 
             # record
@@ -115,6 +140,9 @@ def training_step(record: bool):
                     train_metrics["class_loss"].add(class_loss, increment)
                     train_metrics["class_metric"].add(pred_occurences, labels_occurrence_long)
                     train_metrics["entropy_loss"].add(entropy_loss, increment)
+                    if use_center_softmax:
+                        train_metrics["deep_loss"].add(deep_loss, increment)
+                        train_metrics["deep_metric"].add(pred_token_confidence, labels_segmentation_batch_torch.to(torch.long))
 
             pbar.update(increment)
 
@@ -128,17 +156,29 @@ def training_step(record: bool):
 
 def single_validation_step(model_: torch.nn.Module, accel_data_batch: torch.Tensor,
                            labels_density_batch: torch.Tensor, labels_occurrence_batch: torch.Tensor,
-                           times_batch: np.ndarray):
+                           labels_segmentation_batch: torch.Tensor, times_batch: np.ndarray):
     with torch.no_grad():
         times_input = times_batch if use_time_information else None
-        pred_density_logits, pred_occurences = model_(accel_data_batch, time=times_input, return_as_training=True)
+        if use_center_softmax:
+            pred_density_logits, pred_occurences, pred_token_confidence = model_(accel_data_batch, time=times_input, return_as_training=True)
+            deep_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_token_confidence, labels_segmentation_batch, reduction="none").mean(dim=-1).sum()
+            pred_token_confidence = (pred_token_confidence > 0.0).to(torch.long)
+        else:
+            pred_density_logits, pred_occurences = model_(accel_data_batch, time=times_input, return_as_training=True)
+            deep_loss = None
+            pred_token_confidence = None
+
         entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch,
                                                          reduction="none").mean(dim=-1).sum()
         class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch,
                                                                           reduction="none").mean(dim=-1).sum()
-        loss = entropy_loss + class_loss
+        if use_center_softmax:
+            loss = entropy_loss + class_loss + deep_loss
+            deep_loss = deep_loss.item()
+        else:
+            loss = entropy_loss + class_loss
         pred_occurences = pred_occurences > 0.0
-        return loss.item(), class_loss.item(), pred_occurences.to(torch.long), entropy_loss.item()
+        return loss.item(), class_loss.item(), deep_loss, pred_occurences.to(torch.long), pred_token_confidence, entropy_loss.item()
 
 def validation_step():
     for key in val_metrics:
@@ -166,11 +206,20 @@ def validation_step():
             elif use_enmo_only:
                 accel_data_batch = accel_data_batch[:, 1:2, :]
 
+            if use_center_softmax:
+                labels_segmentation_batch = event_infos["segmentation"]
+                labels_segmentation_batch = torch.tensor(labels_segmentation_batch, dtype=torch.float32,
+                                                               device=config.device)
+            else:
+                labels_segmentation_batch = None
+
             # val model now
-            loss, class_loss, pred_occurences, entropy_loss = single_validation_step(use_model, accel_data_batch,
-                                                                                     labels_density_batch,
-                                                                                     labels_occurrence_batch,
-                                                                                     times_batch)
+            loss, class_loss, deep_loss, pred_occurences, pred_token_confidence, entropy_loss =\
+                single_validation_step(use_model, accel_data_batch,
+                                             labels_density_batch,
+                                             labels_occurrence_batch,
+                                             labels_segmentation_batch,
+                                             times_batch)
 
             # record
             with torch.no_grad():
@@ -179,6 +228,9 @@ def validation_step():
                 val_metrics["class_loss"].add(class_loss, increment)
                 val_metrics["class_metric"].add(pred_occurences, labels_occurrence_long)
                 val_metrics["entropy_loss"].add(entropy_loss, increment)
+                if use_center_softmax:
+                    val_metrics["deep_loss"].add(deep_loss, increment)
+                    val_metrics["deep_metric"].add(pred_token_confidence, labels_segmentation_batch.to(torch.long))
 
             pbar.update(increment)
 
@@ -414,7 +466,7 @@ def print_history(metrics_history):
     for key in metrics_history:
         print("{}      {}".format(key, metrics_history[key][-1]))
 
-def update_SWA_bn(swa_model):
+def update_SWA_bn(swa_model): # modified from PyTorch swa_utils source code.
     # get previous momentum
     momenta = {}
     for module in swa_model.modules():
@@ -498,6 +550,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_velastic_deformation", action="store_true", help="Whether to use velastic deformation (only available for anglez). Default False.")
     parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
     parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
+    parser.add_argument("--use_center_softmax", action="store_true", help="Whether to train the model by predicting the softmax only in the center. Default False.")
     parser.add_argument("--use_swa", action="store_true", help="Whether to use SWA. Default False.")
     parser.add_argument("--swa_start", type=int, default=10, help="Epoch to start SWA. Default 10.")
     parser.add_argument("--donot_exclude_bad_series_from_training", action="store_true", help="Whether to not exclude bad series from training. Default False.")
@@ -550,6 +603,7 @@ if __name__ == "__main__":
     use_velastic_deformation = args.use_velastic_deformation
     use_anglez_only = args.use_anglez_only
     use_enmo_only = args.use_enmo_only
+    use_center_softmax = args.use_center_softmax
     use_swa = args.use_swa
     swa_start = args.swa_start
     donot_exclude_bad_series_from_training = args.donot_exclude_bad_series_from_training
@@ -603,7 +657,7 @@ if __name__ == "__main__":
                             upconv_channels_override=upconv_channels_override, attention_mode="length",
                             attention_dropout=attn_dropout,
 
-                            use_time_input=use_time_information, training_strategy="density_only",
+                            use_time_input=use_time_information, training_strategy="density_and_confidence" if use_center_softmax else "density_only",
                             input_interval_length=prediction_length, input_expand_radius=expand)
     model = model.to(config.device)
 
@@ -680,6 +734,7 @@ if __name__ == "__main__":
         "use_velastic_deformation": use_velastic_deformation,
         "use_anglez_only": use_anglez_only,
         "use_enmo_only": use_enmo_only,
+        "use_center_softmax": use_center_softmax,
         "use_swa": use_swa,
         "swa_start": swa_start,
         "prediction_length": prediction_length,
@@ -700,10 +755,16 @@ if __name__ == "__main__":
     train_metrics["loss"] = metrics.NumericalMetric("train_loss")
     train_metrics["class_loss"] = metrics.NumericalMetric("train_class_loss")
     train_metrics["class_metric"] = metrics.BinaryMetricsTPRFPR("train_class_metric")
+    if use_center_softmax:
+        train_metrics["deep_loss"] = metrics.NumericalMetric("train_deep_loss")
+        train_metrics["deep_metric"] = metrics.BinaryMetrics("train_deep_metric")
     train_metrics["entropy_loss"] = metrics.NumericalMetric("train_entropy_loss")
     val_metrics["loss"] = metrics.NumericalMetric("val_loss")
     val_metrics["class_loss"] = metrics.NumericalMetric("val_class_loss")
     val_metrics["class_metric"] = metrics.BinaryMetricsTPRFPR("val_class_metric")
+    if use_center_softmax:
+        val_metrics["deep_loss"] = metrics.NumericalMetric("val_deep_loss")
+        val_metrics["deep_metric"] = metrics.BinaryMetrics("val_deep_metric")
     val_metrics["entropy_loss"] = metrics.NumericalMetric("val_entropy_loss")
 
     # Compile
@@ -720,11 +781,13 @@ if __name__ == "__main__":
     print("Use anglez only: " + str(use_anglez_only))
     print("Use enmo only: " + str(use_enmo_only))
     training_sampler = convert_to_interval_density_events.IntervalDensityEventsSampler(training_entries, all_data,
+                                                                        input_length_multiple=model.input_length_multiple,
                                                                         train_or_test="train",
                                                                         prediction_length=prediction_length,
                                                                         prediction_stride=prediction_stride,
                                                                         is_enmo_only=use_enmo_only)
     val_sampler = convert_to_interval_density_events.IntervalDensityEventsSampler(validation_entries, all_data,
+                                                                        input_length_multiple=model.input_length_multiple,
                                                                         train_or_test="val",
                                                                         prediction_length=prediction_length,
                                                                         prediction_stride=prediction_stride)

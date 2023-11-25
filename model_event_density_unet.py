@@ -1,6 +1,11 @@
-import torch
-
 from model_event_unet import *
+
+def stable_softmax(x: np.ndarray) -> np.ndarray:
+    assert isinstance(x, np.ndarray), "x must be a numpy array"
+    assert len(x.shape) == 1, "x must be a 1D array"
+    x = x - np.max(x)
+    exp_x = np.exp(x)
+    return exp_x / np.sum(exp_x)
 
 class EventDensityUnet(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels=[2, 2, 4, 8, 16, 32, 32], kernel_size=3,
@@ -26,7 +31,8 @@ class EventDensityUnet(torch.nn.Module):
         assert training_strategy in ["density_only",
                                      "density_and_confidence"], "training_strategy must be one of ['density_only', 'density_and_confidence']"
 
-        self.input_length_multiple = 3 * (2 ** (len(blocks) - 2))
+        self.input_length_multiples = [1] + [3 * (2 ** k) for k in range(len(blocks) - 1)]
+        self.input_length_multiple = self.input_length_multiples[-1]
 
         # modules for stem and deep supervision outputs
         self.stem = ResNetBackbone(in_channels, hidden_channels, kernel_size, blocks, bottleneck_factor,
@@ -60,40 +66,17 @@ class EventDensityUnet(torch.nn.Module):
         self.out_presence_pool = torch.nn.AdaptiveMaxPool1d(1)
         self.out_presence_conv = torch.nn.Conv1d(stem_final_layer_channels, 2, kernel_size=1, bias=True)
 
+        if training_strategy == "density_and_confidence":
+            self.out_confidence_conv = torch.nn.Conv1d(stem_final_layer_channels, 2, kernel_size=1, bias=True)
+
         if upconv_channels_override is not None:
-            if training_strategy == "density_only":
-                self.outconv = torch.nn.Conv1d(upconv_channels_override,
-                                               2, kernel_size=1,
-                                               bias=True, padding="same", padding_mode="replicate")
-            else:
-                self.outconv_confidence = torch.nn.Conv1d(upconv_channels_override,
-                                                          2, kernel_size=1,
-                                                          bias=True, padding="same", padding_mode="replicate")
-                self.outconv_densityConv = torch.nn.Conv1d(upconv_channels_override,
-                                                           upconv_channels_override, kernel_size=1,
-                                                           bias=True, padding="same", padding_mode="replicate")
-                self.out_norm = torch.nn.GroupNorm(num_channels=upconv_channels_override, num_groups=4)
-                self.out_nonlin = torch.nn.GELU()
-                self.outconv_density = torch.nn.Conv1d(upconv_channels_override,
-                                                       2, kernel_size=1,
-                                                       bias=True, padding="same", padding_mode="replicate")
+            self.outconv = torch.nn.Conv1d(upconv_channels_override,
+                                           2, kernel_size=1,
+                                           bias=True, padding="same", padding_mode="replicate")
         else:
-            if training_strategy == "density_only":
-                self.outconv = torch.nn.Conv1d(hidden_channels[-1],
-                                               2, kernel_size=1,
-                                               bias=True, padding="same", padding_mode="replicate")
-            else:
-                self.outconv_confidence = torch.nn.Conv1d(hidden_channels[-1],
-                                                          2, kernel_size=1,
-                                                          bias=True, padding="same", padding_mode="replicate")
-                self.outconv_densityConv = torch.nn.Conv1d(hidden_channels[-1],
-                                                           hidden_channels[-1], kernel_size=1,
-                                                           bias=True, padding="same", padding_mode="replicate")
-                self.out_norm = torch.nn.GroupNorm(num_channels=hidden_channels[-1], num_groups=4)
-                self.out_nonlin = torch.nn.GELU()
-                self.outconv_density = torch.nn.Conv1d(hidden_channels[-1],
-                                                       2, kernel_size=1,
-                                                       bias=True, padding="same", padding_mode="replicate")
+            self.outconv = torch.nn.Conv1d(hidden_channels[-1],
+                                           2, kernel_size=1,
+                                           bias=True, padding="same", padding_mode="replicate")
         self.expected_attn_input_length = expected_attn_input_length
         self.num_attention_blocks = attention_blocks
         self.use_time_input = use_time_input
@@ -118,41 +101,54 @@ class EventDensityUnet(torch.nn.Module):
         # generate list of downsampling methods
         downsampling_methods = [0] * self.pyramid_height
         assert T % self.input_length_multiple == 0, "T must be divisible by {}".format(self.input_length_multiple)
-        assert T == self.expected_attn_input_length, "T: {}, self.expected_attn_input_length: {}".format(T,
-                                                                                                         self.expected_attn_input_length)
+        assert T == self.expected_attn_input_length, "T: {}, self.expected_attn_input_length: {}".format(T, self.expected_attn_input_length)
 
         # run stem
         ret = self.stem(x, downsampling_methods)
 
         x = ret[-1]  # final layer from conv stem
+        attn_lvl_expand_radius = self.input_expand_radius // self.input_length_multiple
 
         if self.num_attention_blocks > 0:
             time_tensor = None
             if self.use_time_input:
                 with (torch.no_grad()):
                     time_tensor = 2 * np.pi * torch.tensor(time, dtype=torch.float32,
-                                                           device=self.get_device()).unsqueeze(-1).unsqueeze(
-                        -1) / self.period_length
+                                                           device=self.get_device()).unsqueeze(-1).unsqueeze(-1) / self.period_length
                     length_time_tensor = 2 * np.pi * torch.arange(
                         self.expected_attn_input_length // self.input_length_multiple, dtype=torch.float32,
-                        device=self.get_device()).unsqueeze(0).unsqueeze(0) / (
-                                                     self.period_length // self.input_length_multiple)
+                        device=self.get_device()).unsqueeze(0).unsqueeze(0) / (self.period_length // self.input_length_multiple)
                     channel_time_tensor = 2 * np.pi * torch.arange(self.stem_final_layer_channels // 2,
                                                                    dtype=torch.float32,
-                                                                   device=self.get_device()).unsqueeze(0).unsqueeze(
-                        -1) / (self.stem_final_layer_channels // 2)
+                                                                   device=self.get_device()).unsqueeze(0).unsqueeze(-1)\
+                                          / (self.stem_final_layer_channels // 2)
                     time_tensor = torch.sin(time_tensor + length_time_tensor + channel_time_tensor)
 
             for i in range(len(self.attention_blocks)):
                 x = self.attention_blocks[i](x, time_tensor)
 
             attn_out = x
-            x = self.no_contraction_head(ret, x)
+            if self.training_strategy == "density_and_confidence":
+                # restrict to middle (discarding expanded parts). this mean we upconv without the expanded parts of the interval
+                x = self.no_contraction_head(
+                    [ret_tensor[:, :, (self.input_expand_radius // self.input_length_multiples[i]):-(self.input_expand_radius // self.input_length_multiples[i])]\
+                                                for i, ret_tensor in enumerate(ret)],
+                    x[:, :, attn_lvl_expand_radius:-attn_lvl_expand_radius]
+                )
+            else:
+                x = self.no_contraction_head(ret, x)
         else:
             attn_out = x
-            x = self.no_contraction_head(ret, torch.zeros_like(x))
+            if self.self.training_strategy == "density_and_confidence":
+                # restrict to middle (discarding expanded parts). this mean we upconv without the expanded parts of the interval
+                x = self.no_contraction_head(
+                    [ret_tensor[:, :, (self.input_expand_radius // self.input_length_multiples[i]):-(self.input_expand_radius // self.input_length_multiples[i])] \
+                                                for i, ret_tensor in enumerate(ret)],
+                    torch.zeros_like(x[:, :, attn_lvl_expand_radius:-attn_lvl_expand_radius])
+                )
+            else:
+                x = self.no_contraction_head(ret, torch.zeros_like(x))
 
-        attn_lvl_expand_radius = self.input_expand_radius // self.input_length_multiple
         presence_vector = self.out_presence_pool(attn_out[:, :, attn_lvl_expand_radius:-attn_lvl_expand_radius])
         event_presence = self.out_presence_conv(presence_vector)
 
@@ -163,14 +159,10 @@ class EventDensityUnet(torch.nn.Module):
                 event_presence = event_presence.squeeze(-1) # (N, 2, 1) -> (N, 2)
                 return x, event_presence
             else:
-                confidence = self.outconv_confidence(x)
-                x = x[:, :, self.input_expand_radius:-self.input_expand_radius]
-                x = self.outconv_densityConv(x)
-                x = self.out_norm(x)
-                x = self.out_nonlin(x)
-                x = self.outconv_density(x)
+                x = self.outconv(x)
                 x = torch.permute(x, [0, 2, 1])  # (N, 2, T) -> (N, T, 2)
                 event_presence = event_presence.squeeze(-1)  # (N, 2, 1) -> (N, 2)
+                confidence = self.out_confidence_conv(attn_out) # (N, 2, T')
                 return x, event_presence, confidence
         else:
             if self.training_strategy == "density_only":
@@ -180,11 +172,7 @@ class EventDensityUnet(torch.nn.Module):
                 x = x * event_presence
                 return x
             else:
-                x = x[:, :, self.input_expand_radius:-self.input_expand_radius]
-                x = self.outconv_densityConv(x)
-                x = self.out_norm(x)
-                x = self.out_nonlin(x)
-                x = self.outconv_density(x)
+                x = self.outconv(x)
                 x = torch.softmax(x, dim=-1)
                 event_presence = torch.sigmoid(event_presence) * 60.0
                 x = x * event_presence

@@ -6,11 +6,16 @@ import convert_to_interval_events
 import transform_elastic_deformation
 
 class IntervalDensityEventsSampler:
-    def __init__(self, series_ids: list[str], naive_all_data: dict, train_or_test="train",
+    def __init__(self, series_ids: list[str], naive_all_data: dict,
+                 input_length_multiple: int,
+                 train_or_test="train",
                  prediction_length=17280, # 24 hours
                  prediction_stride=4320, # 6 hours
                  is_enmo_only=False
                  ):
+        assert prediction_length % input_length_multiple == 0, "prediction_length must be a multiple of input_length_multiple"
+        assert prediction_stride % input_length_multiple == 0, "prediction_stride must be a multiple of input_length_multiple"
+
         self.series_ids = series_ids
         self.naive_all_data = naive_all_data
 
@@ -42,6 +47,7 @@ class IntervalDensityEventsSampler:
 
         self.train_or_test = train_or_test
         self.is_enmo_only = is_enmo_only
+        self.input_length_multiple = input_length_multiple
 
 
     def shuffle(self):
@@ -129,7 +135,10 @@ class IntervalDensityEventsSampler:
         accel_data = self.naive_all_data[series_id]["accel"][:, (start - expand):(end + expand)]
         if (vflip or v_elastic_deformation) and (not elastic_deformation):
             accel_data = accel_data.copy()
+
         event_segmentations = np.zeros((2, end - start + 2 * expand), dtype=np.float32)
+        event_segmentations_downscaled = np.zeros((2, (end - start + 2 * expand) // self.input_length_multiple), dtype=np.float32)
+
         has_onset, has_wakeup = False, False
         has_onset_in_center, has_wakeup_in_center = False, False
         for event in grouped_events:
@@ -143,6 +152,7 @@ class IntervalDensityEventsSampler:
             if flip:
                 onset, wakeup = wakeup, onset
             if onset is not None:
+                event_segmentations_downscaled[0, onset // self.input_length_multiple] = 1.0
                 convert_to_interval_events.set_kernel_range(event_segmentations, idx=0, loc=onset,
                                                             kernel_shape="laplace", kernel_radius=30, replace_radius=event_tolerance_width)
                 if 0 <= onset < event_segmentations.shape[1]:
@@ -150,6 +160,7 @@ class IntervalDensityEventsSampler:
                 if expand <= onset < event_segmentations.shape[1] - expand:
                     has_onset_in_center = True
             if wakeup is not None:
+                event_segmentations_downscaled[1, wakeup // self.input_length_multiple] = 1.0
                 convert_to_interval_events.set_kernel_range(event_segmentations, idx=1, loc=wakeup,
                                                             kernel_shape="laplace", kernel_radius=30, replace_radius=event_tolerance_width)
                 if 0 <= wakeup < event_segmentations.shape[1]:
@@ -181,20 +192,7 @@ class IntervalDensityEventsSampler:
                 time += 17280
             time = time % 17280
 
-        if return_mode == "interval_density":
-            if has_onset_in_center:
-                onset_density = event_segmentations[0, expand:-expand] / np.sum(event_segmentations[0, expand:-expand])
-            else:
-                onset_density = np.full_like(event_segmentations[0, expand:-expand], 1.0 / (end - start))
-                assert event_segmentations.shape[1] == end - start + 2 * expand
-            if has_wakeup_in_center:
-                wakeup_density = event_segmentations[1, expand:-expand] / np.sum(event_segmentations[1, expand:-expand])
-            else:
-                wakeup_density = np.full_like(event_segmentations[1, expand:-expand], 1.0 / (end - start))
-                assert event_segmentations.shape[1] == end - start + 2 * expand
-            event_info = {"density": np.stack([onset_density, wakeup_density], axis=0),
-                            "occurrence": np.array([has_onset_in_center, has_wakeup_in_center], dtype=np.float32)}
-        elif return_mode == "expanded_interval_density":
+        if return_mode == "expanded_interval_density":
             if has_onset:
                 onset_density = event_segmentations[0, :] / np.sum(event_segmentations[0, :])
             else:
@@ -219,7 +217,7 @@ class IntervalDensityEventsSampler:
                 assert event_segmentations.shape[1] == end - start + 2 * expand
             event_info = {"density": np.stack([onset_density, wakeup_density], axis=0),
                             "occurrence": np.array([has_onset_in_center, has_wakeup_in_center], dtype=np.float32),
-                            "segmentation": event_segmentations}
+                            "segmentation": event_segmentations_downscaled}
 
         return accel_data, event_info, time
 
@@ -229,7 +227,7 @@ class IntervalDensityEventsSampler:
                return_mode="expanded_interval_density"):
         assert self.shuffle_indices is not None, "shuffle_indices is None, call shuffle() first"
         assert isinstance(return_mode, str), "return_mode must be a string"
-        assert return_mode in ["interval_density", "expanded_interval_density", "interval_density_and_expanded_events"]
+        assert return_mode in ["expanded_interval_density", "interval_density_and_expanded_events"]
 
         accel_datas = []
         event_infos = {"density": [], "occurrence": []}
