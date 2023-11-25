@@ -152,7 +152,8 @@ class IntervalDensityEventsSampler:
             if flip:
                 onset, wakeup = wakeup, onset
             if onset is not None:
-                event_segmentations_downscaled[0, onset // self.input_length_multiple] = 1.0
+                onset_downscaled = onset // self.input_length_multiple
+                event_segmentations_downscaled[0, max(onset_downscaled - 2, 0):min(onset_downscaled + 3, event_segmentations_downscaled.shape[-1])] = 1.0
                 convert_to_interval_events.set_kernel_range(event_segmentations, idx=0, loc=onset,
                                                             kernel_shape="laplace", kernel_radius=30, replace_radius=event_tolerance_width)
                 if 0 <= onset < event_segmentations.shape[1]:
@@ -160,7 +161,8 @@ class IntervalDensityEventsSampler:
                 if expand <= onset < event_segmentations.shape[1] - expand:
                     has_onset_in_center = True
             if wakeup is not None:
-                event_segmentations_downscaled[1, wakeup // self.input_length_multiple] = 1.0
+                wakeup_downscaled = wakeup // self.input_length_multiple
+                event_segmentations_downscaled[1, max(wakeup_downscaled - 2, 0):min(wakeup_downscaled + 3, event_segmentations_downscaled.shape[-1])] = 1.0
                 convert_to_interval_events.set_kernel_range(event_segmentations, idx=1, loc=wakeup,
                                                             kernel_shape="laplace", kernel_radius=30, replace_radius=event_tolerance_width)
                 if 0 <= wakeup < event_segmentations.shape[1]:
