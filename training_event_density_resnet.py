@@ -284,7 +284,7 @@ def validation_ap(epoch, ap_log_dir, ap_log_dilated_dir, ap_log_aligned_dir, ap_
             stride_count = 8
             if use_swa and (epoch > swa_start) and ((epoch - swa_start) % 3 != 0):
                 stride_count = 1
-            proba_preds = model_event_density_unet.event_density_inference(model=use_model, time_series=accel_data,
+            proba_preds, _, _ = model_event_density_unet.event_density_inference(model=use_model, time_series=accel_data,
                                                                       batch_size=batch_size * 5,
                                                                       prediction_length=prediction_length,
                                                                       expand=expand, times=times,
