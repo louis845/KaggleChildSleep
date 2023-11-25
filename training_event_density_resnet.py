@@ -28,22 +28,17 @@ import model_unet
 import model_event_density_unet
 import postprocessing
 
-def ce_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
-    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape,
-                                                                                                 ground_truth.shape)
-    bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
-    if mask is None:
-        return torch.sum(torch.mean(bce, dim=(1, 2)))
-    else:
-        return torch.sum(torch.mean(bce * mask, dim=(1, 2)))
-
-def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor, mask: torch.Tensor = None):
+def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor):
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
-    bce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
-    if mask is None:
-        return torch.sum(torch.mean(((torch.sigmoid(preds) - ground_truth) ** 2) * bce, dim=(1, 2)))
-    else:
-        return torch.sum(torch.mean(((torch.sigmoid(preds) - ground_truth) ** 2) * bce * mask, dim=(1, 2)))
+    with torch.no_grad():
+        entropy = torch.sum(ground_truth * torch.where(ground_truth > 0.0, torch.log(ground_truth), torch.zeros_like(ground_truth)), dim=1)
+
+    ce = torch.nn.functional.cross_entropy(preds, ground_truth, reduction="none")
+    kl = ce + entropy
+
+    l2 = torch.sum((preds - ground_truth) ** 2, dim=1)
+
+    return 10.0 * (l2 * kl).mean(dim=-1).sum()
 
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
@@ -59,7 +54,10 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
     else:
         pred_density_logits, pred_occurences = model_(accel_data_batch, time=times_input)
     entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
-    class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch, reduction="none").mean(dim=-1).sum()
+    if use_focal_loss:
+        class_loss = focal_loss(pred_occurences, labels_occurrence_batch)
+    else:
+        class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch, reduction="none").mean(dim=-1).sum()
     if use_center_softmax:
         loss = entropy_loss + class_loss + deep_loss
         deep_loss_ret = deep_loss.item()
@@ -254,17 +252,19 @@ def plot_single_precision_recall_curve(ax, precisions, recalls, ap, title):
     ax.text(0.5, 0.5, "AP: {:.4f}".format(ap), horizontalalignment="center", verticalalignment="center")
 
 validation_AP_tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30][::-1]
-def validation_ap(epoch, ap_log_dir, ap_log_dilated_dir, ap_log_aligned_dir, ap_log_loc_softmax_dir, predicted_events, gt_events):
+def validation_ap(epoch, ap_log_dir, ap_log_aligned_dir, ap_log_loc_softmax_dir,
+                  ap_dense_log_dir, ap_dense_log_aligned_dir, ap_dense_log_loc_softmax_dir,
+                  predicted_events, dense_predicted_events, gt_events):
     use_model = swa_model if (use_swa and (epoch > swa_start)) else model
 
-    ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
-    ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
-    ap_onset_metrics_dilated = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
-    ap_wakeup_metrics_dilated = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
-    ap_onset_metrics_loc_softmax = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
-    ap_wakeup_metrics_loc_softmax = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
-    ap_onset_metrics_aligned = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
-    ap_wakeup_metrics_aligned = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+    keys = ["usual", "aligned", "loc_softmax", "dense_usual", "dense_aligned", "dense_loc_softmax"]
+
+    dirs = {"usual": ap_log_dir, "aligned": ap_log_aligned_dir, "loc_softmax": ap_log_loc_softmax_dir,
+            "dense_usual": ap_dense_log_dir, "dense_aligned": ap_dense_log_aligned_dir, "dense_loc_softmax": ap_dense_log_loc_softmax_dir}
+    all_ap_onset_metrics = {key: [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+                             for key in keys}
+    all_ap_wakeup_metrics = {key: [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+                              for key in keys}
 
     with torch.no_grad():
         for series_id in tqdm.tqdm(validation_entries):
@@ -285,18 +285,24 @@ def validation_ap(epoch, ap_log_dir, ap_log_dilated_dir, ap_log_aligned_dir, ap_
             preds_locs = predicted_events[series_id]
             preds_locs_onset = preds_locs["onset"]
             preds_locs_wakeup = preds_locs["wakeup"]
-
+            dense_preds_locs = dense_predicted_events[series_id]
+            dense_preds_locs_onset = dense_preds_locs["onset"]
+            dense_preds_locs_wakeup = dense_preds_locs["wakeup"]
 
             # run inference
             stride_count = 8
             if use_swa and (epoch > swa_start) and ((epoch - swa_start) % 3 != 0):
                 stride_count = 1
-            proba_preds, onset_IOU_loc_softmax_probas, wakeup_IOU_loc_softmax_probas =\
+            proba_preds, all_onset_IOU_loc_softmax_probas, all_wakeup_IOU_loc_softmax_probas =\
                 model_event_density_unet.event_density_inference(model=use_model, time_series=accel_data,
-                                                                      predicted_locations={
+                                                                      predicted_locations=[{
                                                                           "onset": preds_locs_onset,
                                                                           "wakeup": preds_locs_wakeup
                                                                       },
+                                                                      {
+                                                                          "onset": dense_preds_locs_onset,
+                                                                          "wakeup": dense_preds_locs_wakeup
+                                                                      }],
                                                                       batch_size=batch_size * 5,
                                                                       prediction_length=prediction_length,
                                                                       expand=expand, times=times,
@@ -305,149 +311,76 @@ def validation_ap(epoch, ap_log_dir, ap_log_dilated_dir, ap_log_aligned_dir, ap_
                                                                       stride_count=stride_count)
             onset_IOU_probas = proba_preds[0, :]
             wakeup_IOU_probas = proba_preds[1, :]
-            onset_IOU_probas_dilated = dilation_converter.convert(onset_IOU_probas)
-            wakeup_IOU_probas_dilated = dilation_converter.convert(wakeup_IOU_probas)
 
             # restrict
+            onset_IOU_usual_probas = onset_IOU_probas[preds_locs_onset]
+            wakeup_IOU_usual_probas = wakeup_IOU_probas[preds_locs_wakeup]
             onset_IOU_aligned_probas = postprocessing.align_index_probas(preds_locs_onset, onset_IOU_probas)
             wakeup_IOU_aligned_probas = postprocessing.align_index_probas(preds_locs_wakeup, wakeup_IOU_probas)
-            onset_IOU_probas = onset_IOU_probas[preds_locs_onset]
-            wakeup_IOU_probas = wakeup_IOU_probas[preds_locs_wakeup]
-            onset_IOU_probas_dilated = onset_IOU_probas_dilated[preds_locs_onset]
-            wakeup_IOU_probas_dilated = wakeup_IOU_probas_dilated[preds_locs_wakeup]
+            onset_IOU_loc_softmax_probas = all_onset_IOU_loc_softmax_probas[0]
+            wakeup_IOU_loc_softmax_probas = all_wakeup_IOU_loc_softmax_probas[0]
+
+            onset_IOU_dense_usual_probas = onset_IOU_probas[dense_preds_locs_onset]
+            wakeup_IOU_dense_usual_probas = wakeup_IOU_probas[dense_preds_locs_wakeup]
+            onset_IOU_dense_aligned_probas = postprocessing.align_index_probas(dense_preds_locs_onset, onset_IOU_probas)
+            wakeup_IOU_dense_aligned_probas = postprocessing.align_index_probas(dense_preds_locs_wakeup, wakeup_IOU_probas)
+            onset_IOU_dense_loc_softmax_probas = all_onset_IOU_loc_softmax_probas[1]
+            wakeup_IOU_dense_loc_softmax_probas = all_wakeup_IOU_loc_softmax_probas[1]
+
+            onset_all_probas = {"usual": onset_IOU_usual_probas, "aligned": onset_IOU_aligned_probas, "loc_softmax": onset_IOU_loc_softmax_probas,
+                                "dense_usual": onset_IOU_dense_usual_probas, "dense_aligned": onset_IOU_dense_aligned_probas, "dense_loc_softmax": onset_IOU_dense_loc_softmax_probas}
+            wakeup_all_probas = {"usual": wakeup_IOU_usual_probas, "aligned": wakeup_IOU_aligned_probas, "loc_softmax": wakeup_IOU_loc_softmax_probas,
+                                    "dense_usual": wakeup_IOU_dense_usual_probas, "dense_aligned": wakeup_IOU_dense_aligned_probas, "dense_loc_softmax": wakeup_IOU_dense_loc_softmax_probas}
 
             # get the ground truth
             gt_onset_locs = gt_events[series_id]["onset"]
             gt_wakeup_locs = gt_events[series_id]["wakeup"]
 
             # add info
-            for ap_onset_metric, ap_wakeup_metric, ap_onset_metric_dilated, ap_wakeup_metric_dilated \
-                    in zip(ap_onset_metrics, ap_wakeup_metrics, ap_onset_metrics_dilated, ap_wakeup_metrics_dilated):
-                ap_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
-                ap_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
-                ap_onset_metric_dilated.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas_dilated, gt_locs=gt_onset_locs)
-                ap_wakeup_metric_dilated.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas_dilated, gt_locs=gt_wakeup_locs)
-
-            # add aligned and augmented pruned info
-            for ap_onset_metric_aligned, ap_wakeup_metric_aligned, ap_onset_metric_loc_softmax, ap_wakeup_metric_loc_softmax \
-                    in zip(ap_onset_metrics_aligned, ap_wakeup_metrics_aligned, ap_onset_metrics_loc_softmax, ap_wakeup_metrics_loc_softmax):
-                ap_onset_metric_aligned.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_aligned_probas, gt_locs=gt_onset_locs)
-                ap_wakeup_metric_aligned.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_aligned_probas, gt_locs=gt_wakeup_locs)
-                ap_onset_metric_loc_softmax.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_loc_softmax_probas, gt_locs=gt_onset_locs)
-                ap_wakeup_metric_loc_softmax.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_loc_softmax_probas, gt_locs=gt_wakeup_locs)
-
-
+            for key in keys:
+                for key_onset_metric, key_wakeup_metric in zip(all_ap_onset_metrics[key], all_ap_wakeup_metrics[key]):
+                    if "dense" in key:
+                        key_onset_metric.add(pred_locs=dense_preds_locs_onset, pred_probas=onset_all_probas[key], gt_locs=gt_onset_locs)
+                        key_wakeup_metric.add(pred_locs=dense_preds_locs_wakeup, pred_probas=wakeup_all_probas[key], gt_locs=gt_wakeup_locs)
+                    else:
+                        key_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_all_probas[key], gt_locs=gt_onset_locs)
+                        key_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_all_probas[key], gt_locs=gt_wakeup_locs)
 
     # compute average precision
     ctime = time.time()
-    ap_onset_precisions, ap_onset_recalls, ap_onset_average_precisions = [], [], []
-    ap_wakeup_precisions, ap_wakeup_recalls, ap_wakeup_average_precisions = [], [], []
-    ap_onset_dilated_precisions, ap_onset_dilated_recalls, ap_onset_dilated_average_precisions = [], [], []
-    ap_wakeup_dilated_precisions, ap_wakeup_dilated_recalls, ap_wakeup_dilated_average_precisions = [], [], []
-    ap_onset_aligned_precisions, ap_onset_aligned_recalls, ap_onset_aligned_average_precisions = [], [], []
-    ap_wakeup_aligned_precisions, ap_wakeup_aligned_recalls, ap_wakeup_aligned_average_precisions = [], [], []
-    ap_onset_loc_softmax_precisions, ap_onset_loc_softmax_recalls, ap_onset_loc_softmax_average_precisions = [], [], []
-    ap_wakeup_loc_softmax_precisions, ap_wakeup_loc_softmax_recalls, ap_wakeup_loc_softmax_average_precisions = [], [], []
+    all_ap_onset_precisions, all_ap_onset_recalls, all_ap_onset_average_precisions = {key: [] for key in keys}, {key: [] for key in keys}, {key: [] for key in keys}
+    all_ap_wakeup_precisions, all_ap_wakeup_recalls, all_ap_wakeup_average_precisions = {key: [] for key in keys}, {key: [] for key in keys}, {key: [] for key in keys}
 
-    for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
-        ap_onset_precision, ap_onset_recall, ap_onset_average_precision, _ = ap_onset_metric.get()
-        ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision, _ = ap_wakeup_metric.get()
-        ap_onset_precisions.append(ap_onset_precision)
-        ap_onset_recalls.append(ap_onset_recall)
-        ap_onset_average_precisions.append(ap_onset_average_precision)
-        ap_wakeup_precisions.append(ap_wakeup_precision)
-        ap_wakeup_recalls.append(ap_wakeup_recall)
-        ap_wakeup_average_precisions.append(ap_wakeup_average_precision)
-
-    for ap_onset_metric_dilated, ap_wakeup_metric_dilated in zip(ap_onset_metrics_dilated, ap_wakeup_metrics_dilated):
-        ap_onset_dilated_precision, ap_onset_dilated_recall, ap_onset_dilated_average_precision, _ = ap_onset_metric_dilated.get()
-        ap_wakeup_dilated_precision, ap_wakeup_dilated_recall, ap_wakeup_dilated_average_precision, _ = ap_wakeup_metric_dilated.get()
-        ap_onset_dilated_precisions.append(ap_onset_dilated_precision)
-        ap_onset_dilated_recalls.append(ap_onset_dilated_recall)
-        ap_onset_dilated_average_precisions.append(ap_onset_dilated_average_precision)
-        ap_wakeup_dilated_precisions.append(ap_wakeup_dilated_precision)
-        ap_wakeup_dilated_recalls.append(ap_wakeup_dilated_recall)
-        ap_wakeup_dilated_average_precisions.append(ap_wakeup_dilated_average_precision)
-
-    for ap_onset_metric_aligned, ap_wakeup_metric_aligned in zip(ap_onset_metrics_aligned, ap_wakeup_metrics_aligned):
-        ap_onset_aligned_precision, ap_onset_aligned_recall, ap_onset_aligned_average_precision, _ = ap_onset_metric_aligned.get()
-        ap_wakeup_aligned_precision, ap_wakeup_aligned_recall, ap_wakeup_aligned_average_precision, _ = ap_wakeup_metric_aligned.get()
-        ap_onset_aligned_precisions.append(ap_onset_aligned_precision)
-        ap_onset_aligned_recalls.append(ap_onset_aligned_recall)
-        ap_onset_aligned_average_precisions.append(ap_onset_aligned_average_precision)
-        ap_wakeup_aligned_precisions.append(ap_wakeup_aligned_precision)
-        ap_wakeup_aligned_recalls.append(ap_wakeup_aligned_recall)
-        ap_wakeup_aligned_average_precisions.append(ap_wakeup_aligned_average_precision)
-
-    for ap_onset_metric_loc_softmax, ap_wakeup_metric_loc_softmax in zip(ap_onset_metrics_loc_softmax, ap_wakeup_metrics_loc_softmax):
-        ap_onset_loc_softmax_precision, ap_onset_loc_softmax_recall, ap_onset_loc_softmax_average_precision, _ = ap_onset_metric_loc_softmax.get()
-        ap_wakeup_loc_softmax_precision, ap_wakeup_loc_softmax_recall, ap_wakeup_loc_softmax_average_precision, _ = ap_wakeup_metric_loc_softmax.get()
-        ap_onset_loc_softmax_precisions.append(ap_onset_loc_softmax_precision)
-        ap_onset_loc_softmax_recalls.append(ap_onset_loc_softmax_recall)
-        ap_onset_loc_softmax_average_precisions.append(ap_onset_loc_softmax_average_precision)
-        ap_wakeup_loc_softmax_precisions.append(ap_wakeup_loc_softmax_precision)
-        ap_wakeup_loc_softmax_recalls.append(ap_wakeup_loc_softmax_recall)
-        ap_wakeup_loc_softmax_average_precisions.append(ap_wakeup_loc_softmax_average_precision)
-
+    for key in keys:
+        for ap_onset_metric, ap_wakeup_metric in zip(all_ap_onset_metrics[key], all_ap_wakeup_metrics[key]):
+            ap_onset_precision, ap_onset_recall, ap_onset_average_precision, _ = ap_onset_metric.get()
+            ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision, _ = ap_wakeup_metric.get()
+            all_ap_onset_precisions[key].append(ap_onset_precision)
+            all_ap_onset_recalls[key].append(ap_onset_recall)
+            all_ap_onset_average_precisions[key].append(ap_onset_average_precision)
+            all_ap_wakeup_precisions[key].append(ap_wakeup_precision)
+            all_ap_wakeup_recalls[key].append(ap_wakeup_recall)
+            all_ap_wakeup_average_precisions[key].append(ap_wakeup_average_precision)
     print("AP computation time: {:.2f} seconds".format(time.time() - ctime))
 
     # write to dict
     ctime = time.time()
-    val_history["val_onset_mAP"].append(np.mean(ap_onset_average_precisions))
-    val_history["val_wakeup_mAP"].append(np.mean(ap_wakeup_average_precisions))
-    val_history["val_onset_dilated_mAP"].append(np.mean(ap_onset_dilated_average_precisions))
-    val_history["val_wakeup_dilated_mAP"].append(np.mean(ap_wakeup_dilated_average_precisions))
-    val_history["val_onset_aligned_mAP"].append(np.mean(ap_onset_aligned_average_precisions))
-    val_history["val_wakeup_aligned_mAP"].append(np.mean(ap_wakeup_aligned_average_precisions))
-    val_history["val_onset_loc_softmax_mAP"].append(np.mean(ap_onset_loc_softmax_average_precisions))
-    val_history["val_wakeup_loc_softmax_mAP"].append(np.mean(ap_wakeup_loc_softmax_average_precisions))
+    for key in keys:
+        val_history["val_onset_{}_mAP".format(key)].append(np.mean(all_ap_onset_average_precisions[key]))
+        val_history["val_wakeup_{}_mAP".format(key)].append(np.mean(all_ap_wakeup_average_precisions[key]))
 
-    # draw the precision-recall curve using matplotlib onto file "epoch{}_AP.png".format(epoch) inside the ap_log_dir
-    fig, axes = plt.subplots(4, 5, figsize=(20, 16))
-    fig.suptitle("Epoch {} (Onset mAP: {}, Wakeup mAP: {})".format(epoch, np.mean(ap_onset_average_precisions), np.mean(ap_wakeup_average_precisions)))
-    for k in range(len(validation_AP_tolerances)):
-        ax = axes[k // 5, k % 5]
-        plot_single_precision_recall_curve(ax, ap_onset_precisions[k], ap_onset_recalls[k], ap_onset_average_precisions[k], "Onset AP{}".format(validation_AP_tolerances[k]))
-        ax = axes[(k + 10) // 5, (k + 10) % 5]
-        plot_single_precision_recall_curve(ax, ap_wakeup_precisions[k], ap_wakeup_recalls[k], ap_wakeup_average_precisions[k], "Wakeup AP{}".format(validation_AP_tolerances[k]))
-    plt.subplots_adjust(wspace=0.3, hspace=0.3)
-    plt.savefig(os.path.join(ap_log_dir, "epoch{}_AP.png".format(epoch)))
-    plt.close()
-
-    fig, axes = plt.subplots(4, 5, figsize=(20, 16))
-    fig.suptitle("Epoch {} (Onset Dilated mAP: {}, Wakeup Dilated mAP: {})".format(epoch, np.mean(ap_onset_dilated_average_precisions), np.mean(ap_wakeup_dilated_average_precisions)))
-    for k in range(len(validation_AP_tolerances)):
-        ax = axes[k // 5, k % 5]
-        plot_single_precision_recall_curve(ax, ap_onset_dilated_precisions[k], ap_onset_dilated_recalls[k], ap_onset_dilated_average_precisions[k], "Onset Dilated AP{}".format(validation_AP_tolerances[k]))
-        ax = axes[(k + 10) // 5, (k + 10) % 5]
-        plot_single_precision_recall_curve(ax, ap_wakeup_dilated_precisions[k], ap_wakeup_dilated_recalls[k], ap_wakeup_dilated_average_precisions[k], "Wakeup Dilated AP{}".format(validation_AP_tolerances[k]))
-    plt.subplots_adjust(wspace=0.3, hspace=0.3)
-    plt.savefig(os.path.join(ap_log_dilated_dir, "epoch{}_AP.png".format(epoch)))
-    plt.close()
-
-    fig, axes = plt.subplots(4, 5, figsize=(20, 16))
-    fig.suptitle("Epoch {} (Onset Aligned mAP: {}, Wakeup Aligned mAP: {})".format(epoch, np.mean(ap_onset_aligned_average_precisions), np.mean(ap_wakeup_aligned_average_precisions)))
-    for k in range(len(validation_AP_tolerances)):
-        ax = axes[k // 5, k % 5]
-        plot_single_precision_recall_curve(ax, ap_onset_aligned_precisions[k], ap_onset_aligned_recalls[k], ap_onset_aligned_average_precisions[k], "Onset Aligned AP{}".format(validation_AP_tolerances[k]))
-        ax = axes[(k + 10) // 5, (k + 10) % 5]
-        plot_single_precision_recall_curve(ax, ap_wakeup_aligned_precisions[k], ap_wakeup_aligned_recalls[k], ap_wakeup_aligned_average_precisions[k], "Wakeup Aligned AP{}".format(validation_AP_tolerances[k]))
-
-    plt.subplots_adjust(wspace=0.3, hspace=0.3)
-    plt.savefig(os.path.join(ap_log_aligned_dir, "epoch{}_AP.png".format(epoch)))
-    plt.close()
-
-    fig, axes = plt.subplots(4, 5, figsize=(20, 16))
-    fig.suptitle("Epoch {} (Onset Loc Softmax mAP: {}, Wakeup Loc Softmax mAP: {})".format(epoch, np.mean(ap_onset_loc_softmax_average_precisions), np.mean(ap_wakeup_loc_softmax_average_precisions)))
-    for k in range(len(validation_AP_tolerances)):
-        ax = axes[k // 5, k % 5]
-        plot_single_precision_recall_curve(ax, ap_onset_loc_softmax_precisions[k], ap_onset_loc_softmax_recalls[k], ap_onset_loc_softmax_average_precisions[k], "Onset Loc Softmax AP{}".format(validation_AP_tolerances[k]))
-        ax = axes[(k + 10) // 5, (k + 10) % 5]
-        plot_single_precision_recall_curve(ax, ap_wakeup_loc_softmax_precisions[k], ap_wakeup_loc_softmax_recalls[k], ap_wakeup_loc_softmax_average_precisions[k], "Wakeup Loc Softmax AP{}".format(validation_AP_tolerances[k]))
-
-    plt.subplots_adjust(wspace=0.3, hspace=0.3)
-    plt.savefig(os.path.join(ap_log_loc_softmax_dir, "epoch{}_AP.png".format(epoch)))
-    plt.close()
+    # draw the precision-recall curve using matplotlib onto file "epoch{}_AP.png".format(epoch) inside the ap_log_dir(s)
+    for key in keys:
+        fig, axes = plt.subplots(4, 5, figsize=(20, 16))
+        fig.suptitle("Epoch {} (Onset mAP: {}, Wakeup mAP: {})".format(epoch, np.mean(all_ap_onset_average_precisions[key]), np.mean(all_ap_wakeup_average_precisions[key])))
+        for k in range(len(validation_AP_tolerances)):
+            ax = axes[k // 5, k % 5]
+            plot_single_precision_recall_curve(ax, all_ap_onset_precisions[key][k], all_ap_onset_recalls[key][k], all_ap_onset_average_precisions[key][k], "Onset AP{}".format(validation_AP_tolerances[k]))
+            ax = axes[(k + 10) // 5, (k + 10) % 5]
+            plot_single_precision_recall_curve(ax, all_ap_wakeup_precisions[key][k], all_ap_wakeup_recalls[key][k], all_ap_wakeup_average_precisions[key][k], "Wakeup AP{}".format(validation_AP_tolerances[k]))
+        plt.subplots_adjust(wspace=0.3, hspace=0.3)
+        plt.savefig(os.path.join(dirs[key], "epoch{}_AP.png".format(epoch)))
+        plt.close()
 
     print("Plotting time: {:.2f} seconds".format(time.time() - ctime))
 
@@ -532,6 +465,7 @@ if __name__ == "__main__":
     parser.add_argument("--expand", type=int, default=8640, help="Expand the intervals by this amount. Default 8640.")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate. Default 0.1.")
     parser.add_argument("--attn_dropout", type=float, default=0.1, help="Attention dropout rate. Default 0.1.")
+    parser.add_argument("--use_focal_loss", action="store_true", help="Whether to use focal loss. Default False.")
     parser.add_argument("--use_time_information", action="store_true", help="Whether to use time information. Default False.")
     parser.add_argument("--use_elastic_deformation", action="store_true", help="Whether to use elastic deformation. Default False.")
     parser.add_argument("--use_velastic_deformation", action="store_true", help="Whether to use velastic deformation (only available for anglez). Default False.")
@@ -585,6 +519,7 @@ if __name__ == "__main__":
     expand = args.expand
     dropout = args.dropout
     attn_dropout = args.attn_dropout
+    use_focal_loss = args.use_focal_loss
     use_time_information = args.use_time_information
     use_elastic_deformation = args.use_elastic_deformation
     use_velastic_deformation = args.use_velastic_deformation
@@ -605,8 +540,10 @@ if __name__ == "__main__":
         training_entries = [series_id for series_id in training_entries if series_id not in bad_series_list.noisy_bad_segmentations]
 
     assert os.path.isdir("./inference_regression_statistics/regression_preds/"), "Must generate regression predictions first. See inference_regression_statistics folder."
+    assert os.path.isdir("./inference_regression_statistics/regression_preds_dense/"), "Must generate regression predictions first. See inference_regression_statistics folder."
     per_series_id_events = convert_to_seriesid_events.get_events_per_seriesid()
-    regression_predicted_events = convert_to_pred_events.load_all_pred_events_into_dict()
+    regression_predicted_events = convert_to_pred_events.load_all_pred_events_into_dict("regression_preds")
+    regression_dense_predicted_events = convert_to_pred_events.load_all_pred_events_into_dict("regression_preds_dense")
     dilation_converter = model_event_density_unet.ProbasDilationConverter(sigma=30 * 12, device=config.device)
     ap_log_dir = os.path.join(model_dir, "ap_log")
     ap_log_dilated_dir = os.path.join(model_dir, "ap_log_dilated")
@@ -649,7 +586,7 @@ if __name__ == "__main__":
     model = model.to(config.device)
 
     # initialize optimizer
-    print("Loss: Day KL Divergence")
+    print("Loss: Day KL Divergence (Focal)" if use_focal_loss else "Loss: Day KL Divergence")
     print("Learning rate: " + str(learning_rate))
     print("Momentum: " + str(momentum))
     print("Second momentum: " + str(second_momentum))
@@ -716,6 +653,7 @@ if __name__ == "__main__":
         "expand": expand,
         "dropout": dropout,
         "attn_dropout": attn_dropout,
+        "use_focal_loss": use_focal_loss,
         "use_time_information": use_time_information,
         "use_elastic_deformation": use_elastic_deformation,
         "use_velastic_deformation": use_velastic_deformation,
@@ -818,7 +756,9 @@ if __name__ == "__main__":
                 validation_step()
                 validation_ap(epoch=epoch, ap_log_dir=ap_log_dir, ap_log_dilated_dir=ap_log_dilated_dir,
                               ap_log_aligned_dir=ap_log_aligned_dir, ap_log_loc_softmax_dir=ap_log_loc_softmax_dir,
-                              predicted_events=regression_predicted_events, gt_events=per_series_id_events)
+                              predicted_events=regression_predicted_events,
+                              dense_predicted_events=regression_dense_predicted_events,
+                              gt_events=per_series_id_events)
 
             print()
             print_history(train_history)

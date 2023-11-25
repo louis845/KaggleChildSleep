@@ -1,8 +1,8 @@
 import os
 import numpy as np
 
-def load_all_pred_events_into_dict():
-    FOLDER = "inference_regression_statistics/regression_preds"
+def load_all_pred_events_into_dict(folder_name="regression_preds"):
+    FOLDER = "inference_regression_statistics/{}".format(folder_name)
 
     all_data = {}
     all_series_ids = [x.split(".")[0] for x in os.listdir("individual_train_series")]
