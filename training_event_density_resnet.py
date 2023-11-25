@@ -53,11 +53,11 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
         deep_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_token_confidence, labels_segmentation_batch, reduction="none").mean(dim=-1).sum()
     else:
         pred_density_logits, pred_occurences = model_(accel_data_batch, time=times_input)
-    entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
     if use_focal_loss:
-        class_loss = focal_loss(pred_occurences, labels_occurrence_batch)
+        entropy_loss = focal_loss(pred_density_logits, labels_density_batch)
     else:
-        class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch, reduction="none").mean(dim=-1).sum()
+        entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
+    class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch, reduction="none").mean(dim=-1).sum()
     if use_center_softmax:
         loss = entropy_loss + class_loss + deep_loss
         deep_loss_ret = deep_loss.item()
