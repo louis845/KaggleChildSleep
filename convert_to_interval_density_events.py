@@ -181,6 +181,7 @@ class IntervalDensityEventsSampler:
         if flip:
             accel_data = np.flip(accel_data, axis=1)
             event_segmentations = np.flip(event_segmentations, axis=1)
+            event_segmentations_downscaled = np.flip(event_segmentations_downscaled, axis=1)
 
         hour = self.naive_all_data[series_id]["hours"][start - expand]
         minute = self.naive_all_data[series_id]["mins"][start - expand]
