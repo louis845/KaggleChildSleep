@@ -243,7 +243,7 @@ class MainWindow(QMainWindow):
         self.main_layout.addWidget(self.slider_cutoff_label)
 
         self.slider_cutoff = QSlider(Qt.Horizontal)
-        self.slider_cutoff.setMaximum(100)
+        self.slider_cutoff.setMaximum(1000)
         self.slider_cutoff.valueChanged.connect(self.update_cutoff_value)
         self.main_layout.addWidget(self.slider_cutoff)
 
@@ -342,7 +342,7 @@ class MainWindow(QMainWindow):
         return self.kernel_width_values[self.slider_kernel_width.value()]
 
     def get_cutoff(self):
-        return self.slider_cutoff.value() / 10.0
+        return self.slider_cutoff.value() / 100.0
 
     def get_pruning(self):
         return self.slider_pruning.value() * 12

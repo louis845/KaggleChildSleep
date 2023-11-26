@@ -22,7 +22,7 @@ pruning = 60
 alignment = True"""
 
 # OPTION 2:
-out_folder = "regression_preds_dense"
+"""out_folder = "regression_preds_dense"
 if os.path.isdir(out_folder):
     shutil.rmtree(out_folder)
 os.mkdir(out_folder)
@@ -32,6 +32,19 @@ kernel_shape = ["gaussian", "gaussian", "gaussian"]
 kernel_size = [9, 9, 9]
 cutoff = 0.1
 pruning = 96
+alignment = True"""
+
+# OPTION 3:
+out_folder = "regression_preds_very_dense"
+if os.path.isdir(out_folder):
+    shutil.rmtree(out_folder)
+os.mkdir(out_folder)
+
+PREDS = ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"]
+kernel_shape = ["laplace", "laplace", "laplace"]
+kernel_size = [9, 9, 9]
+cutoff = 0.02
+pruning = 72
 alignment = True
 
 preds_folder = [os.path.join("regression_labels", PREDS[k], "{}_kernel{}".format(kernel_shape[k], kernel_size[k])) for k in range(len(PREDS))]

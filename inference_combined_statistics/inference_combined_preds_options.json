@@ -1,10 +1,5 @@
 [
   {
-    "name": "Local 3Length Ensemble (old)",
-    "conf_results": ["old_event5fold_local", "old_event5fold_3length"],
-    "out_folder": "old_event5fold_local_3length"
-  },
-  {
     "name": "3Length (old)",
     "conf_results": ["old_event5fold_3length"],
     "out_folder": "old_event5fold_3length"
@@ -30,49 +25,9 @@
     "out_folder": "event5fold_time_2length"
   },
   {
-    "name": "3Length Boundary Dropout",
-    "conf_results": ["event5fold_2drop_2length"],
-    "out_folder": "event5fold_2drop_2length"
-  },
-  {
     "name": "3Length Time 2Length Ensemble",
     "conf_results": ["event5fold_3length", "event5fold_time_2length"],
     "out_folder": "event5fold_3length_time_2length"
-  },
-  {
-    "name": "3Length Boundary Dropout Ensemble",
-    "conf_results": ["event5fold_2drop_2length", "event5fold_3length"],
-    "out_folder": "event5fold_2drop_3length"
-  },
-  {
-    "name": "3Length Boundary Dropout Time 2Length Ensemble",
-    "conf_results": ["event5fold_2drop_2length", "event5fold_time_2length"],
-    "out_folder": "event5fold_2drop_time_2length"
-  },
-  {
-    "name": "All Ensemble",
-    "conf_results": ["event5fold_2drop_2length", "event5fold_3length", "event5fold_time_2length"],
-    "out_folder": "event5fold_all"
-  },
-  {
-    "name": "3Length BCE",
-    "conf_results": ["event5fold_3length_bce"],
-    "out_folder": "event5fold_3length_bce"
-  },
-  {
-    "name": "3Length BCE Ensemble",
-    "conf_results": ["event5fold_3length", "event5fold_3length_bce"],
-    "out_folder": "event5fold_3length_bce_ensemble"
-  },
-  {
-    "name": "3Length BCE Time 2Length Ensemble",
-    "conf_results": ["event5fold_3length_bce", "event5fold_time_2length"],
-    "out_folder": "event5fold_3length_bce_time_2length"
-  },
-  {
-    "name": "3Length BCE Time 2Length 3Ensemble",
-    "conf_results": ["event5fold_3length", "event5fold_3length_bce", "event5fold_time_2length"],
-    "out_folder": "event5fold_3length_3length_bce_time_2length"
   },
   {
     "name": "3Length (More Stride)",
@@ -90,16 +45,6 @@
     "out_folder": "event5fold_3length_time_2length_ms"
   },
   {
-    "name": "3Length BCE Ensemble (More Stride)",
-    "conf_results": ["event5fold_3length_ms", "event5fold_3length_bce_ms"],
-    "out_folder": "event5fold_3length_bce_ensemble_ms"
-  },
-  {
-    "name": "3Length BCE Time 2Length 3Ensemble (More Stride)",
-    "conf_results": ["event5fold_3length_ms", "event5fold_3length_bce_ms", "event5fold_time_2length_ms"],
-    "out_folder": "event5fold_3length_3length_bce_time_2length_ms"
-  },
-  {
     "name": "3Length (Flipping)",
     "conf_results": ["event5fold_3length_fp"],
     "out_folder": "event5fold_3length_fp"
@@ -110,16 +55,6 @@
     "out_folder": "event5fold_3length_time_2length_fp"
   },
   {
-    "name": "3Length BCE Ensemble (Flipping)",
-    "conf_results": ["event5fold_3length_fp", "event5fold_3length_bce_fp"],
-    "out_folder": "event5fold_3length_bce_ensemble_fp"
-  },
-  {
-    "name": "3Length BCE Time 2Length 3Ensemble (Flipping)",
-    "conf_results": ["event5fold_3length_fp", "event5fold_3length_bce_fp", "event5fold_time_2length"],
-    "out_folder": "event5fold_3length_3length_bce_time_2length_fp"
-  },
-  {
     "name": "3Length (More Stride, Flipping)",
     "conf_results": ["event5fold_3length_msfp"],
     "out_folder": "event5fold_3length_msfp"
@@ -128,16 +63,6 @@
     "name": "3Length Time 2Length Ensemble (More Stride, Flipping)",
     "conf_results": ["event5fold_3length_msfp", "event5fold_time_2length_ms"],
     "out_folder": "event5fold_3length_time_2length_msfp"
-  },
-  {
-    "name": "3Length BCE Ensemble (More Stride, Flipping)",
-    "conf_results": ["event5fold_3length_msfp", "event5fold_3length_bce_msfp"],
-    "out_folder": "event5fold_3length_bce_ensemble_msfp"
-  },
-  {
-    "name": "3Length BCE Time 2Length 3Ensemble (More Stride, Flipping)",
-    "conf_results": ["event5fold_3length_msfp", "event5fold_3length_bce_msfp", "event5fold_time_2length_ms"],
-    "out_folder": "event5fold_3length_3length_bce_time_2length_msfp"
   },
   {
     "name": "3Length (Best)",
@@ -168,30 +93,6 @@
     "name": "3Length Time 2Length Ensemble (More Stride, Best)",
     "conf_results": ["event5fold_3length_ms_best", "event5fold_time_2length_ms_best"],
     "out_folder": "event5fold_3length_time_2length_ms_best"
-  },
-  {
-    "name": "3Length Time 2Length Ensemble (IOU Avg)",
-    "conf_results": ["event5fold_3length", "event5fold_time_2length"],
-    "out_folder": "event5fold_3length_time_2length_iouavg",
-    "iou_averaging": true
-  },
-  {
-    "name": "3Length Time 2Length Ensemble (More Stride, IOU Avg)",
-    "conf_results": ["event5fold_3length_ms", "event5fold_time_2length_ms"],
-    "out_folder": "event5fold_3length_time_2length_ms_iouavg",
-    "iou_averaging": true
-  },
-  {
-    "name": "3Length Time 2Length Ensemble (Best, IOU Avg)",
-    "conf_results": ["event5fold_3length_best", "event5fold_time_2length_best"],
-    "out_folder": "event5fold_3length_time_2length_best_iouavg",
-    "iou_averaging": true
-  },
-  {
-    "name": "3Length Time 2Length Ensemble (More Stride, Best, IOU Avg)",
-    "conf_results": ["event5fold_3length_ms_best", "event5fold_time_2length_ms_best"],
-    "out_folder": "event5fold_3length_time_2length_ms_best_iouavg",
-    "iou_averaging": true
   },
   {
     "name": "3Length (Both)",
