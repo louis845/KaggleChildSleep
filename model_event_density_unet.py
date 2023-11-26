@@ -65,11 +65,15 @@ class EventDensityUnet(torch.nn.Module):
                                               kernel_size=1, dropout=dropout, input_attn=True, use_batch_norm=False,
                                               target_channels_override=upconv_channels_override)
 
-        self.presence_conv = torch.nn.Conv1d(stem_final_layer_channels * 2, 8, kernel_size=1, bias=False)
-        self.presence_norm = torch.nn.InstanceNorm1d(8, affine=True)
-        self.presence_nonlin = torch.nn.GELU()
-        self.out_presence_pool = torch.nn.AdaptiveMaxPool1d(1)
-        self.out_presence_conv = torch.nn.Conv1d(8, 2, kernel_size=1, bias=True)
+        if training_strategy == "density_only":
+            self.out_presence_pool = torch.nn.AdaptiveMaxPool1d(1)
+            self.out_presence_conv = torch.nn.Conv1d(stem_final_layer_channels, 2, kernel_size=1, bias=True)
+        else:
+            self.presence_conv = torch.nn.Conv1d(stem_final_layer_channels * 2, 8, kernel_size=1, bias=False)
+            self.presence_norm = torch.nn.InstanceNorm1d(8, affine=True)
+            self.presence_nonlin = torch.nn.GELU()
+            self.out_presence_pool = torch.nn.AdaptiveMaxPool1d(1)
+            self.out_presence_conv = torch.nn.Conv1d(8, 2, kernel_size=1, bias=True)
 
         if training_strategy == "density_and_confidence":
             self.out_confidence_conv = torch.nn.Conv1d(stem_final_layer_channels, 2, kernel_size=1, bias=True)
@@ -154,14 +158,18 @@ class EventDensityUnet(torch.nn.Module):
             else:
                 x = self.no_contraction_head(ret, torch.zeros_like(x))
 
-        presence_vector = self.presence_conv(torch.cat([
-            ret[-1][:, :, attn_lvl_expand_radius:-attn_lvl_expand_radius],
-            attn_out[:, :, attn_lvl_expand_radius:-attn_lvl_expand_radius]
-        ], dim=1))
-        presence_vector = self.presence_norm(presence_vector)
-        presence_vector = self.presence_nonlin(presence_vector)
-        presence_vector = self.out_presence_pool(presence_vector)
-        event_presence = self.out_presence_conv(presence_vector)
+        if self.training_strategy == "density_only":
+            presence_vector = self.out_presence_pool(attn_out[:, :, attn_lvl_expand_radius:-attn_lvl_expand_radius])
+            event_presence = self.out_presence_conv(presence_vector)
+        else:
+            presence_vector = self.presence_conv(torch.cat([
+                ret[-1][:, :, attn_lvl_expand_radius:-attn_lvl_expand_radius],
+                attn_out[:, :, attn_lvl_expand_radius:-attn_lvl_expand_radius]
+            ], dim=1))
+            presence_vector = self.presence_norm(presence_vector)
+            presence_vector = self.presence_nonlin(presence_vector)
+            presence_vector = self.out_presence_pool(presence_vector)
+            event_presence = self.out_presence_conv(presence_vector)
 
         if self.training or return_as_training:
             if self.training_strategy == "density_only":
