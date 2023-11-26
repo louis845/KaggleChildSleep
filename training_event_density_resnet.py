@@ -255,13 +255,16 @@ def plot_single_precision_recall_curve(ax, precisions, recalls, ap, title):
 validation_AP_tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30][::-1]
 def validation_ap(epoch, ap_log_dir, ap_log_aligned_dir, ap_log_loc_softmax_dir,
                   ap_dense_log_dir, ap_dense_log_aligned_dir, ap_dense_log_loc_softmax_dir,
-                  predicted_events, dense_predicted_events, gt_events):
+                  ap_very_dense_log_dir, ap_very_dense_log_aligned_dir, ap_very_dense_log_loc_softmax_dir,
+                  predicted_events, dense_predicted_events, very_dense_predicted_events, gt_events):
     use_model = swa_model if (use_swa and (epoch > swa_start)) else model
 
-    keys = ["usual", "aligned", "loc_softmax", "dense_usual", "dense_aligned", "dense_loc_softmax"]
+    keys = ["usual", "aligned", "loc_softmax", "dense_usual", "dense_aligned", "dense_loc_softmax",
+                "very_dense_usual", "very_dense_aligned", "very_dense_loc_softmax"]
 
     dirs = {"usual": ap_log_dir, "aligned": ap_log_aligned_dir, "loc_softmax": ap_log_loc_softmax_dir,
-            "dense_usual": ap_dense_log_dir, "dense_aligned": ap_dense_log_aligned_dir, "dense_loc_softmax": ap_dense_log_loc_softmax_dir}
+            "dense_usual": ap_dense_log_dir, "dense_aligned": ap_dense_log_aligned_dir, "dense_loc_softmax": ap_dense_log_loc_softmax_dir,
+            "very_dense_usual": ap_very_dense_log_dir, "very_dense_aligned": ap_very_dense_log_aligned_dir, "very_dense_loc_softmax": ap_very_dense_log_loc_softmax_dir}
     all_ap_onset_metrics = {key: [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
                              for key in keys}
     all_ap_wakeup_metrics = {key: [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
@@ -286,9 +289,14 @@ def validation_ap(epoch, ap_log_dir, ap_log_aligned_dir, ap_log_loc_softmax_dir,
             preds_locs = predicted_events[series_id]
             preds_locs_onset = preds_locs["onset"]
             preds_locs_wakeup = preds_locs["wakeup"]
+
             dense_preds_locs = dense_predicted_events[series_id]
             dense_preds_locs_onset = dense_preds_locs["onset"]
             dense_preds_locs_wakeup = dense_preds_locs["wakeup"]
+
+            very_dense_preds_locs = very_dense_predicted_events[series_id]
+            very_dense_preds_locs_onset = very_dense_preds_locs["onset"]
+            very_dense_preds_locs_wakeup = very_dense_preds_locs["wakeup"]
 
             # run inference
             stride_count = 8
@@ -303,6 +311,10 @@ def validation_ap(epoch, ap_log_dir, ap_log_aligned_dir, ap_log_loc_softmax_dir,
                                                                       {
                                                                           "onset": dense_preds_locs_onset,
                                                                           "wakeup": dense_preds_locs_wakeup
+                                                                      },
+                                                                      {
+                                                                          "onset": very_dense_preds_locs_onset,
+                                                                          "wakeup": very_dense_preds_locs_wakeup
                                                                       }],
                                                                       batch_size=batch_size * 5,
                                                                       prediction_length=prediction_length,
@@ -328,10 +340,19 @@ def validation_ap(epoch, ap_log_dir, ap_log_aligned_dir, ap_log_loc_softmax_dir,
             onset_IOU_dense_loc_softmax_probas = all_onset_IOU_loc_softmax_probas[1]
             wakeup_IOU_dense_loc_softmax_probas = all_wakeup_IOU_loc_softmax_probas[1]
 
+            onset_IOU_very_dense_usual_probas = onset_IOU_probas[very_dense_preds_locs_onset]
+            wakeup_IOU_very_dense_usual_probas = wakeup_IOU_probas[very_dense_preds_locs_wakeup]
+            onset_IOU_very_dense_aligned_probas = postprocessing.align_index_probas(very_dense_preds_locs_onset, onset_IOU_probas)
+            wakeup_IOU_very_dense_aligned_probas = postprocessing.align_index_probas(very_dense_preds_locs_wakeup, wakeup_IOU_probas)
+            onset_IOU_very_dense_loc_softmax_probas = all_onset_IOU_loc_softmax_probas[2]
+            wakeup_IOU_very_dense_loc_softmax_probas = all_wakeup_IOU_loc_softmax_probas[2]
+
             onset_all_probas = {"usual": onset_IOU_usual_probas, "aligned": onset_IOU_aligned_probas, "loc_softmax": onset_IOU_loc_softmax_probas,
-                                "dense_usual": onset_IOU_dense_usual_probas, "dense_aligned": onset_IOU_dense_aligned_probas, "dense_loc_softmax": onset_IOU_dense_loc_softmax_probas}
+                                "dense_usual": onset_IOU_dense_usual_probas, "dense_aligned": onset_IOU_dense_aligned_probas, "dense_loc_softmax": onset_IOU_dense_loc_softmax_probas,
+                                "very_dense_usual": onset_IOU_very_dense_usual_probas, "very_dense_aligned": onset_IOU_very_dense_aligned_probas, "very_dense_loc_softmax": onset_IOU_very_dense_loc_softmax_probas}
             wakeup_all_probas = {"usual": wakeup_IOU_usual_probas, "aligned": wakeup_IOU_aligned_probas, "loc_softmax": wakeup_IOU_loc_softmax_probas,
-                                    "dense_usual": wakeup_IOU_dense_usual_probas, "dense_aligned": wakeup_IOU_dense_aligned_probas, "dense_loc_softmax": wakeup_IOU_dense_loc_softmax_probas}
+                                    "dense_usual": wakeup_IOU_dense_usual_probas, "dense_aligned": wakeup_IOU_dense_aligned_probas, "dense_loc_softmax": wakeup_IOU_dense_loc_softmax_probas,
+                                    "very_dense_usual": wakeup_IOU_very_dense_usual_probas, "very_dense_aligned": wakeup_IOU_very_dense_aligned_probas, "very_dense_loc_softmax": wakeup_IOU_very_dense_loc_softmax_probas}
 
             # get the ground truth
             gt_onset_locs = gt_events[series_id]["onset"]
@@ -340,7 +361,10 @@ def validation_ap(epoch, ap_log_dir, ap_log_aligned_dir, ap_log_loc_softmax_dir,
             # add info
             for key in keys:
                 for key_onset_metric, key_wakeup_metric in zip(all_ap_onset_metrics[key], all_ap_wakeup_metrics[key]):
-                    if "dense" in key:
+                    if "very_dense" in key:
+                        key_onset_metric.add(pred_locs=very_dense_preds_locs_onset, pred_probas=onset_all_probas[key], gt_locs=gt_onset_locs)
+                        key_wakeup_metric.add(pred_locs=very_dense_preds_locs_wakeup, pred_probas=wakeup_all_probas[key], gt_locs=gt_wakeup_locs)
+                    elif "dense" in key:
                         key_onset_metric.add(pred_locs=dense_preds_locs_onset, pred_probas=onset_all_probas[key], gt_locs=gt_onset_locs)
                         key_wakeup_metric.add(pred_locs=dense_preds_locs_wakeup, pred_probas=wakeup_all_probas[key], gt_locs=gt_wakeup_locs)
                     else:
@@ -542,9 +566,11 @@ if __name__ == "__main__":
 
     assert os.path.isdir("./inference_regression_statistics/regression_preds/"), "Must generate regression predictions first. See inference_regression_statistics folder."
     assert os.path.isdir("./inference_regression_statistics/regression_preds_dense/"), "Must generate regression predictions first. See inference_regression_statistics folder."
+    assert os.path.isdir("./inference_regression_statistics/regression_preds_very_dense/"), "Must generate regression predictions first. See inference_regression_statistics folder."
     per_series_id_events = convert_to_seriesid_events.get_events_per_seriesid()
     regression_predicted_events = convert_to_pred_events.load_all_pred_events_into_dict("regression_preds")
     regression_dense_predicted_events = convert_to_pred_events.load_all_pred_events_into_dict("regression_preds_dense")
+    regression_very_dense_predicted_events = convert_to_pred_events.load_all_pred_events_into_dict("regression_preds_very_dense")
     dilation_converter = model_event_density_unet.ProbasDilationConverter(sigma=30 * 12, device=config.device)
     ap_log_dir = os.path.join(model_dir, "ap_log")
     ap_log_aligned_dir = os.path.join(model_dir, "ap_log_aligned")
@@ -552,12 +578,18 @@ if __name__ == "__main__":
     ap_dense_log_dir = os.path.join(model_dir, "ap_dense_log")
     ap_dense_log_aligned_dir = os.path.join(model_dir, "ap_dense_log_aligned")
     ap_dense_log_loc_softmax_dir = os.path.join(model_dir, "ap_dense_log_loc_softmax")
+    ap_very_dense_log_dir = os.path.join(model_dir, "ap_very_dense_log")
+    ap_very_dense_log_aligned_dir = os.path.join(model_dir, "ap_very_dense_log_aligned")
+    ap_very_dense_log_loc_softmax_dir = os.path.join(model_dir, "ap_very_dense_log_loc_softmax")
     os.mkdir(ap_log_dir)
     os.mkdir(ap_log_aligned_dir)
     os.mkdir(ap_log_loc_softmax_dir)
     os.mkdir(ap_dense_log_dir)
     os.mkdir(ap_dense_log_aligned_dir)
     os.mkdir(ap_dense_log_loc_softmax_dir)
+    os.mkdir(ap_very_dense_log_dir)
+    os.mkdir(ap_very_dense_log_aligned_dir)
+    os.mkdir(ap_very_dense_log_loc_softmax_dir)
 
     if isinstance(hidden_channels, int):
         hidden_channels = [hidden_channels]
@@ -762,8 +794,11 @@ if __name__ == "__main__":
                 validation_ap(epoch=epoch, ap_log_dir=ap_log_dir,  ap_log_aligned_dir=ap_log_aligned_dir, ap_log_loc_softmax_dir=ap_log_loc_softmax_dir,
                               ap_dense_log_dir=ap_dense_log_dir, ap_dense_log_aligned_dir=ap_dense_log_aligned_dir,
                               ap_dense_log_loc_softmax_dir=ap_dense_log_loc_softmax_dir,
+                              ap_very_dense_log_dir=ap_very_dense_log_dir, ap_very_dense_log_aligned_dir=ap_very_dense_log_aligned_dir,
+                              ap_very_dense_log_loc_softmax_dir=ap_very_dense_log_loc_softmax_dir,
                               predicted_events=regression_predicted_events,
                               dense_predicted_events=regression_dense_predicted_events,
+                              very_dense_predicted_events=regression_very_dense_predicted_events,
                               gt_events=per_series_id_events)
 
             print()
