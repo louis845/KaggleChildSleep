@@ -389,14 +389,13 @@ def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
 
                 if len(onset_locations) > 0:
                     onset_locs_idxs = np.searchsorted(onset_locations, [interval_start, interval_end], side="left")
-                    event_presence_score = interval_event_presence[k, 0]
+                    event_presence_score = interval_event_presence[0]
                     if onset_locs_idxs[0] < onset_locs_idxs[1] - 1:
                         onset_locs_of_interest = onset_locations[onset_locs_idxs[0]:onset_locs_idxs[1]] - interval_start
-                        batches_out_logits_of_interest = interval_logits[k, 0, onset_locs_of_interest]
-                        batches_out_probas_of_interest = stable_softmax(batches_out_logits_of_interest)
+                        interval_logits_of_interest = interval_logits[0, onset_locs_of_interest]
+                        interval_probas_of_interest = stable_softmax(interval_logits_of_interest)
 
-                        onset_locs_probas[k][
-                        onset_locs_idxs[0]:onset_locs_idxs[1]] += batches_out_probas_of_interest * event_presence_score
+                        onset_locs_probas[k][onset_locs_idxs[0]:onset_locs_idxs[1]] += interval_probas_of_interest * event_presence_score
                         onset_locs_multiplicities[k][onset_locs_idxs[0]:onset_locs_idxs[1]] += 1
                     elif onset_locs_idxs[0] == onset_locs_idxs[1] - 1:
                         onset_locs_probas[k][onset_locs_idxs[0]] += event_presence_score
@@ -405,14 +404,13 @@ def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
                 if len(wakeup_locations) > 0:
                     wakeup_locs_idxs = np.searchsorted(wakeup_locations, [interval_start, interval_end],
                                                        side="left")
-                    event_presence_score = interval_event_presence[k, 1]
+                    event_presence_score = interval_event_presence[1]
                     if wakeup_locs_idxs[0] < wakeup_locs_idxs[1] - 1:
                         wakeup_locs_of_interest = wakeup_locations[wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] - interval_start
-                        batches_out_logits_of_interest = interval_logits[k, 1, wakeup_locs_of_interest]
-                        batches_out_probas_of_interest = stable_softmax(batches_out_logits_of_interest)
+                        interval_logits_of_interest = interval_logits[1, wakeup_locs_of_interest]
+                        interval_probas_of_interest = stable_softmax(interval_logits_of_interest)
 
-                        wakeup_locs_probas[k][wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] +=\
-                            batches_out_probas_of_interest * event_presence_score
+                        wakeup_locs_probas[k][wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] += interval_probas_of_interest * event_presence_score
                         wakeup_locs_multiplicities[k][wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] += 1
                     elif wakeup_locs_idxs[0] == wakeup_locs_idxs[1] - 1:
                         wakeup_locs_probas[k][wakeup_locs_idxs[0]] += event_presence_score
