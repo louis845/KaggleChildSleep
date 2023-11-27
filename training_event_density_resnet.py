@@ -521,7 +521,7 @@ if __name__ == "__main__":
     config.parse_args(args)
 
     # get model directories
-    model_dir, prev_model_dir = manager_models.parse_args(args)
+    model_dir, prev_model_dir, load_model_epoch = manager_models.parse_args(args)
 
     # obtain model and training parameters
     epochs = args.epochs
@@ -647,8 +647,14 @@ if __name__ == "__main__":
             g["lr"] = learning_rate
     else:
         warmup_steps = 0
-        model_checkpoint_path = os.path.join(prev_model_dir, "model.pt")
-        optimizer_checkpoint_path = os.path.join(prev_model_dir, "optimizer.pt")
+        if load_model_epoch == -1:
+            print("Loading previous model (final).")
+            model_checkpoint_path = os.path.join(prev_model_dir, "model.pt")
+            optimizer_checkpoint_path = os.path.join(prev_model_dir, "optimizer.pt")
+        else:
+            print("Loading previous model (epoch {}).".format(load_model_epoch))
+            model_checkpoint_path = os.path.join(prev_model_dir, "model_{}.pt".format(load_model_epoch))
+            optimizer_checkpoint_path = os.path.join(prev_model_dir, "optimizer_{}.pt".format(load_model_epoch))
 
         model.load_state_dict(torch.load(model_checkpoint_path))
         optimizer.load_state_dict(torch.load(optimizer_checkpoint_path))
