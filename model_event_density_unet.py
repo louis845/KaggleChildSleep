@@ -1,3 +1,5 @@
+from typing import Iterator
+
 import torch.nn
 
 from model_event_unet import *
@@ -200,12 +202,9 @@ class EventDensityUnet(torch.nn.Module):
     def get_device(self) -> torch.device:
         return next(self.parameters()).device
 
-
-def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
-                               predicted_locations: Optional[list[dict[str, np.ndarray]]]=None, batch_size=32,
-                               prediction_length=17280, expand=8640, times: Optional[dict[str, np.ndarray]]=None,
-                               stride_count=4, flip_augmentation=False, use_time_input=False, device=None):
-    model.eval()
+def event_density_logit_iterator(model: EventDensityUnet, time_series: np.ndarray, batch_size=32,
+                                 prediction_length=17280, expand=8640, times: Optional[dict[str, np.ndarray]]=None,
+                                 stride_count=4, flip_augmentation=False, use_time_input=False, device=None) -> Iterator[dict[str, np.ndarray]]:
     if isinstance(model, EventDensityUnet):
         use_time_input = model.use_time_input
         device = model.get_device()
@@ -228,32 +227,6 @@ def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
     model.eval()
 
     total_length = time_series.shape[1]
-    probas = np.zeros((2, total_length), dtype=np.float32)
-    multiplicities = np.zeros((total_length,), dtype=np.int32)
-    if predicted_locations is not None:
-        onset_locs_probas = []
-        wakeup_locs_probas = []
-        onset_locs_multiplicities = []
-        wakeup_locs_multiplicities = []
-        for k in range(len(predicted_locations)):
-            assert set(predicted_locations[k].keys()) == {"onset", "wakeup"}, "predicted_locations must contain onset and wakeup"
-            assert isinstance(predicted_locations[k]["onset"], np.ndarray), "predicted_locations[onset] must be a numpy array"
-            assert isinstance(predicted_locations[k]["wakeup"], np.ndarray), "predicted_locations[wakeup] must be a numpy array"
-            assert predicted_locations[k]["onset"].dtype == np.int32 or predicted_locations[k]["onset"].dtype == np.int64,\
-                "predicted_locations[onset] must be int"
-            assert predicted_locations[k]["wakeup"].dtype == np.int32 or predicted_locations[k]["wakeup"].dtype == np.int64,\
-                "predicted_locations[wakeup] must be int"
-
-            assert np.all(predicted_locations[k]["onset"][1:] > predicted_locations[k]["onset"][:-1]), "predicted_locations[onset] must be sorted"
-            assert np.all(predicted_locations[k]["wakeup"][1:] > predicted_locations[k]["wakeup"][:-1]), "predicted_locations[wakeup] must be sorted"
-
-            onset_locs_probas.append(np.zeros((len(predicted_locations[k]["onset"]),), dtype=np.float32))
-            wakeup_locs_probas.append(np.zeros((len(predicted_locations[k]["wakeup"]),), dtype=np.float32))
-            onset_locs_multiplicities.append(np.zeros((len(predicted_locations[k]["onset"]),), dtype=np.int32))
-            wakeup_locs_multiplicities.append(np.zeros((len(predicted_locations[k]["wakeup"]),), dtype=np.int32))
-    else:
-        onset_locs_probas, onset_locs_multiplicities = None, None
-        wakeup_locs_probas, wakeup_locs_multiplicities = None, None
 
     starts = []
     for k in range(stride_count):
@@ -262,64 +235,30 @@ def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
         starts.append((total_length + k * prediction_length // stride_count) % prediction_length)
 
     for start in starts:
-        event_density_single_inference(model, time_series, probas, multiplicities,
-                                          predicted_locations,
-                                          onset_locs_probas, onset_locs_multiplicities,
-                                          wakeup_locs_probas, wakeup_locs_multiplicities,
+        for interval_info in event_density_single_logit_iterator(model, time_series,
                                           device=device, use_time_input=use_time_input,
                                           batch_size=batch_size,
                                           prediction_length=prediction_length, prediction_stride=prediction_length,
-                                          expand=expand, start=start, times=times)
+                                          expand=expand, start=start, times=times):
+            yield interval_info
+
         if flip_augmentation:
-            event_density_single_inference(model, time_series, probas, multiplicities,
-                                              predicted_locations,
-                                              onset_locs_probas, onset_locs_multiplicities,
-                                              wakeup_locs_probas, wakeup_locs_multiplicities,
-                                              device=device, use_time_input=use_time_input,
-                                              batch_size=batch_size,
-                                              prediction_length=prediction_length, prediction_stride=prediction_length,
-                                              expand=expand, start=start, times=times, flipped=True)
-    multiplicities[multiplicities == 0] = 1 # avoid division by zero. the probas will be zero anyway
+            for interval_info in event_density_single_logit_iterator(model, time_series,
+                                                  device=device, use_time_input=use_time_input,
+                                                  batch_size=batch_size,
+                                                  prediction_length=prediction_length, prediction_stride=prediction_length,
+                                                  expand=expand, start=start, times=times, flipped=True):
+                yield interval_info
 
-    if predicted_locations is not None:
-        for k in range(len(predicted_locations)):
-            if len(predicted_locations[k]["onset"]) > 0:
-                onset_locs_multiplicities[k][onset_locs_multiplicities[k] == 0] = 1
-                onset_locs_probas[k] /= onset_locs_multiplicities[k]
-            if len(predicted_locations[k]["wakeup"]) > 0:
-                wakeup_locs_multiplicities[k][wakeup_locs_multiplicities[k] == 0] = 1
-                wakeup_locs_probas[k] /= wakeup_locs_multiplicities[k]
-    return probas / multiplicities, onset_locs_probas, wakeup_locs_probas
-
-def event_density_single_inference(model: EventDensityUnet, time_series: np.ndarray,
-                                      probas: np.ndarray, multiplicities: np.ndarray,
-                                      predicted_locations: Optional[list[dict[str, np.ndarray]]],
-                                      onset_locs_probas: Optional[list[np.ndarray]], onset_locs_multiplicities: Optional[list[np.ndarray]],
-                                      wakeup_locs_probas: Optional[list[np.ndarray]], wakeup_locs_multiplicities: Optional[list[np.ndarray]],
-                                      device: torch.device, use_time_input: bool,
-                                      batch_size=32,
-                                      prediction_length=17280, prediction_stride=17280,
-                                      expand=8640, start=0, times=None,
-                                      flipped=False):
-    if predicted_locations is not None:
-        assert isinstance(onset_locs_probas, list), "onset_locs_probas must be a list"
-        assert isinstance(onset_locs_multiplicities, list), "onset_locs_multiplicities must be a list"
-        assert isinstance(wakeup_locs_probas, list), "wakeup_locs_probas must be a list"
-        assert isinstance(wakeup_locs_multiplicities, list), "wakeup_locs_multiplicities must be a list"
-
-        assert len(predicted_locations) == len(onset_locs_probas) == len(onset_locs_multiplicities) == len(wakeup_locs_probas) == len(wakeup_locs_multiplicities),\
-            "predicted_locations, onset_locs_probas, onset_locs_multiplicities, wakeup_locs_probas and wakeup_locs_multiplicities must have the same length"
+def event_density_single_logit_iterator(model: EventDensityUnet, time_series: np.ndarray,
+                                          device: torch.device, use_time_input: bool,
+                                          batch_size=32,
+                                          prediction_length=17280, prediction_stride=17280,
+                                          expand=8640, start=0, times=None,
+                                          flipped=False) -> Iterator[dict[str, np.ndarray]]:
     model.eval()
 
     assert len(time_series.shape) == 2, "time_series must be a 2D array"
-    assert len(probas.shape) == 2, "probas must be a 2D array"
-    assert len(multiplicities.shape) == 1, "multiplicities must be a 1D array"
-
-    assert time_series.shape[1] == probas.shape[1], "time_series and probas must have the same length"
-    assert time_series.shape[1] == multiplicities.shape[0], "time_series and multiplicities must have the same length"
-
-    assert probas.dtype == np.float32, "probas must be a float32 array"
-    assert multiplicities.dtype == np.int32, "multiplicities must be an int32 array"
 
     total_length = time_series.shape[1]
 
@@ -374,51 +313,122 @@ def event_density_single_inference(model: EventDensityUnet, time_series: np.ndar
                 batches_out, batches_out_raw_logits, batches_out_event_presence_score = model(batches_torch, time=batch_times)
 
             batches_out = batches_out.cpu().numpy()
-            if predicted_locations is not None:
-                batches_out_raw_logits = batches_out_raw_logits.cpu().numpy()
-                batches_out_event_presence_score = batches_out_event_presence_score.cpu().numpy()
+            batches_out_raw_logits = batches_out_raw_logits.cpu().numpy()
+            batches_out_event_presence_score = batches_out_event_presence_score.cpu().numpy()
 
         # update probas
         for i in range(batches_computed, batches_compute_end):
             k = i - batches_computed
-            probas[:, batches_starts[i]:batches_ends[i]] += batches_out[k, :, :]
-            multiplicities[batches_starts[i]:batches_ends[i]] += 1
+            interval_start = batches_starts[i]
+            interval_end = batches_ends[i]
+            interval_out_scores = batches_out[k, :, :] # computed score (softmax * sigmoid score)
+            interval_logits = batches_out_raw_logits[k, :, :] # raw logits
+            interval_event_presence = batches_out_event_presence_score[k, :] # sigmoid score
 
-            if predicted_locations is not None:
-                for j in range(len(predicted_locations)):
-                    onset_locations = predicted_locations[j]["onset"]
-                    wakeup_locations = predicted_locations[j]["wakeup"]
-
-                    if len(onset_locations) > 0:
-                        onset_locs_idxs = np.searchsorted(onset_locations, [batches_starts[i], batches_ends[i]], side="left")
-                        batch_event_presence = batches_out_event_presence_score[k, 0]
-                        if onset_locs_idxs[0] < onset_locs_idxs[1] - 1:
-                            onset_locs_of_interest = onset_locations[onset_locs_idxs[0]:onset_locs_idxs[1]] - batches_starts[i]
-                            batches_out_logits_of_interest = batches_out_raw_logits[k, 0, onset_locs_of_interest]
-                            batches_out_probas_of_interest = stable_softmax(batches_out_logits_of_interest)
-
-                            onset_locs_probas[j][onset_locs_idxs[0]:onset_locs_idxs[1]] += batches_out_probas_of_interest * batch_event_presence
-                            onset_locs_multiplicities[j][onset_locs_idxs[0]:onset_locs_idxs[1]] += 1
-                        elif onset_locs_idxs[0] == onset_locs_idxs[1] - 1:
-                            onset_locs_probas[j][onset_locs_idxs[0]] += batch_event_presence
-                            onset_locs_multiplicities[j][onset_locs_idxs[0]] += 1
-
-                    if len(wakeup_locations) > 0:
-                        wakeup_locs_idxs = np.searchsorted(wakeup_locations, [batches_starts[i], batches_ends[i]], side="left")
-                        batch_event_presence = batches_out_event_presence_score[k, 1]
-                        if wakeup_locs_idxs[0] < wakeup_locs_idxs[1] - 1:
-                            wakeup_locs_of_interest = wakeup_locations[wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] - batches_starts[i]
-                            batches_out_logits_of_interest = batches_out_raw_logits[k, 1, wakeup_locs_of_interest]
-                            batches_out_probas_of_interest = stable_softmax(batches_out_logits_of_interest)
-
-                            wakeup_locs_probas[j][wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] += batches_out_probas_of_interest * batch_event_presence
-                            wakeup_locs_multiplicities[j][wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] += 1
-                        elif wakeup_locs_idxs[0] == wakeup_locs_idxs[1] - 1:
-                            wakeup_locs_probas[j][wakeup_locs_idxs[0]] += batch_event_presence
-                            wakeup_locs_multiplicities[j][wakeup_locs_idxs[0]] += 1
-
+            yield {
+                "interval_start": interval_start,
+                "interval_end": interval_end,
+                "interval_out_scores": interval_out_scores,
+                "interval_logits": interval_logits,
+                "interval_event_presence": interval_event_presence
+            }
 
         batches_computed = batches_compute_end
+
+
+def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
+                               predicted_locations: Optional[list[dict[str, np.ndarray]]]=None, batch_size=32,
+                               prediction_length=17280, expand=8640, times: Optional[dict[str, np.ndarray]]=None,
+                               stride_count=4, flip_augmentation=False, use_time_input=False, device=None):
+    total_length = time_series.shape[1]
+    probas = np.zeros((2, total_length), dtype=np.float32)
+    multiplicities = np.zeros((total_length,), dtype=np.int32)
+    if predicted_locations is not None:
+        onset_locs_probas = []
+        wakeup_locs_probas = []
+        onset_locs_multiplicities = []
+        wakeup_locs_multiplicities = []
+        for k in range(len(predicted_locations)):
+            assert set(predicted_locations[k].keys()) == {"onset", "wakeup"}, "predicted_locations must contain onset and wakeup"
+            assert isinstance(predicted_locations[k]["onset"], np.ndarray), "predicted_locations[onset] must be a numpy array"
+            assert isinstance(predicted_locations[k]["wakeup"], np.ndarray), "predicted_locations[wakeup] must be a numpy array"
+            assert predicted_locations[k]["onset"].dtype == np.int32 or predicted_locations[k]["onset"].dtype == np.int64,\
+                "predicted_locations[onset] must be int"
+            assert predicted_locations[k]["wakeup"].dtype == np.int32 or predicted_locations[k]["wakeup"].dtype == np.int64,\
+                "predicted_locations[wakeup] must be int"
+
+            assert np.all(predicted_locations[k]["onset"][1:] > predicted_locations[k]["onset"][:-1]), "predicted_locations[onset] must be sorted"
+            assert np.all(predicted_locations[k]["wakeup"][1:] > predicted_locations[k]["wakeup"][:-1]), "predicted_locations[wakeup] must be sorted"
+
+            onset_locs_probas.append(np.zeros((len(predicted_locations[k]["onset"]),), dtype=np.float32))
+            wakeup_locs_probas.append(np.zeros((len(predicted_locations[k]["wakeup"]),), dtype=np.float32))
+            onset_locs_multiplicities.append(np.zeros((len(predicted_locations[k]["onset"]),), dtype=np.int32))
+            wakeup_locs_multiplicities.append(np.zeros((len(predicted_locations[k]["wakeup"]),), dtype=np.int32))
+    else:
+        onset_locs_probas, onset_locs_multiplicities = None, None
+        wakeup_locs_probas, wakeup_locs_multiplicities = None, None
+
+    for interval_info in event_density_logit_iterator(model, time_series, batch_size=batch_size,
+                                                      prediction_length=prediction_length, expand=expand,
+                                                      times=times, stride_count=stride_count,
+                                                      flip_augmentation=flip_augmentation,
+                                                      use_time_input=use_time_input, device=device):
+        interval_start = interval_info["interval_start"]
+        interval_end = interval_info["interval_end"]
+        interval_out_scores = interval_info["interval_out_scores"]
+        interval_logits = interval_info["interval_logits"]
+        interval_event_presence = interval_info["interval_event_presence"]
+
+        probas[:, interval_start:interval_end] += interval_out_scores
+        multiplicities[interval_start:interval_end] += 1
+
+        if predicted_locations is not None:
+            for k in range(len(predicted_locations)):
+                onset_locations = predicted_locations[k]["onset"]
+                wakeup_locations = predicted_locations[k]["wakeup"]
+
+                if len(onset_locations) > 0:
+                    onset_locs_idxs = np.searchsorted(onset_locations, [interval_start, interval_end], side="left")
+                    event_presence_score = interval_event_presence[k, 0]
+                    if onset_locs_idxs[0] < onset_locs_idxs[1] - 1:
+                        onset_locs_of_interest = onset_locations[onset_locs_idxs[0]:onset_locs_idxs[1]] - interval_start
+                        batches_out_logits_of_interest = interval_logits[k, 0, onset_locs_of_interest]
+                        batches_out_probas_of_interest = stable_softmax(batches_out_logits_of_interest)
+
+                        onset_locs_probas[k][
+                        onset_locs_idxs[0]:onset_locs_idxs[1]] += batches_out_probas_of_interest * event_presence_score
+                        onset_locs_multiplicities[k][onset_locs_idxs[0]:onset_locs_idxs[1]] += 1
+                    elif onset_locs_idxs[0] == onset_locs_idxs[1] - 1:
+                        onset_locs_probas[k][onset_locs_idxs[0]] += event_presence_score
+                        onset_locs_multiplicities[k][onset_locs_idxs[0]] += 1
+
+                if len(wakeup_locations) > 0:
+                    wakeup_locs_idxs = np.searchsorted(wakeup_locations, [interval_start, interval_end],
+                                                       side="left")
+                    event_presence_score = interval_event_presence[k, 1]
+                    if wakeup_locs_idxs[0] < wakeup_locs_idxs[1] - 1:
+                        wakeup_locs_of_interest = wakeup_locations[wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] - interval_start
+                        batches_out_logits_of_interest = interval_logits[k, 1, wakeup_locs_of_interest]
+                        batches_out_probas_of_interest = stable_softmax(batches_out_logits_of_interest)
+
+                        wakeup_locs_probas[k][wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] +=\
+                            batches_out_probas_of_interest * event_presence_score
+                        wakeup_locs_multiplicities[k][wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] += 1
+                    elif wakeup_locs_idxs[0] == wakeup_locs_idxs[1] - 1:
+                        wakeup_locs_probas[k][wakeup_locs_idxs[0]] += event_presence_score
+                        wakeup_locs_multiplicities[k][wakeup_locs_idxs[0]] += 1
+
+
+    multiplicities[multiplicities == 0] = 1 # avoid division by zero. the probas will be zero anyway
+    if predicted_locations is not None:
+        for k in range(len(predicted_locations)):
+            if len(predicted_locations[k]["onset"]) > 0:
+                onset_locs_multiplicities[k][onset_locs_multiplicities[k] == 0] = 1
+                onset_locs_probas[k] /= onset_locs_multiplicities[k]
+            if len(predicted_locations[k]["wakeup"]) > 0:
+                wakeup_locs_multiplicities[k][wakeup_locs_multiplicities[k] == 0] = 1
+                wakeup_locs_probas[k] /= wakeup_locs_multiplicities[k]
+    return probas / multiplicities, onset_locs_probas, wakeup_locs_probas
 
 class ProbasDilationConverter:
     def __init__(self, sigma: int, device: torch.device):
