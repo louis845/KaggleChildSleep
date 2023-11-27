@@ -1,0 +1,46 @@
+[
+  {
+    "name": "Density Predictions (3 Length)",
+    "folder_name": "event5fold_density_3length",
+    "models": ["event5fold_density_swa_2elastic_length3_drop_model_fold1", "event5fold_density_swa_2elastic_length3_drop_model_fold2", "event5fold_density_swa_2elastic_length3_drop_model_fold3", "event5fold_density_swa_2elastic_length3_drop_model_fold4", "event5fold_density_swa_2elastic_length3_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "anglez",
+    "attention_blocks": 3,
+    "stride_count": 24,
+    "use_swa": true
+  },
+  {
+    "name": "Density Predictions (Time)",
+    "folder_name": "event5fold_density_time_2length",
+    "models": ["event5fold_density_swa_time_2elastic_length2_drop_model_fold1", "event5fold_density_swa_time_2elastic_length2_drop_model_fold2", "event5fold_density_swa_time_2elastic_length2_drop_model_fold3", "event5fold_density_swa_time_2elastic_length2_drop_model_fold4", "event5fold_density_swa_time_2elastic_length2_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "anglez",
+    "attention_blocks": 2,
+    "stride_count": 24,
+    "use_time_information": true,
+    "use_swa": true
+  },
+  {
+    "name": "Density Predictions (3 Length, Best)",
+    "folder_name": "event5fold_density_3length_best",
+    "models": ["event5fold_density_swa_2elastic_length3_drop_model_fold1", "event5fold_density_swa_2elastic_length3_drop_model_fold2", "event5fold_density_swa_2elastic_length3_drop_model_fold3", "event5fold_density_swa_2elastic_length3_drop_model_fold4", "event5fold_density_swa_2elastic_length3_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "anglez",
+    "attention_blocks": 3,
+    "stride_count": 24,
+    "use_best_model": true,
+    "use_swa": true
+  },
+  {
+    "name": "Density Predictions (Time, Best)",
+    "folder_name": "event5fold_density_time_2length_best",
+    "models": ["event5fold_density_swa_time_2elastic_length2_drop_model_fold1", "event5fold_density_swa_time_2elastic_length2_drop_model_fold2", "event5fold_density_swa_time_2elastic_length2_drop_model_fold3", "event5fold_density_swa_time_2elastic_length2_drop_model_fold4", "event5fold_density_swa_time_2elastic_length2_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "anglez",
+    "attention_blocks": 2,
+    "stride_count": 24,
+    "use_time_information": true,
+    "use_best_model": true,
+    "use_swa": true
+  }
+]
