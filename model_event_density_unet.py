@@ -413,8 +413,6 @@ def event_density_probas_from_interval_info(interval_info_stream: Iterator[dict[
                         wakeup_locs_probas[k][wakeup_locs_idxs[0]] += event_presence_score
                         wakeup_locs_multiplicities[k][wakeup_locs_idxs[0]] += 1
 
-
-    multiplicities[multiplicities == 0] = 1 # avoid division by zero. the probas will be zero anyway
     if predicted_locations is not None:
         for k in range(len(predicted_locations)):
             if len(predicted_locations[k]["onset"]) > 0:
@@ -425,6 +423,7 @@ def event_density_probas_from_interval_info(interval_info_stream: Iterator[dict[
                 wakeup_locs_probas[k] /= wakeup_locs_multiplicities[k]
 
     if return_probas:
+        multiplicities[multiplicities == 0] = 1  # avoid division by zero. the probas will be zero anyway
         return probas / multiplicities, onset_locs_probas, wakeup_locs_probas
     else:
         return None, onset_locs_probas, wakeup_locs_probas

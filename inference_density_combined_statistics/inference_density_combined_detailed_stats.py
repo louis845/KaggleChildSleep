@@ -76,7 +76,7 @@ def get_regression_preds_locs(selected_regression_folders: list[str], series_id:
             wakeup_locs = postprocessing.prune(wakeup_locs, wakeup_values[wakeup_values > cutoff], pruning)
 
     if alignment:
-        seconds_values = np.load("../data_naive/{}/secs.npy".format(series_id))
+        seconds_values = np.load("./data_naive/{}/secs.npy".format(series_id))
         first_zero = postprocessing.compute_first_zero(seconds_values)
         if len(onset_locs) > 0:
             onset_locs = postprocessing.align_predictions(onset_locs, onset_kernel_vals, first_zero=first_zero)
@@ -339,6 +339,8 @@ class MainWindow(QMainWindow):
 
     def update_plots(self):
         selected_density_folders, selected_regression_folders = self.get_selected_folders()
+        if len(selected_density_folders) == 0 or len(selected_regression_folders) == 0:
+            return
 
         self.fig_plots.clear()
         validation_ap(self.fig_plots, per_series_id_events, selected_density_folders, selected_regression_folders, self.get_cutoff(),

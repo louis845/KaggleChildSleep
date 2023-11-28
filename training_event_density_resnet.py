@@ -30,16 +30,11 @@ import postprocessing
 
 def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor):
     assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
-    with torch.no_grad():
-        entropy = torch.sum(ground_truth * torch.where(ground_truth > 0.0, torch.log(ground_truth), torch.zeros_like(ground_truth)), dim=1)
 
-    ce = torch.nn.functional.cross_entropy(preds, ground_truth, reduction="none")
-    kl = ce + entropy
+    ce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
+    preds_probas = torch.sigmoid(preds)
 
-    preds_probas = torch.softmax(preds, dim=1)
-    l2 = torch.sum((preds_probas - ground_truth) ** 2, dim=1)
-
-    return 200.0 * (l2 * kl).mean(dim=-1).sum()
+    return (((preds_probas - ground_truth) ** 2) * ce).mean(dim=-1).sum()
 
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
@@ -54,11 +49,11 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
         deep_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_token_confidence, labels_segmentation_batch, reduction="none").mean(dim=-1).sum()
     else:
         pred_density_logits, pred_occurences = model_(accel_data_batch, time=times_input)
+    entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
     if use_focal_loss:
-        entropy_loss = focal_loss(pred_density_logits, labels_density_batch)
+        class_loss = focal_loss(pred_occurences, labels_occurrence_batch)
     else:
-        entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
-    class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch, reduction="none").mean(dim=-1).sum()
+        class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch, reduction="none").mean(dim=-1).sum()
     if use_center_softmax:
         loss = entropy_loss + class_loss + deep_loss
         deep_loss_ret = deep_loss.item()
@@ -561,8 +556,8 @@ if __name__ == "__main__":
 
     assert sum([use_anglez_only, use_enmo_only]) <= 1, "Cannot use more than one of anglez only, enmo only"
     assert not (use_time_information and random_flip), "Cannot use time information and random flip at the same time."
-    if not donot_exclude_bad_series_from_training:
-        training_entries = [series_id for series_id in training_entries if series_id not in bad_series_list.noisy_bad_segmentations]
+    #if not donot_exclude_bad_series_from_training:
+    training_entries = [series_id for series_id in training_entries if series_id not in bad_series_list.noisy_bad_segmentations]
 
     assert os.path.isdir("./inference_regression_statistics/regression_preds/"), "Must generate regression predictions first. See inference_regression_statistics folder."
     assert os.path.isdir("./inference_regression_statistics/regression_preds_dense/"), "Must generate regression predictions first. See inference_regression_statistics folder."
