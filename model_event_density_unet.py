@@ -335,14 +335,15 @@ def event_density_single_logit_iterator(model: EventDensityUnet, time_series: np
 
         batches_computed = batches_compute_end
 
-
-def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
-                               predicted_locations: Optional[list[dict[str, np.ndarray]]]=None, batch_size=32,
-                               prediction_length=17280, expand=8640, times: Optional[dict[str, np.ndarray]]=None,
-                               stride_count=4, flip_augmentation=False, use_time_input=False, device=None):
-    total_length = time_series.shape[1]
-    probas = np.zeros((2, total_length), dtype=np.float32)
-    multiplicities = np.zeros((total_length,), dtype=np.int32)
+def event_density_probas_from_interval_info(interval_info_stream: Iterator[dict[str, np.ndarray]],
+                                            total_length: int,
+                                            predicted_locations: Optional[list[dict[str, np.ndarray]]]=None,
+                                            return_probas=True):
+    if return_probas:
+        probas = np.zeros((2, total_length), dtype=np.float32)
+        multiplicities = np.zeros((total_length,), dtype=np.int32)
+    else:
+        probas, multiplicities = None, None
     if predicted_locations is not None:
         onset_locs_probas = []
         wakeup_locs_probas = []
@@ -368,19 +369,16 @@ def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
         onset_locs_probas, onset_locs_multiplicities = None, None
         wakeup_locs_probas, wakeup_locs_multiplicities = None, None
 
-    for interval_info in event_density_logit_iterator(model, time_series, batch_size=batch_size,
-                                                      prediction_length=prediction_length, expand=expand,
-                                                      times=times, stride_count=stride_count,
-                                                      flip_augmentation=flip_augmentation,
-                                                      use_time_input=use_time_input, device=device):
+    for interval_info in interval_info_stream:
         interval_start = interval_info["interval_start"]
         interval_end = interval_info["interval_end"]
-        interval_out_scores = interval_info["interval_out_scores"]
         interval_logits = interval_info["interval_logits"]
         interval_event_presence = interval_info["interval_event_presence"]
 
-        probas[:, interval_start:interval_end] += interval_out_scores
-        multiplicities[interval_start:interval_end] += 1
+        if return_probas:
+            interval_out_scores = interval_info["interval_out_scores"]
+            probas[:, interval_start:interval_end] += interval_out_scores
+            multiplicities[interval_start:interval_end] += 1
 
         if predicted_locations is not None:
             for k in range(len(predicted_locations)):
@@ -402,8 +400,7 @@ def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
                         onset_locs_multiplicities[k][onset_locs_idxs[0]] += 1
 
                 if len(wakeup_locations) > 0:
-                    wakeup_locs_idxs = np.searchsorted(wakeup_locations, [interval_start, interval_end],
-                                                       side="left")
+                    wakeup_locs_idxs = np.searchsorted(wakeup_locations, [interval_start, interval_end], side="left")
                     event_presence_score = interval_event_presence[1]
                     if wakeup_locs_idxs[0] < wakeup_locs_idxs[1] - 1:
                         wakeup_locs_of_interest = wakeup_locations[wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] - interval_start
@@ -426,7 +423,24 @@ def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
             if len(predicted_locations[k]["wakeup"]) > 0:
                 wakeup_locs_multiplicities[k][wakeup_locs_multiplicities[k] == 0] = 1
                 wakeup_locs_probas[k] /= wakeup_locs_multiplicities[k]
-    return probas / multiplicities, onset_locs_probas, wakeup_locs_probas
+
+    if return_probas:
+        return probas / multiplicities, onset_locs_probas, wakeup_locs_probas
+    else:
+        return None, onset_locs_probas, wakeup_locs_probas
+
+def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
+                               predicted_locations: Optional[list[dict[str, np.ndarray]]]=None, batch_size=32,
+                               prediction_length=17280, expand=8640, times: Optional[dict[str, np.ndarray]]=None,
+                               stride_count=4, flip_augmentation=False, use_time_input=False, device=None):
+
+    logit_stream = event_density_logit_iterator(model, time_series, batch_size=batch_size,
+                                 prediction_length=prediction_length, expand=expand,
+                                 times=times, stride_count=stride_count,
+                                 flip_augmentation=flip_augmentation,
+                                 use_time_input=use_time_input, device=device)
+
+    return event_density_probas_from_interval_info(logit_stream, time_series.shape[1], predicted_locations=predicted_locations)
 
 class ProbasDilationConverter:
     def __init__(self, sigma: int, device: torch.device):

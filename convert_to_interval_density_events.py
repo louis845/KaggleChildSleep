@@ -11,7 +11,8 @@ class IntervalDensityEventsSampler:
                  train_or_test="train",
                  prediction_length=17280, # 24 hours
                  prediction_stride=4320, # 6 hours
-                 is_enmo_only=False
+                 is_enmo_only=False,
+                 donot_exclude_bad_series_from_training=False
                  ):
         assert prediction_length % input_length_multiple == 0, "prediction_length must be a multiple of input_length_multiple"
         assert prediction_stride % input_length_multiple == 0, "prediction_stride must be a multiple of input_length_multiple"
@@ -28,7 +29,10 @@ class IntervalDensityEventsSampler:
             self.all_segmentations[series_id] = []
 
             interval_min = convert_to_interval_events.get_first_day_step(naive_all_data, series_id)
-            interval_max = convert_to_interval_events.get_truncated_series_length(naive_all_data, series_id, self.events)
+            if donot_exclude_bad_series_from_training:
+                interval_max = naive_all_data[series_id]["accel"].shape[1]
+            else:
+                interval_max = convert_to_interval_events.get_truncated_series_length(naive_all_data, series_id, self.events)
 
             while interval_min + prediction_length < interval_max:
                 self.all_segmentations_list.append({

@@ -44,7 +44,7 @@ class MatplotlibWidget(QWidget):
             y2 = enmo / 0.1018  # std computed by check_series_properties.py
             y2 = (y2 ** 0.6 - 1) / 0.6
             self.axis.plot(x, y1, label="anglez")
-            self.axis.plot(x, y2, label="enmo")
+            #self.axis.plot(x, y2, label="enmo")
             #self.axis.plot(x, extras["onset"] / 100.0, label="onset")
             #self.axis.plot(x, extras["wakeup"] / 100.0, label="wakeup")
             #self.axis.plot(x, extras["onset_kernel"], label="onset_kernel")
@@ -256,14 +256,15 @@ def load_file(item):
     filename = "./individual_train_series/" + item + ".parquet"
     df = pd.read_parquet(filename)
     extras = {}
-    extras["onset_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV_Sigmas/gaussian_kernel/{}_onset.npy".format(item))
-    extras["wakeup_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV_Sigmas/gaussian_kernel/{}_wakeup.npy".format(item))
-    extras["onset_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_onset_locs.npy".format(item))
-    extras["wakeup_locs"] = np.load("./inference_regression_statistics/regression_preds/{}_wakeup_locs.npy".format(item))
+    extras["onset_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV/gaussian_kernel9/{}_onset.npy".format(item))
+    extras["wakeup_kernel"] = np.load("./inference_regression_statistics/regression_labels/Standard_5CV/gaussian_kernel9/{}_wakeup.npy".format(item))
+    extras["onset_locs"] = np.load("./inference_regression_statistics/regression_preds_dense/{}_onset_locs.npy".format(item))
+    extras["wakeup_locs"] = np.load("./inference_regression_statistics/regression_preds_dense/{}_wakeup_locs.npy".format(item))
 
-    confidence_pred_folder = "./inference_combined_statistics/combined_predictions/event5fold_swa_3length_best/width50"
-    extras["onset_IOU_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_onset.npy"))
-    extras["wakeup_IOU_conf"] = np.load(os.path.join(confidence_pred_folder, item + "_wakeup.npy"))
+    confidence_pred_folder = "./inference_density_statistics/density_labels/event5fold_density_3length"
+    probas = np.load(os.path.join(confidence_pred_folder, "{}/probas.npy".format(item)))
+    extras["onset_IOU_conf"] = probas[0, :]
+    extras["wakeup_IOU_conf"] = probas[1, :]
 
     confidence_pred_folder2 = "./inference_combined_statistics/combined_predictions/event5fold_3length_time_2length/width55"
     extras["onset_IOU_conf2"] = np.load(os.path.join(confidence_pred_folder2, item + "_onset.npy"))

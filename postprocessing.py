@@ -85,23 +85,34 @@ def prune_ROI(event_locs, event_probas, pruning_radius, pruning_inner_radius, pr
     return event_locs[keeps]
 
 
-def prune_matrix_profile(event_locs, matrix_profile_vals, matrix_profile_thresh=0.01, matrix_profile_stride=4320):
+def prune_matrix_profile(event_locs, matrix_profile_vals, matrix_profile_thresh=0.01, matrix_profile_stride=4320,
+                         return_idx=False): # if return idx, return a boolean array with same length as event_locs
     bad_locations = matrix_profile_vals < matrix_profile_thresh
     if not np.any(bad_locations):
-        return event_locs
+        if return_idx:
+            return np.full(len(event_locs), True, dtype=bool)
+        else:
+            return event_locs
     bad_locs_start, bad_locs_end = edges_detect(bad_locations)
 
     locs_idx_start = np.searchsorted(event_locs, bad_locs_start[0], side="left")
     locs_idx_end = np.searchsorted(event_locs, bad_locs_end[-1] + matrix_profile_stride, side="right")
     if locs_idx_end - locs_idx_start == 0:
-        return event_locs
+        if return_idx:
+            return np.full(len(event_locs), True, dtype=bool)
+        else:
+            return event_locs
 
     event_locs_of_interest = event_locs[locs_idx_start:locs_idx_end]
 
     idxs = np.searchsorted(bad_locs_start, event_locs_of_interest, side="right") - 1
     inside_bad_locs = (bad_locs_start[idxs] <= event_locs_of_interest) & (event_locs_of_interest < bad_locs_end[idxs] + matrix_profile_stride)
     good_locs = np.pad(~inside_bad_locs, (locs_idx_start, len(event_locs) - locs_idx_end), mode="constant", constant_values=True)
-    return event_locs[good_locs]
+
+    if return_idx:
+        return good_locs
+    else:
+        return event_locs[good_locs]
 
 def prune_wakeup_at_heads(wakeup_event_locs, onset_probas, cutoff=0.5):
     assert np.all(wakeup_event_locs[:-1] <= wakeup_event_locs[1:]), "wakeup_event_locs must be sorted"
@@ -220,23 +231,27 @@ def align_predictions(preds_locs, preds_local_kernel, first_zero):
 
     return np.unique(preds_locs)
 
-def augment_left_right(preds_locs, preds_local_kernel):
+def augment_left_right(preds_locs, preds_probas, preds_local_kernel):
     preds_left = preds_locs - 12
     preds_right = preds_locs + 12
 
     left_kernel_val = index_out_of_bounds(preds_local_kernel, preds_left)
     right_kernel_val = index_out_of_bounds(preds_local_kernel, preds_right)
 
-    augmented_locs1 = np.where(left_kernel_val > right_kernel_val, preds_left, preds_right)
-    augmented_locs2 = np.where(left_kernel_val > right_kernel_val, preds_right, preds_left)[(left_kernel_val != -1) & (right_kernel_val != -1)]
+    both_in_bounds = (left_kernel_val != -1) & (right_kernel_val != -1)
 
-    return augmented_locs1, augmented_locs2
+    augmented_locs1 = np.where(left_kernel_val > right_kernel_val, preds_left, preds_right)
+    augmented_locs2 = np.where(left_kernel_val > right_kernel_val, preds_right, preds_left)[both_in_bounds]
+
+    augmented_locs_probas1 = preds_probas.copy()
+    augmented_locs_probas2 = preds_probas[both_in_bounds]
+
+    return augmented_locs1, augmented_locs2, augmented_locs_probas1, augmented_locs_probas2
 
 def augment_and_cat(preds_locs, preds_local_kernel, preds_probas, divisor: float, shifts: list[float]):
-    augmented_locs1, augmented_locs2 = augment_left_right(preds_locs, preds_local_kernel)
-    preds_locs_probas = preds_probas[preds_locs]
-    augmented_locs_probas1 = preds_probas[augmented_locs1]
-    augmented_locs_probas2 = preds_probas[augmented_locs2]
+    augmented_locs1, augmented_locs2, augmented_locs_probas1, augmented_locs_probas2 =\
+        augment_left_right(preds_locs, preds_probas, preds_local_kernel)
+    preds_locs_probas = preds_probas
 
     all_preds_locs = np.concatenate([preds_locs, augmented_locs1, augmented_locs2])
     all_preds_probas = np.concatenate([preds_locs_probas / divisor + shifts[0],
@@ -245,6 +260,8 @@ def augment_and_cat(preds_locs, preds_local_kernel, preds_probas, divisor: float
     return all_preds_locs, all_preds_probas
 
 def get_augmented_predictions(preds_locs, preds_local_kernel, preds_probas, cutoff_thresh: float):
+    assert len(preds_probas) == len(preds_locs), "preds_probas and preds_locs must have the same length"
+
     if len(preds_locs) == 0:
         return np.array([], dtype=np.int32), np.array([], dtype=np.float32)
 
@@ -252,8 +269,8 @@ def get_augmented_predictions(preds_locs, preds_local_kernel, preds_probas, cuto
         all_preds_locs, all_preds_probas = augment_and_cat(preds_locs, preds_local_kernel, preds_probas,
                                                            3.0, [2.0 / 3, 1.0 / 3, 0.0])
     else:
-        preds_locs_below = preds_locs[preds_probas[preds_locs] < cutoff_thresh]
-        preds_locs_above = preds_locs[preds_probas[preds_locs] >= cutoff_thresh]
+        preds_locs_below = preds_locs[preds_probas < cutoff_thresh]
+        preds_locs_above = preds_locs[preds_probas >= cutoff_thresh]
 
         if len(preds_locs_above) == 0: # all below
             all_preds_locs, all_preds_probas = augment_and_cat(preds_locs, preds_local_kernel, preds_probas,
@@ -262,9 +279,9 @@ def get_augmented_predictions(preds_locs, preds_local_kernel, preds_probas, cuto
             all_preds_locs, all_preds_probas = augment_and_cat(preds_locs, preds_local_kernel, preds_probas,
                                                                6.0, [5.0 / 6, 4.0 / 6, 3.0 / 6])
         else:
-            all_above_preds_locs, all_above_preds_probas = augment_and_cat(preds_locs_above, preds_local_kernel, preds_probas,
+            all_above_preds_locs, all_above_preds_probas = augment_and_cat(preds_locs_above, preds_local_kernel, preds_probas[preds_probas >= cutoff_thresh],
                                                                6.0, [5.0 / 6, 4.0 / 6, 3.0 / 6])
-            all_below_preds_locs, all_below_preds_probas = augment_and_cat(preds_locs_below, preds_local_kernel, preds_probas,
+            all_below_preds_locs, all_below_preds_probas = augment_and_cat(preds_locs_below, preds_local_kernel, preds_probas[preds_probas < cutoff_thresh],
                                                                6.0, [2.0 / 6, 1.0 / 6, 0.0])
             all_preds_locs = np.concatenate([all_above_preds_locs, all_below_preds_locs])
             all_preds_probas = np.concatenate([all_above_preds_probas, all_below_preds_probas])
