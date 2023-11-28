@@ -37,8 +37,8 @@ regression_labels_folders = [os.path.join("./inference_regression_statistics", "
 
 def get_regression_preds_locs(selected_regression_folders: list[str], series_id: str):
     # regression settings
-    cutoff = 0.1
-    pruning = 48
+    cutoff = 0.01
+    pruning = 72
     alignment = True
 
     # compute locs here
