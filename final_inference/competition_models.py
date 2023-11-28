@@ -9,7 +9,7 @@ import numba.cuda
 import stumpy
 
 import postprocessing
-import model_event_unet
+import model_event_density_unet
 import kernel_utils
 
 class CompetitionModels:
@@ -49,7 +49,7 @@ class CompetitionModels:
             blocks_length = len(regression_cfg["hidden_blocks"])
             target_multiple = 3 * (2 ** (blocks_length - 2))
 
-            model = model_event_unet.EventRegressorUnet(use_learnable_sigma=regression_cfg["use_sigmas"],
+            model = model_event_density_unet.EventRegressorUnet(use_learnable_sigma=regression_cfg["use_sigmas"],
                                                         blocks=regression_cfg["hidden_blocks"],
                                                         hidden_channels=regression_cfg["hidden_channels"])
             model.to(self.device)
@@ -97,7 +97,7 @@ class CompetitionModels:
                 confidence_cfg["use_swa"] = cfg["use_swa"]
             confidence_cfg["model_name"] = cfg["model_name"]
 
-            model = model_event_unet.EventConfidenceUnet(in_channels=1, # we use anglez only
+            model = model_event_density_unet.EventDensityUnet(in_channels=1, # we use anglez only
                                                          attention_blocks=confidence_cfg["attention_blocks"],
                                                          attention_mode=confidence_cfg["attention_mode"],
                                                          use_time_input=confidence_cfg["use_time_information"],
