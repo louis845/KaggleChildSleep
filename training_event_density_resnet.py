@@ -705,6 +705,7 @@ if __name__ == "__main__":
         "use_center_softmax": use_center_softmax,
         "use_swa": use_swa,
         "swa_start": swa_start,
+        "donot_exclude_bad_series_from_training": donot_exclude_bad_series_from_training,
         "prediction_length": prediction_length,
         "prediction_stride": prediction_stride,
         "batch_size": batch_size,
@@ -753,7 +754,8 @@ if __name__ == "__main__":
                                                                         train_or_test="train",
                                                                         prediction_length=prediction_length,
                                                                         prediction_stride=prediction_stride,
-                                                                        is_enmo_only=use_enmo_only)
+                                                                        is_enmo_only=use_enmo_only,
+                                                                        donot_exclude_bad_series_from_training=donot_exclude_bad_series_from_training)
     val_sampler = convert_to_interval_density_events.IntervalDensityEventsSampler(validation_entries, all_data,
                                                                         input_length_multiple=model.input_length_multiple,
                                                                         train_or_test="val",

@@ -1,0 +1,316 @@
+import sys
+import os
+import json
+
+import matplotlib.figure
+from PySide2.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QSlider, QLabel, QCheckBox, QHBoxLayout, QPushButton, QSplitter, QComboBox
+from PySide2.QtGui import QFontMetrics
+from PySide2.QtCore import Qt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
+from matplotlib.figure import Figure
+import numpy as np
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # add root folder to sys.path
+import postprocessing
+import metrics_ap
+import convert_to_seriesid_events
+import convert_to_pred_events
+
+def plot_single_precision_recall_curve(ax, precisions, recalls, ap, proba, title):
+    ax.plot(recalls, precisions)
+    #ax.scatter(recalls, precisions, c=proba, cmap="coolwarm")
+    ax.set_title(title)
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.text(0.5, 0.5, "AP: {:.4f}".format(ap), horizontalalignment="center", verticalalignment="center")
+
+validation_AP_tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30][::-1]
+regression_labels_folders = [os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV", "gaussian_kernel9"),
+                             os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV_Mid", "gaussian_kernel9"),
+                             os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV_Wide", "gaussian_kernel9")]
+
+def get_regression_preds_locs(selected_regression_folders: list[str], series_id: str):
+    num_regression_preds = 0
+    onset_kernel_vals, wakeup_kernel_vals = None, None
+    for folder in selected_regression_folders:
+        onset_kernel = np.load(os.path.join(folder, "{}_onset.npy".format(series_id)))
+        wakeup_kernel = np.load(os.path.join(folder, "{}_wakeup.npy".format(series_id)))
+        if onset_kernel_vals is None:
+            onset_kernel_vals = onset_kernel
+            wakeup_kernel_vals = wakeup_kernel
+        else:
+            onset_kernel_vals = onset_kernel_vals + onset_kernel
+            wakeup_kernel_vals = wakeup_kernel_vals + wakeup_kernel
+        num_regression_preds += 1
+
+    onset_kernel_vals = onset_kernel_vals / num_regression_preds
+    wakeup_kernel_vals = wakeup_kernel_vals / num_regression_preds
+
+
+
+def validation_ap(fig: matplotlib.figure.Figure, gt_events,
+                  selected_density_folders: list[str], selected_regression_folders: list[str],
+                  cutoff, augmentation, matrix_values_pruning,
+                  linear_dropoff):
+    ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+    ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+
+    for series_id in all_series_ids:
+        # compute the regression predictions
+        preds_locs = predicted_events[series_id]
+        preds_locs_onset = preds_locs["onset"]
+        preds_locs_wakeup = preds_locs["wakeup"]
+
+        # compute the
+        onset_IOU_probas = np.load(os.path.join(iou_probas_folder, "{}_onset.npy".format(series_id)))
+        wakeup_IOU_probas = np.load(os.path.join(iou_probas_folder, "{}_wakeup.npy".format(series_id)))
+        original_length = len(onset_IOU_probas)
+
+        onset_IOU_probas = onset_IOU_probas[preds_locs_onset]
+        wakeup_IOU_probas = wakeup_IOU_probas[preds_locs_wakeup]
+
+        if augmentation:
+            # load the kernel predictions
+            onset_kernel_ensembled, wakeup_kernel_ensembled = None, None
+            for k in range(len(regression_labels_folders)):
+                onset_kernel = np.load(os.path.join(regression_labels_folders[k], "{}_onset.npy".format(series_id)))
+                wakeup_kernel = np.load(os.path.join(regression_labels_folders[k], "{}_wakeup.npy".format(series_id)))
+                if k == 0:
+                    onset_kernel_ensembled = onset_kernel
+                    wakeup_kernel_ensembled = wakeup_kernel
+                else:
+                    onset_kernel_ensembled = onset_kernel_ensembled + onset_kernel
+                    wakeup_kernel_ensembled = wakeup_kernel_ensembled + wakeup_kernel
+            onset_kernel_ensembled = onset_kernel_ensembled / len(regression_labels_folders)
+            wakeup_kernel_ensembled = wakeup_kernel_ensembled / len(regression_labels_folders)
+
+            # augment and restrict the probas
+            preds_locs_onset, onset_IOU_probas = postprocessing.get_augmented_predictions(preds_locs_onset,
+                                                            onset_kernel_ensembled, onset_IOU_probas, cutoff_thresh=cutoff)
+            preds_locs_wakeup, wakeup_IOU_probas = postprocessing.get_augmented_predictions(preds_locs_wakeup,
+                                                            wakeup_kernel_ensembled, wakeup_IOU_probas, cutoff_thresh=cutoff)
+
+        # prune using matrix values
+        if matrix_values_pruning:
+            matrix_values = np.load(os.path.join("./data_matrix_profile", "{}.npy".format(series_id)))
+            preds_locs_onset_restrict = postprocessing.prune_matrix_profile(preds_locs_onset, matrix_values,
+                                                                            return_idx=True)
+            preds_locs_wakeup_restrict = postprocessing.prune_matrix_profile(preds_locs_wakeup, matrix_values,
+                                                                             return_idx=True)
+
+            preds_locs_onset = preds_locs_onset[preds_locs_onset_restrict]
+            onset_IOU_probas = onset_IOU_probas[preds_locs_onset_restrict]
+            preds_locs_wakeup = preds_locs_wakeup[preds_locs_wakeup_restrict]
+            wakeup_IOU_probas = wakeup_IOU_probas[preds_locs_wakeup_restrict]
+
+        if linear_dropoff:
+            # apply linear dropoff
+            onset_IOU_probas = onset_IOU_probas * (1 - preds_locs_onset.astype(np.float32) / original_length)
+            wakeup_IOU_probas = wakeup_IOU_probas * (1 - preds_locs_wakeup.astype(np.float32) / original_length)
+
+        # get the ground truth
+        gt_onset_locs = gt_events[series_id]["onset"]
+        gt_wakeup_locs = gt_events[series_id]["wakeup"]
+
+        # add info
+        for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+            ap_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
+            ap_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
+
+    # compute average precision
+    ap_onset_precisions, ap_onset_recalls, ap_onset_average_precisions, ap_onset_probas = [], [], [], []
+    ap_wakeup_precisions, ap_wakeup_recalls, ap_wakeup_average_precisions, ap_wakeup_probas = [], [], [], []
+    for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+        ap_onset_precision, ap_onset_recall, ap_onset_average_precision, ap_onset_proba = ap_onset_metric.get()
+        ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision, ap_wakeup_proba = ap_wakeup_metric.get()
+        ap_onset_precisions.append(ap_onset_precision)
+        ap_onset_recalls.append(ap_onset_recall)
+        ap_onset_average_precisions.append(ap_onset_average_precision)
+        ap_onset_probas.append(ap_onset_proba)
+        ap_wakeup_precisions.append(ap_wakeup_precision)
+        ap_wakeup_recalls.append(ap_wakeup_recall)
+        ap_wakeup_average_precisions.append(ap_wakeup_average_precision)
+        ap_wakeup_probas.append(ap_wakeup_proba)
+
+    # draw the precision-recall curve using matplotlib onto file "epoch{}_AP.png".format(epoch) inside the ap_log_dir
+    axes = fig.subplots(4, 5)
+    fig.suptitle("Width: {}, Cutoff: {}, Augmentation: {} (Onset mAP: {}, Wakeup mAP: {})".format(width, cutoff, augmentation,
+                                                                np.mean(ap_onset_average_precisions), np.mean(ap_wakeup_average_precisions)))
+    for k in range(len(validation_AP_tolerances)):
+        ax = axes[k // 5, k % 5]
+        plot_single_precision_recall_curve(ax, ap_onset_precisions[k], ap_onset_recalls[k], ap_onset_average_precisions[k],
+                                           ap_onset_probas[k], "Onset AP{}".format(validation_AP_tolerances[k]))
+        ax = axes[(k + 10) // 5, (k + 10) % 5]
+        plot_single_precision_recall_curve(ax, ap_wakeup_precisions[k], ap_wakeup_recalls[k], ap_wakeup_average_precisions[k],
+                                           ap_wakeup_probas[k], "Wakeup AP{}".format(validation_AP_tolerances[k]))
+    fig.subplots_adjust(wspace=0.5, hspace=0.7)
+
+class MainWindow(QMainWindow):
+    union_width_values = [31, 35, 40, 45, 50, 55, 60, 70, 80, 90, 100, 120]
+
+    def __init__(self, parent=None):
+        super(MainWindow, self).__init__(parent)
+
+        with open(os.path.join("./inference_density_statistics/inference_density_preds_options.json"), "r") as f:
+            self.options = json.load(f)
+        with open(os.path.join("./inference_regression_statistics/inference_regression_preds_options.json"), "r") as f:
+            self.regression_options = json.load(f)
+
+        # Initialize folders
+        self.folders = {option["name"]: option for option in self.options}
+        for regress_opt in self.regression_options:
+            regress_opt["out_folder"] = regress_opt["name"].replace(" ", "_").replace("(", "").replace(")", "")
+        self.regression_folders = {option["name"]: option for option in self.regression_options}
+
+        # Initialize UI
+        self.setWindowTitle("Detailed combined statistics")
+
+        self.main_widget = QWidget(self)
+        self.setCentralWidget(self.main_widget)
+
+        self.main_layout = QVBoxLayout(self.main_widget)
+        self.top_bottom_splitter = QSplitter(Qt.Vertical)
+        self.main_layout.addWidget(self.top_bottom_splitter)
+
+        self.top_widget = QWidget(self.top_bottom_splitter)
+        self.top_bottom_splitter.addWidget(self.top_widget)
+        self.top_layout = QVBoxLayout(self.top_widget)
+
+        # Create matplotlib plots
+        self.fig_plots = Figure()
+
+        # Create FigureCanvas objects
+        self.canvas_plots = FigureCanvas(self.fig_plots)
+
+        # Create NavigationToolbars for each FigureCanvas
+        self.toolbar_plots = NavigationToolbar(self.canvas_plots, self)
+
+        # Create a horizontal layout for the plots
+        self.plot_layout = QVBoxLayout()
+        self.plot_layout.addWidget(self.toolbar_plots)
+        self.plot_layout.addWidget(self.canvas_plots)
+
+        # Add plot layout to the main layout
+        self.top_layout.addLayout(self.plot_layout)
+
+        # Add a dropdown menu with options "Huber" "Gaussian" "Laplace"
+        self.dropdown_kernel_shape = QComboBox()
+        self.dropdown_kernel_shape.addItems(["Huber", "Gaussian", "Laplace"])
+        self.top_layout.addWidget(self.dropdown_kernel_shape)
+
+        # Create checkboxes
+        self.checkbox_layout = QHBoxLayout()
+        self.checkbox_augmentation = QCheckBox("Use Augmentation")
+        self.checkbox_matrix_values_pruning = QCheckBox("Use Matrix Values Pruning")
+        self.checkbox_linear_dropoff = QCheckBox("Use Linear Dropoff")
+        self.checkbox_layout.addStretch(1)
+        self.checkbox_layout.addWidget(self.checkbox_augmentation)
+        self.checkbox_layout.addStretch(1)
+        self.checkbox_layout.addWidget(self.checkbox_matrix_values_pruning)
+        self.checkbox_layout.addStretch(1)
+        self.checkbox_layout.addWidget(self.checkbox_linear_dropoff)
+        self.checkbox_layout.addStretch(1)
+        self.top_layout.addLayout(self.checkbox_layout)
+
+        # Create sliders
+        self.slider_cutoff_label = QLabel("Cutoff: 0")
+        self.slider_cutoff_label.setAlignment(Qt.AlignCenter)  # Centered the text for the slider label
+        font_metrics = QFontMetrics(self.slider_cutoff_label.font())
+        self.slider_cutoff_label.setFixedHeight(
+            font_metrics.height())  # Set the height of the label to the height of the text
+        self.top_layout.addWidget(self.slider_cutoff_label)
+
+        self.slider_cutoff = QSlider(Qt.Horizontal)
+        self.slider_cutoff.setMaximum(1000)
+        self.slider_cutoff.valueChanged.connect(self.update_cutoff_value)
+        self.top_layout.addWidget(self.slider_cutoff)
+
+        # Create two list of checkboxes
+        self.bottom_widget = QWidget(self.top_bottom_splitter)
+        self.top_bottom_splitter.addWidget(self.bottom_widget)
+        self.bottom_layout = QHBoxLayout(self.bottom_widget)
+
+        self.left_checkbox_layout = QVBoxLayout()
+        self.right_checkbox_layout = QVBoxLayout()
+        self.bottom_layout.addLayout(self.left_checkbox_layout)
+        self.bottom_layout.addLayout(self.right_checkbox_layout)
+
+        self.density_choice_checkboxes = []
+        for option_name in self.folders:
+            checkbox = QCheckBox(option_name)
+            checkbox.setChecked(False)
+            self.left_checkbox_layout.addWidget(checkbox)
+            self.density_choice_checkboxes.append(checkbox)
+
+        self.regression_choice_checkboxes = []
+        for option_name in self.regression_folders:
+            checkbox = QCheckBox(option_name)
+            checkbox.setChecked(False)
+            self.right_checkbox_layout.addWidget(checkbox)
+            self.regression_choice_checkboxes.append(checkbox)
+
+        # Create a "Plot" button
+        self.plot_button = QPushButton("Plot")
+        self.plot_button.clicked.connect(self.update_plots)
+        self.main_layout.addWidget(self.plot_button)
+
+    def get_selected_folders(self):
+        selected_kernel_shape = self.dropdown_kernel_shape.currentText().lower()
+        selected_density_folders = []
+        selected_regression_folders = []
+
+        for checkbox in self.density_choice_checkboxes:
+            if checkbox.isChecked():
+                folder_name = self.folders[checkbox.text()]["folder_name"]
+                folder = os.path.join("./inference_density_statistics/density_labels", folder_name)
+                assert os.path.isdir(folder)
+                selected_density_folders.append(folder)
+
+        for checkbox in self.regression_choice_checkboxes:
+            if checkbox.isChecked():
+                folder_name = self.regression_folders[checkbox.text()]["out_folder"]
+                folder = os.path.join("./inference_regression_statistics/regression_labels", folder_name)
+                assert os.path.isdir(folder)
+
+                if os.path.isdir(os.path.join(folder, "{}_kernel".format(selected_kernel_shape))):
+                    folder = os.path.join(folder, "{}_kernel".format(selected_kernel_shape))
+                else:
+                    folder = os.path.join(folder, "{}_kernel9".format(selected_kernel_shape))
+                assert os.path.isdir(folder)
+                selected_regression_folders.append(folder)
+
+        return selected_density_folders, selected_regression_folders
+
+    def update_plots(self):
+        selected_density_folders, selected_regression_folders = self.get_selected_folders()
+
+        self.fig_plots.clear()
+        validation_ap(self.fig_plots, per_series_id_events, selected_density_folders, selected_regression_folders, self.get_cutoff(),
+                      self.checkbox_augmentation.isChecked(), self.checkbox_matrix_values_pruning.isChecked(),
+
+                      self.checkbox_linear_dropoff.isChecked())
+        self.canvas_plots.draw()
+
+    def get_cutoff(self):
+        return self.slider_cutoff.value() / 1000.0
+
+    def update_cutoff_value(self, value):
+        self.slider_cutoff_label.setText("Cutoff: " + str(self.get_cutoff()))
+        #self.update_plots()
+
+if __name__ == "__main__":
+    all_series_ids = [filename.split(".")[0] for filename in os.listdir("./individual_train_series")]
+
+    per_series_id_events = convert_to_seriesid_events.get_events_per_seriesid()
+
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    window.raise_()
+    window.activateWindow()
+    screen = app.screens()[0]
+    screen_geometry = screen.geometry()
+    window.move((screen_geometry.width() - window.width()) / 2, (screen_geometry.height() - window.height()) / 2)
+    sys.exit(app.exec_())
