@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+from typing import Iterator
 
 import matplotlib.figure
 from PySide2.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QSlider, QLabel, QCheckBox, QHBoxLayout, QPushButton, QSplitter, QComboBox
@@ -9,12 +10,15 @@ from PySide2.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 import numpy as np
+import h5py
+import tqdm
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # add root folder to sys.path
 import postprocessing
 import metrics_ap
 import convert_to_seriesid_events
 import convert_to_pred_events
+import model_event_density_unet
 
 def plot_single_precision_recall_curve(ax, precisions, recalls, ap, proba, title):
     ax.plot(recalls, precisions)
@@ -32,6 +36,12 @@ regression_labels_folders = [os.path.join("./inference_regression_statistics", "
                              os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV_Wide", "gaussian_kernel9")]
 
 def get_regression_preds_locs(selected_regression_folders: list[str], series_id: str):
+    # regression settings
+    cutoff = 0.1
+    pruning = 48
+    alignment = True
+
+    # compute locs here
     num_regression_preds = 0
     onset_kernel_vals, wakeup_kernel_vals = None, None
     for folder in selected_regression_folders:
@@ -48,7 +58,53 @@ def get_regression_preds_locs(selected_regression_folders: list[str], series_id:
     onset_kernel_vals = onset_kernel_vals / num_regression_preds
     wakeup_kernel_vals = wakeup_kernel_vals / num_regression_preds
 
+    onset_locs = (onset_kernel_vals[1:-1] > onset_kernel_vals[0:-2]) & (onset_kernel_vals[1:-1] > onset_kernel_vals[2:])
+    onset_locs = np.argwhere(onset_locs).flatten() + 1
+    wakeup_locs = (wakeup_kernel_vals[1:-1] > wakeup_kernel_vals[0:-2]) & (wakeup_kernel_vals[1:-1] > wakeup_kernel_vals[2:])
+    wakeup_locs = np.argwhere(wakeup_locs).flatten() + 1
 
+    onset_values = onset_kernel_vals[onset_locs]
+    wakeup_values = wakeup_kernel_vals[wakeup_locs]
+
+    onset_locs = onset_locs[onset_values > cutoff]
+    wakeup_locs = wakeup_locs[wakeup_values > cutoff]
+
+    if pruning > 0:
+        if len(onset_locs) > 0:
+            onset_locs = postprocessing.prune(onset_locs, onset_values[onset_values > cutoff], pruning)
+        if len(wakeup_locs) > 0:
+            wakeup_locs = postprocessing.prune(wakeup_locs, wakeup_values[wakeup_values > cutoff], pruning)
+
+    if alignment:
+        seconds_values = np.load("../data_naive/{}/secs.npy".format(series_id))
+        first_zero = postprocessing.compute_first_zero(seconds_values)
+        if len(onset_locs) > 0:
+            onset_locs = postprocessing.align_predictions(onset_locs, onset_kernel_vals, first_zero=first_zero)
+        if len(wakeup_locs) > 0:
+            wakeup_locs = postprocessing.align_predictions(wakeup_locs, wakeup_kernel_vals, first_zero=first_zero)
+
+    return onset_locs, wakeup_locs, onset_kernel_vals, wakeup_kernel_vals
+
+def event_density_file_logit_iterator(selected_density_folder, series_id) -> Iterator[dict[str, np.ndarray]]:
+    # load the logits
+    logits_file = os.path.join(selected_density_folder, series_id, "intervals.h5")
+    with h5py.File(logits_file, "r") as f:
+        intervals_start = f["intervals_start"][:]
+        intervals_end = f["intervals_end"][:]
+        intervals_logits = f["intervals_logits"][:]
+        intervals_event_presence = f["intervals_event_presence"][:]
+
+    for k in range(len(intervals_start)):
+        interval_start = intervals_start[k]
+        interval_end = intervals_end[k]
+        interval_logits = intervals_logits[k]
+        interval_event_presence = intervals_event_presence[k]
+        yield {
+            "interval_start": interval_start,
+            "interval_end": interval_end,
+            "interval_logits": interval_logits,
+            "interval_event_presence": interval_event_presence
+        }
 
 def validation_ap(fig: matplotlib.figure.Figure, gt_events,
                   selected_density_folders: list[str], selected_regression_folders: list[str],
@@ -57,40 +113,38 @@ def validation_ap(fig: matplotlib.figure.Figure, gt_events,
     ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
     ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
 
-    for series_id in all_series_ids:
+    for series_id in tqdm.tqdm(all_series_ids):
         # compute the regression predictions
-        preds_locs = predicted_events[series_id]
-        preds_locs_onset = preds_locs["onset"]
-        preds_locs_wakeup = preds_locs["wakeup"]
+        preds_locs_onset, preds_locs_wakeup, onset_kernel_vals, wakeup_kernel_vals = get_regression_preds_locs(selected_regression_folders, series_id)
+        total_length = len(onset_kernel_vals)
 
-        # compute the
-        onset_IOU_probas = np.load(os.path.join(iou_probas_folder, "{}_onset.npy".format(series_id)))
-        wakeup_IOU_probas = np.load(os.path.join(iou_probas_folder, "{}_wakeup.npy".format(series_id)))
-        original_length = len(onset_IOU_probas)
-
-        onset_IOU_probas = onset_IOU_probas[preds_locs_onset]
-        wakeup_IOU_probas = wakeup_IOU_probas[preds_locs_wakeup]
+        # load and compute the probas
+        onset_locs_all_probas, wakeup_locs_all_probas = None, None
+        for k in range(len(selected_density_folders)):
+            logit_loader = event_density_file_logit_iterator(selected_density_folders[k], series_id)
+            _, onset_locs_probas, wakeup_locs_probas = model_event_density_unet.event_density_probas_from_interval_info(
+                                                                             interval_info_stream=logit_loader,
+                                                                             total_length=total_length,
+                                                                             predicted_locations=[{
+                                                                                    "onset": preds_locs_onset,
+                                                                                    "wakeup": preds_locs_wakeup
+                                                                             }],
+                                                                             return_probas=False)
+            if onset_locs_all_probas is None:
+                onset_locs_all_probas = onset_locs_probas[0]
+                wakeup_locs_all_probas = wakeup_locs_probas[0]
+            else:
+                onset_locs_all_probas += onset_locs_probas[0]
+                wakeup_locs_all_probas += wakeup_locs_probas[0]
+        onset_locs_all_probas /= len(selected_density_folders)
+        wakeup_locs_all_probas /= len(selected_density_folders)
 
         if augmentation:
-            # load the kernel predictions
-            onset_kernel_ensembled, wakeup_kernel_ensembled = None, None
-            for k in range(len(regression_labels_folders)):
-                onset_kernel = np.load(os.path.join(regression_labels_folders[k], "{}_onset.npy".format(series_id)))
-                wakeup_kernel = np.load(os.path.join(regression_labels_folders[k], "{}_wakeup.npy".format(series_id)))
-                if k == 0:
-                    onset_kernel_ensembled = onset_kernel
-                    wakeup_kernel_ensembled = wakeup_kernel
-                else:
-                    onset_kernel_ensembled = onset_kernel_ensembled + onset_kernel
-                    wakeup_kernel_ensembled = wakeup_kernel_ensembled + wakeup_kernel
-            onset_kernel_ensembled = onset_kernel_ensembled / len(regression_labels_folders)
-            wakeup_kernel_ensembled = wakeup_kernel_ensembled / len(regression_labels_folders)
-
             # augment and restrict the probas
-            preds_locs_onset, onset_IOU_probas = postprocessing.get_augmented_predictions(preds_locs_onset,
-                                                            onset_kernel_ensembled, onset_IOU_probas, cutoff_thresh=cutoff)
-            preds_locs_wakeup, wakeup_IOU_probas = postprocessing.get_augmented_predictions(preds_locs_wakeup,
-                                                            wakeup_kernel_ensembled, wakeup_IOU_probas, cutoff_thresh=cutoff)
+            preds_locs_onset, onset_locs_all_probas = postprocessing.get_augmented_predictions(preds_locs_onset,
+                                                            onset_kernel_vals, onset_locs_all_probas, cutoff_thresh=cutoff)
+            preds_locs_wakeup, wakeup_locs_all_probas = postprocessing.get_augmented_predictions(preds_locs_wakeup,
+                                                            wakeup_kernel_vals, wakeup_locs_all_probas, cutoff_thresh=cutoff)
 
         # prune using matrix values
         if matrix_values_pruning:
@@ -101,14 +155,14 @@ def validation_ap(fig: matplotlib.figure.Figure, gt_events,
                                                                              return_idx=True)
 
             preds_locs_onset = preds_locs_onset[preds_locs_onset_restrict]
-            onset_IOU_probas = onset_IOU_probas[preds_locs_onset_restrict]
+            onset_locs_all_probas = onset_locs_all_probas[preds_locs_onset_restrict]
             preds_locs_wakeup = preds_locs_wakeup[preds_locs_wakeup_restrict]
-            wakeup_IOU_probas = wakeup_IOU_probas[preds_locs_wakeup_restrict]
+            wakeup_locs_all_probas = wakeup_locs_all_probas[preds_locs_wakeup_restrict]
 
         if linear_dropoff:
             # apply linear dropoff
-            onset_IOU_probas = onset_IOU_probas * (1 - preds_locs_onset.astype(np.float32) / original_length)
-            wakeup_IOU_probas = wakeup_IOU_probas * (1 - preds_locs_wakeup.astype(np.float32) / original_length)
+            onset_locs_all_probas = onset_locs_all_probas * (1 - preds_locs_onset.astype(np.float32) / total_length)
+            wakeup_locs_all_probas = wakeup_locs_all_probas * (1 - preds_locs_wakeup.astype(np.float32) / total_length)
 
         # get the ground truth
         gt_onset_locs = gt_events[series_id]["onset"]
@@ -116,8 +170,8 @@ def validation_ap(fig: matplotlib.figure.Figure, gt_events,
 
         # add info
         for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
-            ap_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_IOU_probas, gt_locs=gt_onset_locs)
-            ap_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_IOU_probas, gt_locs=gt_wakeup_locs)
+            ap_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_locs_all_probas, gt_locs=gt_onset_locs)
+            ap_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_locs_all_probas, gt_locs=gt_wakeup_locs)
 
     # compute average precision
     ap_onset_precisions, ap_onset_recalls, ap_onset_average_precisions, ap_onset_probas = [], [], [], []
@@ -136,7 +190,7 @@ def validation_ap(fig: matplotlib.figure.Figure, gt_events,
 
     # draw the precision-recall curve using matplotlib onto file "epoch{}_AP.png".format(epoch) inside the ap_log_dir
     axes = fig.subplots(4, 5)
-    fig.suptitle("Width: {}, Cutoff: {}, Augmentation: {} (Onset mAP: {}, Wakeup mAP: {})".format(width, cutoff, augmentation,
+    fig.suptitle("Cutoff: {}, Augmentation: {} (Onset mAP: {}, Wakeup mAP: {})".format(cutoff, augmentation,
                                                                 np.mean(ap_onset_average_precisions), np.mean(ap_wakeup_average_precisions)))
     for k in range(len(validation_AP_tolerances)):
         ax = axes[k // 5, k % 5]
