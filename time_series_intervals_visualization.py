@@ -27,7 +27,7 @@ class MatplotlibWidget(QWidget):
         self.min_y = -10.0
 
 
-    def plot_data(self, title, anglez, enmo, matrix_profile, extras, timestamp, time_discrepancy, events, start_loc,
+    def plot_data(self, title, anglez, enmo, matrix_profile, extras, timestamp, matrix_profile2, events, start_loc,
                   is_profile=False, is_discrepancy=False):
         end_loc = start_loc + len(anglez)
 
@@ -38,7 +38,8 @@ class MatplotlibWidget(QWidget):
         if is_profile:
             self.axis.plot(x, matrix_profile, label="matrix_profile")
         elif is_discrepancy:
-            self.axis.plot(x, time_discrepancy, label="time_discrepancy")
+            y2 = enmo / 0.1018
+            self.axis.plot(x, y2, label="enmo")
         else:
             y1 = anglez / 35.52  # std computed by check_series_properties.py
             y2 = enmo / 0.1018  # std computed by check_series_properties.py
@@ -96,8 +97,8 @@ class MainWidget(QWidget):
         self.main_layout = QVBoxLayout(self.main_widget)
 
         self.display_widget = MatplotlibWidget()
-        self.profile_widget = MatplotlibWidget()
         self.discrepancy_widget = MatplotlibWidget()
+        self.profile_widget = MatplotlibWidget()
 
         self.labels_widget = QWidget()
         self.labels_layout = QHBoxLayout(self.labels_widget)
@@ -115,8 +116,8 @@ class MainWidget(QWidget):
         self.selection_slider.setMaximum(10)
 
         self.main_layout.addWidget(self.display_widget)
-        self.main_layout.addWidget(self.profile_widget)
         self.main_layout.addWidget(self.discrepancy_widget)
+        self.main_layout.addWidget(self.profile_widget)
         self.main_layout.addWidget(self.labels_widget)
         self.main_layout.addWidget(self.selection_slider)
 
@@ -140,15 +141,10 @@ class MainWidget(QWidget):
 
         anglez, enmo, timestamp, extras = load_file(series_id)
         matrix_profile = np.load(os.path.join("data_matrix_profile", series_id + ".npy"))
-        hours = np.load(os.path.join("data_naive", series_id, "hours.npy"))
-        mins = np.load(os.path.join("data_naive", series_id, "mins.npy"))
-        secs = np.load(os.path.join("data_naive", series_id, "secs.npy"))
-        hours_raw = np.load(os.path.join("data_naive", series_id, "hours_raw.npy"))
-        mins_raw = np.load(os.path.join("data_naive", series_id, "mins_raw.npy"))
-        secs_raw = np.load(os.path.join("data_naive", series_id, "secs_raw.npy"))
-        time = hours * 3600 + mins * 60 + secs
-        time_raw = hours_raw * 3600 + mins_raw * 60 + secs_raw
-        time_discrepancy = (time_raw != time).astype(np.float32)
+        if os.path.isfile(os.path.join("data_matrix_profile_detailed", series_id + ".npy")):
+            matrix_profile2 = np.load(os.path.join("data_matrix_profile_detailed", series_id + ".npy"))
+        else:
+            matrix_profile2 = matrix_profile
 
         total_length = len(anglez)
         stride = total_length // (total_length // 2160)
@@ -185,7 +181,7 @@ class MainWidget(QWidget):
             interval_enmo = enmo.iloc[start:end]
             interval_timestamp = timestamp.iloc[start:end]
             interval_matrix_profile = matrix_profile[start:end]
-            interval_time_discrepancy = time_discrepancy[start:end]
+            interval_matrix_profile2 = matrix_profile2[start:end]
             local_extras = {}
             for key, value in extras.items():
                 if "_locs" not in key:
@@ -195,7 +191,7 @@ class MainWidget(QWidget):
                     assert np.all(local_extras[key] >= 0) and np.all(local_extras[key] < end - start)
 
             self.preloaded_intervals.append((series_id, start, end, interval_anglez, interval_enmo, interval_matrix_profile,
-                                             local_extras, interval_timestamp, interval_time_discrepancy, events))
+                                             local_extras, interval_timestamp, interval_matrix_profile2, events))
 
             k += stride
 
@@ -204,9 +200,8 @@ class MainWidget(QWidget):
 
         # Set fixed width height
         min_anglez, max_anglez = anglez.min() / 35.52, anglez.max() / 35.52
-        min_enmo, max_enmo = enmo.min() / 0.1018, enmo.max() / 0.1018
-        min_y = min(min_anglez, min_enmo)
-        max_y = max(max_anglez, max_enmo)
+        min_y = min_anglez
+        max_y = max_anglez
         length = max_y - min_y
         min_y -= length * 0.1
         max_y += length * 0.1
@@ -224,8 +219,15 @@ class MainWidget(QWidget):
         self.profile_widget.min_y = min_y
         self.profile_widget.max_y = max_y
 
-        self.discrepancy_widget.min_y = -0.1
-        self.discrepancy_widget.max_y = 1.1
+        # Set fixed height for discrepancy
+        min_y = matrix_profile2.min()
+        max_y = matrix_profile2.max()
+        length = max_y - min_y
+        min_y -= length * 0.1
+        max_y += length * 0.1
+
+        self.discrepancy_widget.min_y = min_y
+        self.discrepancy_widget.max_y = max_y
 
     def left_button_clicked(self):
         if self.preloaded_intervals is None:
@@ -247,10 +249,10 @@ class MainWidget(QWidget):
 
         selected_index = self.selection_slider.value()
         self.series_label.setText(str(selected_index))
-        series_id, start, end, anglez, enmo, matrix_profile, extras, timestamp, time_discrepancy, events = self.preloaded_intervals[selected_index]
-        self.display_widget.plot_data(series_id, anglez, enmo, matrix_profile, extras, timestamp, time_discrepancy, events, start)
-        self.profile_widget.plot_data(series_id, anglez, enmo, matrix_profile, extras, timestamp, time_discrepancy, events, start, is_profile=True)
-        self.discrepancy_widget.plot_data(series_id, anglez, enmo, matrix_profile, extras, timestamp, time_discrepancy, events, start, is_discrepancy=True)
+        series_id, start, end, anglez, enmo, matrix_profile, extras, timestamp, matrix_profile2, events = self.preloaded_intervals[selected_index]
+        self.display_widget.plot_data(series_id, anglez, enmo, matrix_profile, extras, timestamp, matrix_profile2, events, start)
+        self.profile_widget.plot_data(series_id, anglez, enmo, matrix_profile, extras, timestamp, matrix_profile2, events, start, is_profile=True)
+        self.discrepancy_widget.plot_data(series_id, anglez, enmo, matrix_profile, extras, timestamp, matrix_profile2, events, start, is_discrepancy=True)
 
 def load_file(item):
     filename = "./individual_train_series/" + item + ".parquet"
