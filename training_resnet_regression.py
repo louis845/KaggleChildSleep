@@ -609,7 +609,6 @@ if __name__ == "__main__":
     else:
         assert loss_type in ["huber", "mse", "huber_mse", "huber_sigma"], "Must use regression loss type if not using regression kernel."
     if use_standard_model:
-        assert use_anglez_only, "Must use anglez only if using standard model."
         assert loss_type == "huber" or loss_type == "huber_sigma" or loss_type == "mse", "Must use huber loss/MSE loss if using standard model."
     if loss_type == "huber_sigma":
         assert use_standard_model, "Must use standard model if using huber sigma loss."
