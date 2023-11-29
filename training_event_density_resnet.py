@@ -510,7 +510,7 @@ if __name__ == "__main__":
     assert type(validation_entries) == list
     print("Training dataset: {}".format(train_dset_name))
     print("Validation dataset: {}".format(val_dset_name))
-    validation_entries = [series_id for series_id in validation_entries if series_id not in bad_series_list.noisy_bad_segmentations] # exclude
+    #validation_entries = [series_id for series_id in validation_entries if series_id not in bad_series_list.noisy_bad_segmentations] # exclude
 
     # initialize gpu
     config.parse_args(args)
@@ -556,8 +556,8 @@ if __name__ == "__main__":
 
     assert sum([use_anglez_only, use_enmo_only]) <= 1, "Cannot use more than one of anglez only, enmo only"
     assert not (use_time_information and random_flip), "Cannot use time information and random flip at the same time."
-    #if not donot_exclude_bad_series_from_training:
-    training_entries = [series_id for series_id in training_entries if series_id not in bad_series_list.noisy_bad_segmentations]
+    if not donot_exclude_bad_series_from_training:
+        training_entries = [series_id for series_id in training_entries if series_id not in bad_series_list.noisy_bad_segmentations]
 
     assert os.path.isdir("./inference_regression_statistics/regression_preds/"), "Must generate regression predictions first. See inference_regression_statistics folder."
     assert os.path.isdir("./inference_regression_statistics/regression_preds_dense/"), "Must generate regression predictions first. See inference_regression_statistics folder."
@@ -755,7 +755,8 @@ if __name__ == "__main__":
                                                                         input_length_multiple=model.input_length_multiple,
                                                                         train_or_test="val",
                                                                         prediction_length=prediction_length,
-                                                                        prediction_stride=prediction_stride)
+                                                                        prediction_stride=prediction_stride,
+                                                                        donot_exclude_bad_series_from_training=True)
 
 
     # Start training loop

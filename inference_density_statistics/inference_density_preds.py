@@ -29,6 +29,7 @@ def inference(model_dir, validation_entries, all_data,
               show_tqdm_bar=True,
 
               out_folder=None):
+    print("Using stride count: {}".format(stride_count))
     assert out_folder is not None, "Must specify out_folder."
     assert isinstance(out_folder, str), "out_folder must be a string."
 
