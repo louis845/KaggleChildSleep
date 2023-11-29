@@ -27,4 +27,4 @@ do
     sleep 10
 done
 
-python inference_regression_statistics/inference_regression_preds.py --device 0 --use_anglez_only
+python inference_regression_statistics/inference_regression_preds.py --device 0
