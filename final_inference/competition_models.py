@@ -21,8 +21,12 @@ class CompetitionModels:
 
         self.regression_models = []
         self.confidence_models = []
-        self.iou_converter = None
         self.stumpy_device = None
+
+        self.regression_cutoff = None
+        self.regression_pruning = None
+        self.confidence_cutoff = None
+        self.confidence_aug_cutoff = None
 
     def load_regression_models(self):
         for cfg in self.model_config["regression_models"]:
@@ -79,6 +83,9 @@ class CompetitionModels:
                 "attention_mode": "length",
                 "stride_count": 4,
                 "use_time_information": False,
+                "input_data": "anglez",
+                "training_strategy": "density_only",
+                "input_length": 17280,
                 "expand": 8640,
                 "use_swa": False
             }
@@ -91,17 +98,28 @@ class CompetitionModels:
                 confidence_cfg["stride_count"] = cfg["stride_count"]
             if "use_time_information" in cfg:
                 confidence_cfg["use_time_information"] = cfg["use_time_information"]
+            if "input_data" in cfg:
+                confidence_cfg["input_data"] = cfg["input_data"]
+            if "training_strategy" in cfg:
+                confidence_cfg["training_strategy"] = cfg["training_strategy"]
+            if "input_length" in cfg:
+                confidence_cfg["input_length"] = cfg["input_length"]
             if "expand" in cfg:
                 confidence_cfg["expand"] = cfg["expand"]
             if "use_swa" in cfg:
                 confidence_cfg["use_swa"] = cfg["use_swa"]
             confidence_cfg["model_name"] = cfg["model_name"]
+            print(confidence_cfg["model_name"])
 
-            model = model_event_density_unet.EventDensityUnet(in_channels=1, # we use anglez only
+            assert confidence_cfg["input_data"] in ["anglez", "enmo"]
+
+            model = model_event_density_unet.EventDensityUnet(in_channels=1,
                                                          attention_blocks=confidence_cfg["attention_blocks"],
                                                          attention_mode=confidence_cfg["attention_mode"],
                                                          use_time_input=confidence_cfg["use_time_information"],
-                                                         expected_attn_input_length=17280 + 2 * confidence_cfg["expand"])
+                                                         training_strategy=confidence_cfg["training_strategy"],
+                                                         input_interval_length=confidence_cfg["input_length"],
+                                                         input_expand_radius=confidence_cfg["expand"])
             model.to(self.device)
             if confidence_cfg["use_swa"]:
                 model = torch.optim.swa_utils.AveragedModel(model)
@@ -113,29 +131,35 @@ class CompetitionModels:
             model_pkg = {
                 "model": model,
                 "model_name": confidence_cfg["model_name"],
-                "prediction_length": 17280,
+                "prediction_length": confidence_cfg["input_length"],
                 "expand": confidence_cfg["expand"],
                 "use_time_information": confidence_cfg["use_time_information"],
+                "input_data": confidence_cfg["input_data"],
                 "use_swa": confidence_cfg["use_swa"],
                 "stride_count": confidence_cfg["stride_count"]
             }
 
             self.confidence_models.append(model_pkg)
 
-    def initialize_IOU_converter(self):
-        self.iou_converter = model_event_unet.ProbasIOUScoreConverter(intersection_width=30 * 12, union_width=50 * 12, device=self.device)
-
     def load_models(self):
         self.load_regression_models()
         self.load_confidence_models()
-        self.initialize_IOU_converter()
 
-    def run_inference(self, series_id: str, accel_data: np.ndarray,
+    def set_parameters(self, regression_cutoff, regression_pruning, confidence_cutoff, confidence_aug_cutoff):
+        self.regression_cutoff = regression_cutoff
+        self.regression_pruning = regression_pruning
+        self.confidence_cutoff = confidence_cutoff
+        self.confidence_aug_cutoff = confidence_aug_cutoff
+
+    def run_inference(self, series_id: str, accel_data_anglez: np.ndarray, accel_data_enmo: np.ndarray,
                       secs_corr: np.ndarray, mins_corr: np.ndarray, hours_corr: np.ndarray,
                       models_subset: list = None, use_matrix_profile_pruning: bool = False):
-        ## cfg values for regression
-        cutoff = 4.5
-        pruning = 60
+        ## cfg values
+        regression_cutoff = self.regression_cutoff
+        regression_pruning = self.regression_pruning
+        confidence_cutoff = self.confidence_cutoff
+        confidence_aug_cutoff = self.confidence_aug_cutoff
+        batch_size = 512
 
         ## find regression locations first
         ctime = time.time()
@@ -156,7 +180,7 @@ class CompetitionModels:
             num_regression_models += 1
 
             with torch.no_grad():
-                preds_raw = model_event_unet.event_regression_inference(model, accel_data, target_multiple=target_multiple, return_torch_tensor=True,
+                preds_raw = model_event_density_unet.event_regression_inference(model, accel_data_anglez, target_multiple=target_multiple, return_torch_tensor=True,
                                                                         device=self.device, use_learnable_sigma=use_sigmas)
                 if use_sigmas:
                     model_onset_kernel_preds = kernel_utils.generate_kernel_preds_sigma_gpu(preds_raw[0, :], sigmas_array=preds_raw[2, :],
@@ -196,12 +220,12 @@ class CompetitionModels:
         wakeup_values = wakeup_kernel_values[wakeup_locs]
 
         # prune and align
-        onset_locs = onset_locs[onset_values > cutoff] # prune low (kernel) confidence values, and nearby values
-        wakeup_locs = wakeup_locs[wakeup_values > cutoff]
+        onset_locs = onset_locs[onset_values > regression_cutoff] # prune low (kernel) confidence values, and nearby values
+        wakeup_locs = wakeup_locs[wakeup_values > regression_cutoff]
         if len(onset_locs) > 0:
-            onset_locs = postprocessing.prune(onset_locs, onset_values[onset_values > cutoff], pruning)
+            onset_locs = postprocessing.prune(onset_locs, onset_values[onset_values > regression_cutoff], regression_pruning)
         if len(wakeup_locs) > 0:
-            wakeup_locs = postprocessing.prune(wakeup_locs, wakeup_values[wakeup_values > cutoff], pruning)
+            wakeup_locs = postprocessing.prune(wakeup_locs, wakeup_values[wakeup_values > regression_cutoff], regression_pruning)
 
         first_zero = postprocessing.compute_first_zero(secs_corr) # align to 15s and 45s
         if len(onset_locs) > 0:
@@ -210,13 +234,84 @@ class CompetitionModels:
             wakeup_locs = postprocessing.align_predictions(wakeup_locs, wakeup_kernel_values, first_zero=first_zero)
         first_postprocessing_time = time.time() - ctime
 
+        ## now compute confidence
+        ctime = time.time()
+        onset_confidence_probas, wakeup_confidence_probas = None, None
+        num_confidence_models = 0
+        for confidence_model_pkg in self.confidence_models:
+            model = confidence_model_pkg["model"]
+            model_name = confidence_model_pkg["model_name"]
+            prediction_length = confidence_model_pkg["prediction_length"]
+            expand = confidence_model_pkg["expand"]
+            use_time_information = confidence_model_pkg["use_time_information"]
+            stride_count = confidence_model_pkg["stride_count"]
+            input_data = confidence_model_pkg["input_data"]
+
+            if models_subset is not None and model_name not in models_subset:
+                continue
+            num_confidence_models += 1
+
+            with torch.no_grad():
+                if use_time_information:
+                    times = {"hours": hours_corr, "mins": mins_corr, "secs": secs_corr}
+                else:
+                    times = None
+
+                if input_data == "anglez":
+                    accel_data = accel_data_anglez
+                elif input_data == "enmo":
+                    accel_data = accel_data_enmo
+
+                _, onset_locs_probas, wakeup_locs_probas = model_event_density_unet.event_density_inference(model=model,
+                                                                 time_series=accel_data,
+                                                                 predicted_locations=[{
+                                                                     "onset": onset_locs,
+                                                                     "wakeup": wakeup_locs
+                                                                 }],
+                                                                 batch_size=batch_size,
+                                                                 prediction_length=prediction_length,
+                                                                 expand=expand,
+                                                                 times=times,
+                                                                 stride_count=stride_count,
+                                                                 flip_augmentation=False,
+                                                                 use_time_input=use_time_information,
+                                                                 device=self.device)
+
+            if onset_confidence_probas is None:
+                onset_confidence_probas = onset_locs_probas[0]
+                wakeup_confidence_probas = wakeup_locs_probas[0]
+            else:
+                onset_confidence_probas += onset_locs_probas[0]
+                wakeup_confidence_probas += wakeup_locs_probas[0]
+        onset_confidence_probas /= num_confidence_models
+        wakeup_confidence_probas /= num_confidence_models
+
+        confidence_computation_time = time.time() - ctime
+
+        ## prune using cutoff
+        ctime = time.time()
+        if confidence_cutoff > 0:
+            onset_locs = onset_locs[onset_confidence_probas > confidence_cutoff]
+            onset_confidence_probas = onset_confidence_probas[onset_confidence_probas > confidence_cutoff]
+            wakeup_locs = wakeup_locs[wakeup_confidence_probas > confidence_cutoff]
+            wakeup_confidence_probas = wakeup_confidence_probas[wakeup_confidence_probas > confidence_cutoff]
+
+        ## do augmentation now
+        onset_locs, onset_confidence_probas = postprocessing.get_augmented_predictions_density(onset_locs, onset_kernel_values,
+                                                                                onset_confidence_probas,
+                                                                                cutoff_thresh=confidence_aug_cutoff)
+        wakeup_locs, wakeup_confidence_probas = postprocessing.get_augmented_predictions_density(wakeup_locs, wakeup_kernel_values,
+                                                                                  wakeup_confidence_probas,
+                                                                                  cutoff_thresh=confidence_aug_cutoff)
+        second_postprocessing_time = time.time() - ctime
+
         ## matrix values prune if necessary
         if use_matrix_profile_pruning:
             ctime = time.time()
             if len(onset_locs) > 0 or len(wakeup_locs) > 0:
                 # compute matrix values
                 downsampling_rate = 12
-                anglez = accel_data[0, :].astype(np.float64)
+                anglez = accel_data_anglez[0, :].astype(np.float64)
 
                 # compute left pad and downsample by pooling
                 original_length = len(anglez)
@@ -243,119 +338,18 @@ class CompetitionModels:
                 assert matrix_profile.dtype == np.float32
 
                 if len(onset_locs) > 0:
-                    onset_locs = postprocessing.prune_matrix_profile(onset_locs, matrix_profile)
+                    onset_locs_restrict = postprocessing.prune_matrix_profile(onset_locs, matrix_profile,
+                                                                              return_idx=True)
+                    onset_locs = onset_locs[onset_locs_restrict]
+                    onset_confidence_probas = onset_confidence_probas[onset_locs_restrict]
                 if len(wakeup_locs) > 0:
-                    wakeup_locs = postprocessing.prune_matrix_profile(wakeup_locs, matrix_profile)
+                    wakeup_locs_restrict = postprocessing.prune_matrix_profile(wakeup_locs, matrix_profile,
+                                                                               return_idx=True)
+                    wakeup_locs = wakeup_locs[wakeup_locs_restrict]
+                    wakeup_confidence_probas = wakeup_confidence_probas[wakeup_locs_restrict]
             matrix_profile_pruning_time = time.time() - ctime
         else:
             matrix_profile_pruning_time = 0.0
-
-        ## cfg values for confidence
-        batch_size = 512
-        iou_averaging = ("iou_averaging" in self.model_config) and self.model_config["iou_averaging"]
-
-        ## now compute confidence
-        if iou_averaging:
-            ctime = time.time()
-            onset_IOU_probas, wakeup_IOU_probas = None, None
-            num_confidence_models = 0
-            for confidence_model_pkg in self.confidence_models:
-                model = confidence_model_pkg["model"]
-                model_name = confidence_model_pkg["model_name"]
-                prediction_length = confidence_model_pkg["prediction_length"]
-                expand = confidence_model_pkg["expand"]
-                use_time_information = confidence_model_pkg["use_time_information"]
-                stride_count = confidence_model_pkg["stride_count"]
-
-                if models_subset is not None and model_name not in models_subset:
-                    continue
-                num_confidence_models += 1
-
-                with torch.no_grad():
-                    if use_time_information:
-                        times = {"hours": hours_corr, "mins": mins_corr, "secs": secs_corr}
-                    else:
-                        times = None
-
-                    preds = model_event_unet.event_confidence_inference(model=model, time_series=accel_data,
-                                                                        batch_size=batch_size,
-                                                                        prediction_length=prediction_length,
-                                                                        expand=expand, times=times,
-                                                                        stride_count=stride_count,
-                                                                        flip_augmentation=False,
-                                                                        use_time_input=use_time_information,
-                                                                        device=self.device)
-
-                onset_confidence_probas = preds[0, :]
-                wakeup_confidence_probas = preds[1, :]
-
-                # convert to IOU score
-                model_onset_IOU_probas = self.iou_converter.convert(onset_confidence_probas)
-                model_wakeup_IOU_probas = self.iou_converter.convert(wakeup_confidence_probas)
-
-                if onset_IOU_probas is None:
-                    onset_IOU_probas = model_onset_IOU_probas
-                    wakeup_IOU_probas = model_wakeup_IOU_probas
-                else:
-                    onset_IOU_probas += model_onset_IOU_probas
-                    wakeup_IOU_probas += model_wakeup_IOU_probas
-
-            onset_IOU_probas /= num_confidence_models
-            wakeup_IOU_probas /= num_confidence_models
-
-            confidence_computation_time = time.time() - ctime
-        else:
-            ctime = time.time()
-            onset_confidence_probas, wakeup_confidence_probas = None, None
-            num_confidence_models = 0
-            for confidence_model_pkg in self.confidence_models:
-                model = confidence_model_pkg["model"]
-                model_name = confidence_model_pkg["model_name"]
-                prediction_length = confidence_model_pkg["prediction_length"]
-                expand = confidence_model_pkg["expand"]
-                use_time_information = confidence_model_pkg["use_time_information"]
-                stride_count = confidence_model_pkg["stride_count"]
-
-                if models_subset is not None and model_name not in models_subset:
-                    continue
-                num_confidence_models += 1
-
-                with torch.no_grad():
-                    if use_time_information:
-                        times = {"hours": hours_corr, "mins": mins_corr, "secs": secs_corr}
-                    else:
-                        times = None
-
-                    preds = model_event_unet.event_confidence_inference(model=model, time_series=accel_data,
-                                                                        batch_size=batch_size,
-                                                                        prediction_length=prediction_length,
-                                                                        expand=expand, times=times,
-                                                                        stride_count=stride_count,
-                                                                        flip_augmentation=False,
-                                                                        use_time_input=use_time_information,
-                                                                        device=self.device)
-
-                if onset_confidence_probas is None:
-                    onset_confidence_probas = preds[0, :]
-                    wakeup_confidence_probas = preds[1, :]
-                else:
-                    onset_confidence_probas += preds[0, :]
-                    wakeup_confidence_probas += preds[1, :]
-            onset_confidence_probas /= num_confidence_models
-            wakeup_confidence_probas /= num_confidence_models
-
-            # convert to IOU score
-            onset_IOU_probas = self.iou_converter.convert(onset_confidence_probas)
-            wakeup_IOU_probas = self.iou_converter.convert(wakeup_confidence_probas)
-            confidence_computation_time = time.time() - ctime
-
-        ## do augmentation now
-        ctime = time.time()
-        onset_locs, onset_IOU_probas = postprocessing.get_augmented_predictions(onset_locs, onset_kernel_values,
-                                                                                onset_IOU_probas, cutoff_thresh=0.01)
-        wakeup_locs, wakeup_IOU_probas = postprocessing.get_augmented_predictions(wakeup_locs, wakeup_kernel_values,
-                                                                                wakeup_IOU_probas, cutoff_thresh=0.01)
-        second_postprocessing_time = time.time() - ctime
 
         avg_kernel_values_time = kernel_values_computation_time / num_regression_models
         avg_confidence_time = confidence_computation_time / num_confidence_models
@@ -371,4 +365,4 @@ class CompetitionModels:
         }
 
         ## return
-        return onset_locs, onset_IOU_probas, wakeup_locs, wakeup_IOU_probas, time_elapsed_performance_metrics
+        return onset_locs, onset_confidence_probas, wakeup_locs, wakeup_confidence_probas, time_elapsed_performance_metrics

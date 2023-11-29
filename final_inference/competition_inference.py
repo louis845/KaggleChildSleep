@@ -59,16 +59,19 @@ class CompetitionInference:
         ctime2 = time.time()
         for series_id in series_ids:
             ctime = time.time()
-            if cache and os.path.isfile("cache/{}.npy".format(series_id)):
-                accel_data = np.load("cache/{}.npy".format(series_id))
+            if cache and os.path.isfile("cache/{}_anglez.npy".format(series_id)):
+                accel_data_anglez = np.load("cache/{}_anglez.npy".format(series_id))
+                accel_data_enmo = np.load("cache/{}_enmo.npy".format(series_id))
                 secs_corr = np.load("cache/{}_secs.npy".format(series_id))
                 mins_corr = np.load("cache/{}_mins.npy".format(series_id))
                 hours_corr = np.load("cache/{}_hours.npy".format(series_id))
             else:
-                df = pd.read_parquet(self.input_pq_file, columns=["step", "timestamp", "anglez"],
+                df = pd.read_parquet(self.input_pq_file, columns=["step", "timestamp", "anglez", "enmo"],
                                      filters=[("series_id", "==", series_id)])
 
-                accel_data = np.expand_dims(df["anglez"].to_numpy(dtype=np.float32) / 35.52, axis=0) # shape (1, T)
+                accel_data_anglez = np.expand_dims(df["anglez"].to_numpy(dtype=np.float32) / 35.52, axis=0) # shape (1, T)
+                accel_data_enmo = df["enmo"].to_numpy(dtype=np.float32) / 0.1018
+                accel_data_enmo = np.expand_dims((accel_data_enmo ** 0.6 - 1) / 0.6, axis=0) # shape (1, T)
                 timestamps = pd.to_datetime(df["timestamp"]).apply(lambda dt: dt.tz_localize(None))
 
                 secs = timestamps.dt.second.to_numpy(dtype=np.float32)
@@ -78,7 +81,8 @@ class CompetitionInference:
                 secs_corr, mins_corr, hours_corr = correct_time(secs, mins, hours)
 
                 if cache:
-                    np.save("cache/{}.npy".format(series_id), accel_data)
+                    np.save("cache/{}_anglez.npy".format(series_id), accel_data_anglez)
+                    np.save("cache/{}_enmo.npy".format(series_id), accel_data_enmo)
                     np.save("cache/{}_secs.npy".format(series_id), secs_corr)
                     np.save("cache/{}_mins.npy".format(series_id), mins_corr)
                     np.save("cache/{}_hours.npy".format(series_id), hours_corr)
@@ -90,7 +94,8 @@ class CompetitionInference:
             if model_filter is not None:
                 filtered_subset = model_filter(series_id)
             onset_locs, onset_IOU_probas, wakeup_locs, wakeup_IOU_probas, time_elapsed_performance_metrics =\
-                self.models_callable.run_inference(series_id, accel_data, secs_corr, mins_corr, hours_corr,
+                self.models_callable.run_inference(series_id, accel_data_anglez, accel_data_enmo,
+                                                   secs_corr, mins_corr, hours_corr,
                                                    models_subset=filtered_subset, use_matrix_profile_pruning=use_matrix_profile_pruning)
             inference_time = time.time() - ctime
 
@@ -169,14 +174,18 @@ if __name__ == "__main__":
     # Load the config and models
     models_callable = competition_models.CompetitionModels(model_config_file=input_model_cfg_file,
                                                            models_root_dir=input_models_root_dir,
-                                                           device=torch.device("cuda:1"))
+                                                           device=torch.device("cuda:0"))
     models_callable.load_models()
+    models_callable.set_parameters(regression_cutoff=0.01,
+                                   regression_pruning=72,
+                                   confidence_cutoff=0.01,
+                                   confidence_aug_cutoff=1.0)
 
     # Load the data and run inference
     competition_inference = CompetitionInference(input_pq_file=input_pq_file,
                                                     models_callable=models_callable)
     competition_inference.inference_all(out_file_path=out_file_path, log_debug=True, show_tqdm_bar=True, model_filter=model_filter_func,
-                                        cache=True)
+                                        cache=True, use_matrix_profile_pruning=True)
 
     # Done. Garbage collect
     gc.collect()

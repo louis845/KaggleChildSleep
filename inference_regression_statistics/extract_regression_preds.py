@@ -22,7 +22,7 @@ pruning = 60
 alignment = True"""
 
 # OPTION 2:
-"""out_folder = "regression_preds_dense"
+out_folder = "regression_preds_dense"
 if os.path.isdir(out_folder):
     shutil.rmtree(out_folder)
 os.mkdir(out_folder)
@@ -32,10 +32,10 @@ kernel_shape = ["gaussian", "gaussian", "gaussian"]
 kernel_size = [9, 9, 9]
 cutoff = 0.1
 pruning = 96
-alignment = True"""
+alignment = True
 
 # OPTION 3:
-out_folder = "regression_preds_very_dense"
+"""out_folder = "regression_preds_very_dense"
 if os.path.isdir(out_folder):
     shutil.rmtree(out_folder)
 os.mkdir(out_folder)
@@ -45,7 +45,7 @@ kernel_shape = ["laplace", "laplace", "laplace"]
 kernel_size = [9, 9, 9]
 cutoff = 0.02
 pruning = 72
-alignment = True
+alignment = True"""
 
 preds_folder = [os.path.join("regression_labels", PREDS[k], "{}_kernel{}".format(kernel_shape[k], kernel_size[k])) for k in range(len(PREDS))]
 
@@ -53,6 +53,9 @@ preds_folder = [os.path.join("regression_labels", PREDS[k], "{}_kernel{}".format
 pruning = 60
 alignment = True
 preds_folder = os.path.join("regression_labels", "Standard_5CV_Sigmas_VElastic", "gaussian_kernel")"""
+
+total_num_onset_locs = 0
+total_num_wakeup_locs = 0
 series_ids = [x.split(".")[0] for x in os.listdir("../individual_train_series")]
 for series_id in tqdm.tqdm(series_ids):
     onset_kernel_values, wakeup_kernel_values = None, None
@@ -96,5 +99,10 @@ for series_id in tqdm.tqdm(series_ids):
         if len(wakeup_locs) > 0:
             wakeup_locs = postprocessing.align_predictions(wakeup_locs, wakeup_kernel_values, first_zero=first_zero)
 
+    total_num_onset_locs += len(onset_locs)
+    total_num_wakeup_locs += len(wakeup_locs)
     np.save(os.path.join(out_folder, "{}_onset_locs.npy".format(series_id)), onset_locs)
     np.save(os.path.join(out_folder, "{}_wakeup_locs.npy".format(series_id)), wakeup_locs)
+    
+print("Num onset locations: {}".format(total_num_onset_locs))
+print("Num wakeup locations: {}".format(total_num_wakeup_locs))

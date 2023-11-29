@@ -289,11 +289,43 @@ def get_augmented_predictions(preds_locs, preds_local_kernel, preds_probas, cuto
     all_preds_locs, all_preds_probas = all_preds_locs[sort_index], all_preds_probas[sort_index]
     return all_preds_locs, all_preds_probas
 
-def align_and_augment_predictions(preds_locs, preds_local_kernel, preds_probas, series_secs, cutoff_thresh: float):
+def augment_and_cat_density(preds_locs, preds_local_kernel, preds_probas, shifts: list[float]):
+    augmented_locs1, augmented_locs2, augmented_locs_probas1, augmented_locs_probas2 =\
+        augment_left_right(preds_locs, preds_probas, preds_local_kernel)
+    preds_locs_probas = preds_probas
+
+    all_preds_locs = np.concatenate([preds_locs, augmented_locs1, augmented_locs2])
+    all_preds_probas = np.concatenate([preds_locs_probas + shifts[0],
+                                       augmented_locs_probas1 + shifts[1],
+                                       augmented_locs_probas2 + shifts[2]])
+    return all_preds_locs, all_preds_probas
+
+def get_augmented_predictions_density(preds_locs, preds_local_kernel, preds_score, cutoff_thresh: float):
+    assert len(preds_score) == len(preds_locs), "preds_score and preds_locs must have the same length"
+
     if len(preds_locs) == 0:
         return np.array([], dtype=np.int32), np.array([], dtype=np.float32)
 
-    first_zero = compute_first_zero(series_secs)
-    preds_locs = align_predictions(preds_locs, preds_local_kernel, first_zero)
+    if cutoff_thresh == 0.0:
+        all_preds_locs, all_preds_probas = augment_and_cat_density(preds_locs, preds_local_kernel, preds_score,
+                                                           [122.0, 61.0, 0.0])
+    else:
+        preds_locs_below = preds_locs[preds_score < cutoff_thresh]
+        preds_locs_above = preds_locs[preds_score >= cutoff_thresh]
 
-    return get_augmented_predictions(preds_locs, preds_local_kernel, preds_probas, cutoff_thresh)
+        if len(preds_locs_above) == 0: # all below
+            all_preds_locs, all_preds_probas = augment_and_cat_density(preds_locs, preds_local_kernel, preds_score,
+                                                               [122.0, 61.0, 0.0])
+        elif len(preds_locs_below) == 0: # all above
+            all_preds_locs, all_preds_probas = augment_and_cat_density(preds_locs, preds_local_kernel, preds_score,
+                                                               [305.0, 244.0, 183.0])
+        else:
+            all_above_preds_locs, all_above_preds_probas = augment_and_cat_density(preds_locs_above, preds_local_kernel, preds_score[preds_score >= cutoff_thresh],
+                                                               [305.0, 244.0, 183.0])
+            all_below_preds_locs, all_below_preds_probas = augment_and_cat_density(preds_locs_below, preds_local_kernel, preds_score[preds_score < cutoff_thresh],
+                                                               [122.0, 61.0, 0.0])
+            all_preds_locs = np.concatenate([all_above_preds_locs, all_below_preds_locs])
+            all_preds_probas = np.concatenate([all_above_preds_probas, all_below_preds_probas])
+    sort_index = np.argsort(all_preds_locs)
+    all_preds_locs, all_preds_probas = all_preds_locs[sort_index], all_preds_probas[sort_index]
+    return all_preds_locs, all_preds_probas
