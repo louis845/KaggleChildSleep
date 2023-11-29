@@ -15,7 +15,7 @@ import convert_to_npy_naive
 FOLDER = "./inference_regression_statistics/regression_labels"
 
 def inference(model_dir, out_folder, validation_entries, target_multiple, use_sigmas, hidden_channels, hidden_blocks, pred_width,
-              use_swa):
+              use_swa, use_anglez_only, use_enmo_only):
     # init model
     model = model_event_unet.EventRegressorUnet(use_learnable_sigma=use_sigmas, hidden_channels=hidden_channels, blocks=hidden_blocks)
     model = model.to(config.device)
@@ -289,19 +289,11 @@ if __name__ == "__main__":
         os.mkdir(FOLDER)
 
     parser = argparse.ArgumentParser("Inference script for models trained on regression events data")
-    parser.add_argument("--use_anglez_only", action="store_true", help="Whether to use only anglez. Default False.")
-    parser.add_argument("--use_enmo_only", action="store_true", help="Whether to use only enmo. Default False.")
     config.add_argparse_arguments(parser)
     args = parser.parse_args()
 
     # initialize gpu
     config.parse_args(args)
-
-    # get data parameters
-    use_anglez_only = args.use_anglez_only
-    use_enmo_only = args.use_enmo_only
-
-    assert not (use_anglez_only and use_enmo_only), "Cannot use both anglez only and enmo only."
 
     # load data
     all_data = convert_to_npy_naive.load_all_data_into_dict()
@@ -315,6 +307,8 @@ if __name__ == "__main__":
         models = option["models"]
         entries = option["entries"]
         use_sigmas = ("use_sigmas" in option) and option["use_sigmas"]
+        use_anglez_only = True
+        use_enmo_only = False
         hidden_channels = [4, 4, 8, 16, 32]
         hidden_blocks = [2, 2, 2, 2, 3]
         pred_width = 120
@@ -327,6 +321,9 @@ if __name__ == "__main__":
             pred_width = option["pred_width"]
         if "use_swa" in option:
             use_swa = option["use_swa"]
+        if "use_enmo_only" in option:
+            use_enmo_only = option["use_enmo_only"]
+            use_anglez_only = not use_enmo_only
         blocks_length = len(hidden_channels)
         print("Running inference on {}".format(name))
 
@@ -351,4 +348,5 @@ if __name__ == "__main__":
             validation_entries = manager_folds.load_dataset(entry)
 
             inference(model_dir, out_folder, validation_entries, target_multiple, use_sigmas,
-                      hidden_channels=hidden_channels, hidden_blocks=hidden_blocks, pred_width=pred_width, use_swa=use_swa)
+                      hidden_channels=hidden_channels, hidden_blocks=hidden_blocks, pred_width=pred_width, use_swa=use_swa,
+                      use_anglez_only=use_anglez_only, use_enmo_only=use_enmo_only)
