@@ -5,6 +5,23 @@ import bad_series_list
 import convert_to_interval_events
 import transform_elastic_deformation
 
+def index_array(arr: np.ndarray, low: int, high: int) -> tuple[np.ndarray, int, int]:
+    # index select arr along the last axis, from low to high
+    # automatically pad with zeros if low, high are out of bounds
+    # returns (indexed_arr, left_pad, right_pad)
+    assert len(arr.shape) == 2, "arr must be a 2D array"
+    assert low < high, "low must be less than high"
+    assert not ((low < 0 and high <= 0) or (low >= arr.shape[1] and high > arr.shape[1])), "low and high must intersect with arr"
+
+    if 0 <= low < arr.shape[1] and 0 < high <= arr.shape[1]:
+        return arr[:, low:high].copy(), 0, 0
+    elif low < 0 and 0 < high <= arr.shape[1]:
+        return np.concatenate([np.zeros((arr.shape[0], -low), dtype=arr.dtype), arr[:, :high]], axis=1), -low, 0
+    elif 0 <= low < arr.shape[1] and high > arr.shape[1]:
+        return np.concatenate([arr[:, low:], np.zeros((arr.shape[0], high - arr.shape[1]), dtype=arr.dtype)], axis=1), 0, high - arr.shape[1]
+    elif low < 0 and high > arr.shape[1]:
+        return np.concatenate([np.zeros((arr.shape[0], -low), dtype=arr.dtype), arr, np.zeros((arr.shape[0], high - arr.shape[1]), dtype=arr.dtype)], axis=1), -low, high - arr.shape[1]
+
 class IntervalDensityEventsSampler:
     def __init__(self, series_ids: list[str], naive_all_data: dict,
                  input_length_multiple: int,
@@ -28,8 +45,8 @@ class IntervalDensityEventsSampler:
         for series_id in series_ids:
             self.all_segmentations[series_id] = []
 
-            interval_min = convert_to_interval_events.get_first_day_step(naive_all_data, series_id)
-            if donot_exclude_bad_series_from_training:
+            interval_min = 0
+            if donot_exclude_bad_series_from_training or (series_id not in bad_series_list.bad_segmentations_tail):
                 interval_max = naive_all_data[series_id]["accel"].shape[1]
             else:
                 interval_max = convert_to_interval_events.get_truncated_series_length(naive_all_data, series_id, self.events)
@@ -45,6 +62,17 @@ class IntervalDensityEventsSampler:
                     "end": interval_min + prediction_length
                 })
                 interval_min += prediction_stride
+
+            if donot_exclude_bad_series_from_training or (series_id not in bad_series_list.bad_segmentations_tail):
+                self.all_segmentations_list.append({
+                    "series_id": series_id,
+                    "start": interval_max - prediction_length,
+                    "end": interval_max
+                })
+                self.all_segmentations[series_id].append({
+                    "start": interval_max - prediction_length,
+                    "end": interval_max
+                })
 
         self.shuffle_indices = None
         self.sample_low = 0
@@ -80,25 +108,13 @@ class IntervalDensityEventsSampler:
         end = interval_info["end"]
         total_length = int(self.naive_all_data[series_id]["accel"].shape[1])
 
-        # shift if expansion makes it out of boundaries
-        if expand > 0:
-            if start - expand < 0:
-                overhead = expand - start
-                start += overhead
-                end += overhead
-            if end + expand > total_length:
-                overhead = end + expand - total_length
-                end -= overhead
-                start -= overhead
-
         # apply random shift
         shift = 0
         if random_shift > 0:
             shift = np.random.randint(-random_shift, random_shift + 1)
-            shift = max(min(shift, total_length - end - expand), -start + expand)
+            shift = max(min(shift, total_length - end), -start)
         start, end = start + shift, end + shift
-
-        assert start - expand >= 0 and end + expand <= total_length, "start: {}, end: {}, total_length: {}".format(start, end, total_length)
+        assert start >= 0 and end <= total_length, "start: {}, end: {}, total_length: {}".format(start, end, total_length)
 
         # find the events that need to be included, and generate elastic deformation if necessary
         events_start, events_end = start - expand, end + expand
@@ -136,9 +152,7 @@ class IntervalDensityEventsSampler:
                         })
 
         # Load acceleration data and event segmentations
-        accel_data = self.naive_all_data[series_id]["accel"][:, (start - expand):(end + expand)]
-        if (vflip or v_elastic_deformation) and (not elastic_deformation):
-            accel_data = accel_data.copy()
+        accel_data, left_pad, right_pad = index_array(self.naive_all_data[series_id]["accel"], start - expand, end + expand)
 
         event_segmentations = np.zeros((2, end - start + 2 * expand), dtype=np.float32)
         event_segmentations_downscaled = np.zeros((2, (end - start + 2 * expand) // self.input_length_multiple), dtype=np.float32)
@@ -183,6 +197,19 @@ class IntervalDensityEventsSampler:
                 accel_data[1, :] = transform_elastic_deformation.deform_v_time_series_enmo(accel_data[1, :])
             else:
                 accel_data[0, :] = transform_elastic_deformation.deform_v_time_series(accel_data[0, :])
+
+            # vertical elastic deformation makes padded zeros non-zero, we need to reintroduce zeros
+            if left_pad > 0:
+                if elastic_deformation:
+                    left_pad = np.searchsorted(deformation_indices, left_pad, side="left")
+                if left_pad > 0:
+                    accel_data[:, :left_pad] = 0.0
+            if right_pad > 0:
+                right_pad = accel_data.shape[-1] - right_pad
+                if elastic_deformation:
+                    right_pad = np.searchsorted(deformation_indices, right_pad, side="left")
+                if right_pad < accel_data.shape[-1]:
+                    accel_data[:, right_pad:] = 0.0
 
         if flip:
             accel_data = np.flip(accel_data, axis=1)

@@ -307,8 +307,9 @@ def event_density_single_logit_iterator(model: EventDensityUnet, time_series: np
         with torch.no_grad():
             if flipped:
                 batches_out, batches_out_raw_logits, batches_out_event_presence_score = model(torch.flip(batches_torch, dims=[-1,]), time=batch_times)
-                batches_out = torch.flip(batches_out, dims=[-1,])
-                batches_out_raw_logits = torch.flip(batches_out_raw_logits, dims=[-1,])
+                batches_out = torch.flip(batches_out, dims=[-1, -2])
+                batches_out_raw_logits = torch.flip(batches_out_raw_logits, dims=[-1, -2])
+                batches_out_event_presence_score = torch.flip(batches_out_event_presence_score, dims=[-1,])
             else:
                 batches_out, batches_out_raw_logits, batches_out_event_presence_score = model(batches_torch, time=batch_times)
 

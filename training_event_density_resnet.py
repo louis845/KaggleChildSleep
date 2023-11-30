@@ -510,7 +510,7 @@ if __name__ == "__main__":
     assert type(validation_entries) == list
     print("Training dataset: {}".format(train_dset_name))
     print("Validation dataset: {}".format(val_dset_name))
-    #validation_entries = [series_id for series_id in validation_entries if series_id not in bad_series_list.noisy_bad_segmentations] # exclude
+    validation_entries = [series_id for series_id in validation_entries if series_id not in bad_series_list.noisy_bad_segmentations] # exclude
 
     # initialize gpu
     config.parse_args(args)
