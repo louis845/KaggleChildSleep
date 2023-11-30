@@ -36,6 +36,19 @@ def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor):
 
     return (((preds_probas - ground_truth) ** 2) * ce).mean(dim=-1).sum()
 
+def focal_kl_loss(preds: torch.Tensor, ground_truth: torch.Tensor):
+    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
+    with torch.no_grad():
+        entropy = torch.sum(ground_truth * torch.where(ground_truth > 0.0, torch.log(ground_truth), torch.zeros_like(ground_truth)), dim=1)
+
+    ce = torch.nn.functional.cross_entropy(preds, ground_truth, reduction="none")
+    kl = ce + entropy
+
+    preds_probas = torch.softmax(preds, dim=1)
+    l2 = torch.sum((preds_probas - ground_truth) ** 2, dim=1)
+
+    return 200.0 * (l2 * kl).mean(dim=-1).sum()
+
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
                             accel_data_batch: torch.Tensor, labels_density_batch: torch.Tensor,
@@ -49,7 +62,10 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
         deep_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_token_confidence, labels_segmentation_batch, reduction="none").mean(dim=-1).sum()
     else:
         pred_density_logits, pred_occurences = model_(accel_data_batch, time=times_input)
-    entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
+    if use_focal_loss:
+        entropy_loss = focal_kl_loss(pred_density_logits, labels_density_batch)
+    else:
+        entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
     if use_focal_loss:
         class_loss = focal_loss(pred_occurences, labels_occurrence_batch)
     else:
