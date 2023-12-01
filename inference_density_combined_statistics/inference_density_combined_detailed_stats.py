@@ -319,6 +319,7 @@ class MainWindow(QMainWindow):
         self.checkbox_matrix_values_pruning = QCheckBox("Use Matrix Values Pruning")
         self.checkbox_linear_dropoff = QCheckBox("Use Linear Dropoff")
         self.checkbox_postalignment = QCheckBox("Use Post Alignment")
+        self.checkbox_exclude_bad = QCheckBox("Exclude Bad Segmentations")
         self.checkbox_layout.addStretch(1)
         self.checkbox_layout.addWidget(self.checkbox_augmentation)
         self.checkbox_layout.addStretch(1)
@@ -327,6 +328,8 @@ class MainWindow(QMainWindow):
         self.checkbox_layout.addWidget(self.checkbox_linear_dropoff)
         self.checkbox_layout.addStretch(1)
         self.checkbox_layout.addWidget(self.checkbox_postalignment)
+        self.checkbox_layout.addStretch(1)
+        self.checkbox_layout.addWidget(self.checkbox_exclude_bad)
         self.checkbox_layout.addStretch(1)
         self.top_layout.addLayout(self.checkbox_layout)
 
@@ -427,7 +430,9 @@ class MainWindow(QMainWindow):
 
                       self.checkbox_linear_dropoff.isChecked(), self.checkbox_postalignment.isChecked(),
 
-                      selected_fold=selected_fold)
+                      selected_fold=selected_fold,
+
+                      exclude_bad_segmentations=self.checkbox_exclude_bad.isChecked())
         self.canvas_plots.draw()
 
     def get_cutoff(self):
