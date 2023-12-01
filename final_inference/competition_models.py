@@ -27,6 +27,7 @@ class CompetitionModels:
         self.regression_pruning = None
         self.confidence_cutoff = None
         self.confidence_aug_cutoff = None
+        self.matrix_profile_downsampling_rate = None
 
     def load_regression_models(self):
         for cfg in self.model_config["regression_models"]:
@@ -145,11 +146,12 @@ class CompetitionModels:
         self.load_regression_models()
         self.load_confidence_models()
 
-    def set_parameters(self, regression_cutoff, regression_pruning, confidence_cutoff, confidence_aug_cutoff):
+    def set_parameters(self, regression_cutoff, regression_pruning, confidence_cutoff, confidence_aug_cutoff, matrix_profile_downsampling_rate):
         self.regression_cutoff = regression_cutoff
         self.regression_pruning = regression_pruning
         self.confidence_cutoff = confidence_cutoff
         self.confidence_aug_cutoff = confidence_aug_cutoff
+        self.matrix_profile_downsampling_rate = matrix_profile_downsampling_rate
 
     def run_inference(self, series_id: str, accel_data_anglez: np.ndarray, accel_data_enmo: np.ndarray,
                       secs_corr: np.ndarray, mins_corr: np.ndarray, hours_corr: np.ndarray,
@@ -159,6 +161,7 @@ class CompetitionModels:
         regression_pruning = self.regression_pruning
         confidence_cutoff = self.confidence_cutoff
         confidence_aug_cutoff = self.confidence_aug_cutoff
+        downsampling_rate = self.matrix_profile_downsampling_rate
         batch_size = 512
 
         ## find regression locations first
@@ -310,7 +313,6 @@ class CompetitionModels:
             ctime = time.time()
             if len(onset_locs) > 0 or len(wakeup_locs) > 0:
                 # compute matrix values
-                downsampling_rate = 12
                 anglez = accel_data_anglez[0, :].astype(np.float64)
 
                 # compute left pad and downsample by pooling
