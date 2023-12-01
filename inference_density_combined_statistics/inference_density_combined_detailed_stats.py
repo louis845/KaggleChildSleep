@@ -13,12 +13,12 @@ import numpy as np
 import h5py
 import tqdm
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # add root folder to sys.path
 import postprocessing
 import metrics_ap
 import convert_to_seriesid_events
 import manager_folds
 import model_event_density_unet
+import bad_series_list
 
 def plot_single_precision_recall_curve(ax, precisions, recalls, ap, proba, title):
     ax.plot(recalls, precisions)
@@ -110,7 +110,9 @@ def validation_ap(fig: matplotlib.figure.Figure, gt_events,
                   cutoff, augmentation, augmentation_cutoff, matrix_values_pruning,
                   linear_dropoff, postalignment,
 
-                  selected_fold: int):
+                  selected_fold: int,
+
+                  exclude_bad_segmentations: bool):
     selected_series_ids = subfolds[selected_fold]
 
     ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
@@ -122,6 +124,9 @@ def validation_ap(fig: matplotlib.figure.Figure, gt_events,
     total_wakeup_values = 0
 
     for series_id in tqdm.tqdm(selected_series_ids):
+        if exclude_bad_segmentations and series_id in bad_series_list.noisy_bad_segmentations:
+            continue
+
         # compute the regression predictions
         preds_locs_onset, preds_locs_wakeup, onset_kernel_vals, wakeup_kernel_vals = get_regression_preds_locs(selected_regression_folders, series_id,
                                                                                                                alignment=not postalignment)
@@ -200,6 +205,18 @@ def validation_ap(fig: matplotlib.figure.Figure, gt_events,
         # get the ground truth
         gt_onset_locs = gt_events[series_id]["onset"]
         gt_wakeup_locs = gt_events[series_id]["wakeup"]
+
+        # exclude end if excluding bad segmentations
+        if exclude_bad_segmentations and series_id in bad_series_list.bad_segmentations_tail:
+            if len(gt_onset_locs) > 0 and len(gt_wakeup_locs) > 0:
+                last = gt_wakeup_locs[-1] + 8640
+                onset_cutoff = np.searchsorted(preds_locs_onset, last, side="right")
+                wakeup_cutoff = np.searchsorted(preds_locs_wakeup, last, side="right")
+
+                preds_locs_onset = preds_locs_onset[:onset_cutoff]
+                preds_locs_wakeup = preds_locs_wakeup[:wakeup_cutoff]
+                onset_locs_all_probas = onset_locs_all_probas[:onset_cutoff]
+                wakeup_locs_all_probas = wakeup_locs_all_probas[:wakeup_cutoff]
 
         # add info
         for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):

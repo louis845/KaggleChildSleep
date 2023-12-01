@@ -361,5 +361,46 @@
     "attention_blocks": 3,
     "stride_count": 8,
     "use_best_model": true
+  },
+
+  {
+    "name": "Density Predictions (3 Length, 8 Stride, Focal)",
+    "folder_name": "event5fold_density_3length_8stride_focal",
+    "models": ["event5fold_density_focal_2elastic_length3_drop_model_fold1", "event5fold_density_focal_2elastic_length3_drop_model_fold2", "event5fold_density_focal_2elastic_length3_drop_model_fold3", "event5fold_density_focal_2elastic_length3_drop_model_fold4", "event5fold_density_focal_2elastic_length3_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "anglez",
+    "attention_blocks": 3,
+    "stride_count": 8
+  },
+  {
+    "name": "Density Predictions (Time, 8 Stride, Focal)",
+    "folder_name": "event5fold_density_time_2length_8stride_focal",
+    "models": ["event5fold_density_focal_time_2elastic_length2_drop_model_fold5", "event5fold_density_focal_time_2elastic_length2_drop_model_fold2", "event5fold_density_focal_time_2elastic_length2_drop_model_fold3", "event5fold_density_focal_time_2elastic_length2_drop_model_fold4", "event5fold_density_focal_time_2elastic_length2_drop_model_fold1"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "anglez",
+    "attention_blocks": 2,
+    "stride_count": 8,
+    "use_time_information": true
+  },
+  {
+    "name": "Density Predictions (3 Length, 8 Stride, Focal, Best)",
+    "folder_name": "event5fold_density_3length_8stride_focal_best",
+    "models": ["event5fold_density_focal_2elastic_length3_drop_model_fold1", "event5fold_density_focal_2elastic_length3_drop_model_fold2", "event5fold_density_focal_2elastic_length3_drop_model_fold3", "event5fold_density_focal_2elastic_length3_drop_model_fold4", "event5fold_density_focal_2elastic_length3_drop_model_fold5"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "anglez",
+    "attention_blocks": 3,
+    "stride_count": 8,
+    "use_best_model": true
+  },
+  {
+    "name": "Density Predictions (Time, 8 Stride, Focal, Best)",
+    "folder_name": "event5fold_density_time_2length_8stride_focal_best",
+    "models": ["event5fold_density_focal_time_2elastic_length2_drop_model_fold5", "event5fold_density_focal_time_2elastic_length2_drop_model_fold2", "event5fold_density_focal_time_2elastic_length2_drop_model_fold3", "event5fold_density_focal_time_2elastic_length2_drop_model_fold4", "event5fold_density_focal_time_2elastic_length2_drop_model_fold1"],
+    "entries": ["fold_1_val_5cv", "fold_2_val_5cv", "fold_3_val_5cv", "fold_4_val_5cv", "fold_5_val_5cv"],
+    "input_type": "anglez",
+    "attention_blocks": 2,
+    "stride_count": 8,
+    "use_time_information": true,
+    "use_best_model": true
   }
 ]
