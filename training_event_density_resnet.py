@@ -267,7 +267,9 @@ validation_AP_tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30][::-1]
 def validation_ap(epoch, ap_log_dir, ap_log_aligned_dir, ap_log_loc_softmax_dir,
                   ap_dense_log_dir, ap_dense_log_aligned_dir, ap_dense_log_loc_softmax_dir,
                   ap_very_dense_log_dir, ap_very_dense_log_aligned_dir, ap_very_dense_log_loc_softmax_dir,
-                  predicted_events, dense_predicted_events, very_dense_predicted_events, gt_events):
+                  predicted_events, dense_predicted_events, very_dense_predicted_events, gt_events,
+
+                  remove_bad_tail_segmentations):
     use_model = swa_model if (use_swa and (epoch > swa_start)) else model
 
     keys = ["usual", "aligned", "loc_softmax", "dense_usual", "dense_aligned", "dense_loc_softmax",
@@ -373,14 +375,26 @@ def validation_ap(epoch, ap_log_dir, ap_log_aligned_dir, ap_log_loc_softmax_dir,
             for key in keys:
                 for key_onset_metric, key_wakeup_metric in zip(all_ap_onset_metrics[key], all_ap_wakeup_metrics[key]):
                     if "very_dense" in key:
-                        key_onset_metric.add(pred_locs=very_dense_preds_locs_onset, pred_probas=onset_all_probas[key], gt_locs=gt_onset_locs)
-                        key_wakeup_metric.add(pred_locs=very_dense_preds_locs_wakeup, pred_probas=wakeup_all_probas[key], gt_locs=gt_wakeup_locs)
+                        key_preds_locs_onset, key_preds_locs_wakeup = very_dense_preds_locs_onset, very_dense_preds_locs_wakeup
                     elif "dense" in key:
-                        key_onset_metric.add(pred_locs=dense_preds_locs_onset, pred_probas=onset_all_probas[key], gt_locs=gt_onset_locs)
-                        key_wakeup_metric.add(pred_locs=dense_preds_locs_wakeup, pred_probas=wakeup_all_probas[key], gt_locs=gt_wakeup_locs)
+                        key_preds_locs_onset, key_preds_locs_wakeup = dense_preds_locs_onset, dense_preds_locs_wakeup
                     else:
-                        key_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_all_probas[key], gt_locs=gt_onset_locs)
-                        key_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_all_probas[key], gt_locs=gt_wakeup_locs)
+                        key_preds_locs_onset, key_preds_locs_wakeup = preds_locs_onset, preds_locs_wakeup
+                    key_preds_probas_onset, key_preds_probas_wakeup = onset_all_probas[key], wakeup_all_probas[key]
+
+                    if remove_bad_tail_segmentations and series_id in bad_series_list.bad_segmentations_tail:
+                        if len(gt_onset_locs) > 0 and len(gt_wakeup_locs) > 0:
+                            last = gt_wakeup_locs[-1] + 8640
+                            onset_key_cutoff = np.searchsorted(key_preds_locs_onset, last, side="right")
+                            wakeup_key_cutoff = np.searchsorted(key_preds_locs_wakeup, last, side="right")
+
+                            key_preds_locs_onset = key_preds_locs_onset[:onset_key_cutoff]
+                            key_preds_locs_wakeup = key_preds_locs_wakeup[:wakeup_key_cutoff]
+                            key_preds_probas_onset = key_preds_probas_onset[:onset_key_cutoff]
+                            key_preds_probas_wakeup = key_preds_probas_wakeup[:wakeup_key_cutoff]
+
+                    key_onset_metric.add(pred_locs=key_preds_locs_onset, pred_probas=key_preds_probas_onset, gt_locs=gt_onset_locs)
+                    key_wakeup_metric.add(pred_locs=key_preds_locs_wakeup, pred_probas=key_preds_probas_wakeup, gt_locs=gt_wakeup_locs)
 
     # compute average precision
     ctime = time.time()
@@ -511,6 +525,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_swa", action="store_true", help="Whether to use SWA. Default False.")
     parser.add_argument("--swa_start", type=int, default=10, help="Epoch to start SWA. Default 10.")
     parser.add_argument("--donot_exclude_bad_series_from_training", action="store_true", help="Whether to not exclude bad series from training. Default False.")
+    parser.add_argument("--donot_remove_bad_tail_segmentations_AP", action="store_true", help="Whether to not remove bad tail segmentations for AP. Default False.")
     parser.add_argument("--prediction_length", type=int, default=17280, help="Number of timesteps to predict. Default 17280.")
     parser.add_argument("--prediction_stride", type=int, default=4320, help="Number of timesteps to stride when predicting. Default 4320.")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size. Default 32.")
@@ -565,6 +580,7 @@ if __name__ == "__main__":
     use_swa = args.use_swa
     swa_start = args.swa_start
     donot_exclude_bad_series_from_training = args.donot_exclude_bad_series_from_training
+    donot_remove_bad_tail_segmentations_AP = args.donot_remove_bad_tail_segmentations_AP
     prediction_length = args.prediction_length
     prediction_stride = args.prediction_stride
     batch_size = args.batch_size
@@ -717,6 +733,7 @@ if __name__ == "__main__":
         "use_swa": use_swa,
         "swa_start": swa_start,
         "donot_exclude_bad_series_from_training": donot_exclude_bad_series_from_training,
+        "donot_remove_bad_tail_segmentations_AP": donot_remove_bad_tail_segmentations_AP,
         "prediction_length": prediction_length,
         "prediction_stride": prediction_stride,
         "batch_size": batch_size,
@@ -819,7 +836,9 @@ if __name__ == "__main__":
                               predicted_events=regression_predicted_events,
                               dense_predicted_events=regression_dense_predicted_events,
                               very_dense_predicted_events=regression_very_dense_predicted_events,
-                              gt_events=per_series_id_events)
+                              gt_events=per_series_id_events,
+
+                              remove_bad_tail_segmentations=not donot_remove_bad_tail_segmentations_AP)
 
             print()
             print_history(train_history)

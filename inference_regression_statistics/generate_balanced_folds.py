@@ -17,17 +17,17 @@ for series_id in all_series_ids:
 
 mean_aes = {k: v for k, v in sorted(mean_aes.items(), key=lambda item: item[1])}
 
-# Generate 5 folds
-folds = [[], [], [], [], []]
+# Generate 10 folds
+folds = [[], [], [], [], [], [], [], [], [], []]
 for i, series_id in enumerate(mean_aes.keys()):
-    folds[i % 5].append(series_id)
+    folds[i % 10].append(series_id)
 for j in range(len(series_ids_set_diff)):
-    folds[(i + j + 1) % 5].append(series_ids_set_diff[j])
+    folds[(i + j + 1) % 10].append(series_ids_set_diff[j])
 
 # Generate train/test splits
-for i in range(5):
+for i in range(10):
     train_series_ids = []
-    for j in range(5):
+    for j in range(10):
         if j != i:
             train_series_ids = folds[j] + train_series_ids
 
