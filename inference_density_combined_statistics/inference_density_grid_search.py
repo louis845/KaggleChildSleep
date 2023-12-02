@@ -98,7 +98,7 @@ def event_density_file_logit_iterator(selected_density_folder, series_id) -> Ite
 
 def validation_ap(gt_events, all_series_ids,
                   selected_density_folders: list[str], selected_regression_folders: list[str],
-                  cutoff, augmentation_cutoff, matrix_values_pruning,
+                  cutoff, augmentation, augmentation_cutoff, matrix_values_pruning,
 
                   regression_pruning, regression_postpruning,
 
@@ -107,9 +107,6 @@ def validation_ap(gt_events, all_series_ids,
 
     ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
     ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
-
-    ap_onset_metrics_aug = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
-    ap_wakeup_metrics_aug = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
 
     cutoff_onset_values = 0
     cutoff_wakeup_values = 0
@@ -190,10 +187,11 @@ def validation_ap(gt_events, all_series_ids,
                 wakeup_locs_all_probas = wakeup_locs_all_probas[wakeup_prune_keeps]
 
         # augment and restrict the probas
-        preds_locs_onset_aug, onset_locs_all_probas_aug = postprocessing.get_augmented_predictions_density(preds_locs_onset,
-                                                        onset_kernel_vals, onset_locs_all_probas, cutoff_thresh=augmentation_cutoff)
-        preds_locs_wakeup_aug, wakeup_locs_all_probas_aug = postprocessing.get_augmented_predictions_density(preds_locs_wakeup,
-                                                        wakeup_kernel_vals, wakeup_locs_all_probas, cutoff_thresh=augmentation_cutoff)
+        if augmentation:
+            preds_locs_onset, onset_locs_all_probas = postprocessing.get_augmented_predictions_density(preds_locs_onset,
+                                                            onset_kernel_vals, onset_locs_all_probas, cutoff_thresh=augmentation_cutoff)
+            preds_locs_wakeup, wakeup_locs_all_probas = postprocessing.get_augmented_predictions_density(preds_locs_wakeup,
+                                                            wakeup_kernel_vals, wakeup_locs_all_probas, cutoff_thresh=augmentation_cutoff)
 
         # prune using matrix values
         if matrix_values_pruning:
@@ -224,21 +222,10 @@ def validation_ap(gt_events, all_series_ids,
                 onset_locs_all_probas = onset_locs_all_probas[:onset_cutoff]
                 wakeup_locs_all_probas = wakeup_locs_all_probas[:wakeup_cutoff]
 
-                onset_cutoff = np.searchsorted(preds_locs_onset_aug, last, side="right")
-                wakeup_cutoff = np.searchsorted(preds_locs_wakeup_aug, last, side="right")
-                preds_locs_onset_aug = preds_locs_onset_aug[:onset_cutoff]
-                preds_locs_wakeup_aug = preds_locs_wakeup_aug[:wakeup_cutoff]
-                onset_locs_all_probas_aug = onset_locs_all_probas_aug[:onset_cutoff]
-                wakeup_locs_all_probas_aug = wakeup_locs_all_probas_aug[:wakeup_cutoff]
-
         # add info
         for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
             ap_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_locs_all_probas, gt_locs=gt_onset_locs)
             ap_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_locs_all_probas, gt_locs=gt_wakeup_locs)
-
-        for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics_aug, ap_wakeup_metrics_aug):
-            ap_onset_metric.add(pred_locs=preds_locs_onset_aug, pred_probas=onset_locs_all_probas_aug, gt_locs=gt_onset_locs)
-            ap_wakeup_metric.add(pred_locs=preds_locs_wakeup_aug, pred_probas=wakeup_locs_all_probas_aug, gt_locs=gt_wakeup_locs)
 
     # compute average precision
     ap_onset_average_precisions, ap_wakeup_average_precisions = [], []
@@ -248,29 +235,14 @@ def validation_ap(gt_events, all_series_ids,
         ap_onset_average_precisions.append(ap_onset_average_precision)
         ap_wakeup_average_precisions.append(ap_wakeup_average_precision)
 
-    ap_onset_average_precisions_aug, ap_wakeup_average_precisions_aug = [], []
-    for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics_aug, ap_wakeup_metrics_aug):
-        ap_onset_precision, ap_onset_recall, ap_onset_average_precision, ap_onset_proba = ap_onset_metric.get()
-        ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision, ap_wakeup_proba = ap_wakeup_metric.get()
-        ap_onset_average_precisions_aug.append(ap_onset_average_precision)
-        ap_wakeup_average_precisions_aug.append(ap_wakeup_average_precision)
-
     onset_mAP = np.mean(ap_onset_average_precisions)
     wakeup_mAP = np.mean(ap_wakeup_average_precisions)
 
-    onset_mAP_aug = np.mean(ap_onset_average_precisions_aug)
-    wakeup_mAP_aug = np.mean(ap_wakeup_average_precisions_aug)
-
     general_mAP = (onset_mAP + wakeup_mAP) / 2
-    general_mAP_aug = (onset_mAP_aug + wakeup_mAP_aug) / 2
 
     return {"onset_mAP": onset_mAP,
             "wakeup_mAP": wakeup_mAP,
-            "general_mAP": general_mAP,
-
-            "onset_mAP_aug": onset_mAP_aug,
-            "wakeup_mAP_aug": wakeup_mAP_aug,
-            "general_mAP_aug": general_mAP_aug}
+            "general_mAP": general_mAP}
 
 def run_validation_AP(config, all_series_ids, per_series_id_events):
     regression_cfg_content = config["regression_cfg_content"]
@@ -279,13 +251,15 @@ def run_validation_AP(config, all_series_ids, per_series_id_events):
     regression_kernels = regression_cfg_content["regression_kernels"]
     regression_pruning = regression_cfg_content["pruning"]
     regression_postpruning = regression_cfg_content["postpruning"]
+    augmentation = regression_cfg_content["augmentation"]
+    augmentation_cutoff = regression_cfg_content["augmentation_cutoff"]
 
     density_results = density_cfg_content["density_results"]
 
     return validation_ap(gt_events=per_series_id_events, all_series_ids=all_series_ids,
                   selected_density_folders=density_results,
                   selected_regression_folders=regression_kernels,
-                  cutoff=0.0, augmentation_cutoff=1.0, matrix_values_pruning=False,
+                  cutoff=0.0, augmentation=augmentation, augmentation_cutoff=augmentation_cutoff, matrix_values_pruning=False,
 
                   regression_pruning=regression_pruning, regression_postpruning=regression_postpruning)
 
@@ -301,10 +275,6 @@ if __name__ == "__main__":
     out_onset_results_file = "./inference_density_combined_statistics/inference_density_grid_search_onset_results.csv"
     out_wakeup_results_file = "./inference_density_combined_statistics/inference_density_grid_search_wakeup_results.csv"
 
-    out_results_file_aug = "./inference_density_combined_statistics/inference_density_grid_search_results_aug.csv"
-    out_onset_results_file_aug = "./inference_density_combined_statistics/inference_density_grid_search_onset_results_aug.csv"
-    out_wakeup_results_file_aug = "./inference_density_combined_statistics/inference_density_grid_search_wakeup_results_aug.csv"
-
     # load files
     with open(config_file, "r") as f:
         config = json.load(f)
@@ -312,14 +282,8 @@ if __name__ == "__main__":
         existing_results = pd.read_csv(out_results_file, index_col=0)
         existing_onset_results = pd.read_csv(out_onset_results_file, index_col=0)
         existing_wakeup_results = pd.read_csv(out_wakeup_results_file, index_col=0)
-
-        existing_results_aug = pd.read_csv(out_results_file_aug, index_col=0)
-        existing_onset_results_aug = pd.read_csv(out_onset_results_file_aug, index_col=0)
-        existing_wakeup_results_aug = pd.read_csv(out_wakeup_results_file_aug, index_col=0)
     else:
         existing_results, existing_onset_results, existing_wakeup_results = None, None, None
-
-        existing_results_aug, existing_onset_results_aug, existing_wakeup_results_aug = None, None, None
 
     # convert config
     regression_names = []
@@ -351,14 +315,6 @@ if __name__ == "__main__":
         write_wakeup_matrix_mAP = np.full((len(config["regressions"]), len(config["densities"])), dtype=np.float32, fill_value=np.nan)
         write_wakeup_matrix_mAP[:len(existing_regressions), :len(existing_densities)] = existing_wakeup_results.values
 
-        write_matrix_mAP_aug = np.full((len(config["regressions"]), len(config["densities"])), dtype=np.float32, fill_value=np.nan)
-        write_matrix_mAP_aug[:len(existing_regressions), :len(existing_densities)] = existing_results_aug.values
-        write_onset_matrix_mAP_aug = np.full((len(config["regressions"]), len(config["densities"])), dtype=np.float32, fill_value=np.nan)
-        write_onset_matrix_mAP_aug[:len(existing_regressions), :len(existing_densities)] = existing_onset_results_aug.values
-        write_wakeup_matrix_mAP_aug = np.full((len(config["regressions"]), len(config["densities"])), dtype=np.float32, fill_value=np.nan)
-        write_wakeup_matrix_mAP_aug[:len(existing_regressions), :len(existing_densities)] = existing_wakeup_results_aug.values
-
-
         write_columns = existing_densities + [density_name for density_name in config["densities"] if density_name not in existing_densities] # densities
         write_rows = existing_regressions + [regression_name for regression_name in config["regressions"] if regression_name not in existing_regressions] # regressions
 
@@ -368,10 +324,6 @@ if __name__ == "__main__":
         write_matrix_mAP = np.full((len(config["regressions"]), len(config["densities"])), dtype=np.float32, fill_value=np.nan)
         write_onset_matrix_mAP = np.full((len(config["regressions"]), len(config["densities"])), dtype=np.float32, fill_value=np.nan)
         write_wakeup_matrix_mAP = np.full((len(config["regressions"]), len(config["densities"])), dtype=np.float32, fill_value=np.nan)
-
-        write_matrix_mAP_aug = np.full((len(config["regressions"]), len(config["densities"])), dtype=np.float32, fill_value=np.nan)
-        write_onset_matrix_mAP_aug = np.full((len(config["regressions"]), len(config["densities"])), dtype=np.float32, fill_value=np.nan)
-        write_wakeup_matrix_mAP_aug = np.full((len(config["regressions"]), len(config["densities"])), dtype=np.float32, fill_value=np.nan)
 
         write_columns = list(config["densities"].keys()) # densities
         write_rows = list(config["regressions"].keys()) # regressions
@@ -399,10 +351,6 @@ if __name__ == "__main__":
         write_onset_matrix_mAP[i, j] = result["onset_mAP"]
         write_wakeup_matrix_mAP[i, j] = result["wakeup_mAP"]
 
-        write_matrix_mAP_aug[i, j] = result["general_mAP_aug"]
-        write_onset_matrix_mAP_aug[i, j] = result["onset_mAP_aug"]
-        write_wakeup_matrix_mAP_aug[i, j] = result["wakeup_mAP_aug"]
-
     # write the results
     write_df = pd.DataFrame(data=write_matrix_mAP, index=write_rows, columns=write_columns)
     write_df.to_csv(out_results_file)
@@ -410,12 +358,5 @@ if __name__ == "__main__":
     write_onset_df.to_csv(out_onset_results_file)
     write_wakeup_df = pd.DataFrame(data=write_wakeup_matrix_mAP, index=write_rows, columns=write_columns)
     write_wakeup_df.to_csv(out_wakeup_results_file)
-
-    write_df_aug = pd.DataFrame(data=write_matrix_mAP_aug, index=write_rows, columns=write_columns)
-    write_df_aug.to_csv(out_results_file_aug)
-    write_onset_df_aug = pd.DataFrame(data=write_onset_matrix_mAP_aug, index=write_rows, columns=write_columns)
-    write_onset_df_aug.to_csv(out_onset_results_file_aug)
-    write_wakeup_df_aug = pd.DataFrame(data=write_wakeup_matrix_mAP_aug, index=write_rows, columns=write_columns)
-    write_wakeup_df_aug.to_csv(out_wakeup_results_file_aug)
 
     print("All done!")
