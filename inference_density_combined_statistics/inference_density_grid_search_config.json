@@ -1,5 +1,62 @@
 {
   "regressions": {
+    "All, 36 Pruning": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 36,
+      "postpruning": 0,
+      "kernel_width": 9
+    },
+    "All, 36 Pruning, 12 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 36,
+      "postpruning": 0,
+      "kernel_width": 12
+    },
+    "All, 36 Pruning, 36 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 36,
+      "postpruning": 0,
+      "kernel_width": 36
+    },
+
+    "All, 48 Pruning": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 48,
+      "postpruning": 0,
+      "kernel_width": 9
+    },
+    "All, 48 Pruning, 12 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 48,
+      "postpruning": 0,
+      "kernel_width": 12
+    },
+    "All, 48 Pruning, 36 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 48,
+      "postpruning": 0,
+      "kernel_width": 36
+    },
+
+    "All, 60 Pruning": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 60,
+      "postpruning": 0,
+      "kernel_width": 9
+    },
+    "All, 60 Pruning, 12 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 60,
+      "postpruning": 0,
+      "kernel_width": 12
+    },
+    "All, 60 Pruning, 36 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 60,
+      "postpruning": 0,
+      "kernel_width": 36
+    },
+
     "All, 72 Pruning": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
       "pruning": 72,
@@ -12,66 +69,87 @@
       "postpruning": 0,
       "kernel_width": 12
     },
-    "All, 12 Pruning, 12 Kernel": {
+    "All, 72 Pruning, 36 Kernel": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
-      "pruning": 12,
+      "pruning": 72,
       "postpruning": 0,
-      "kernel_width": 12
-    },
-    "All, 12 Pruning, 12 Kernel, 36 Postpruning": {
-      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
-      "pruning": 12,
-      "postpruning": 36,
-      "kernel_width": 12
-    },
-    "All, 12 Pruning, 12 Kernel, 48 Postpruning": {
-      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
-      "pruning": 12,
-      "postpruning": 48,
-      "kernel_width": 12
-    },
-    "All, 12 Pruning, 12 Kernel, 60 Postpruning": {
-      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
-      "pruning": 12,
-      "postpruning": 60,
-      "kernel_width": 12
-    },
-    "All, 12 Pruning, 12 Kernel, 72 Postpruning": {
-      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
-      "pruning": 12,
-      "postpruning": 72,
-      "kernel_width": 12
+      "kernel_width": 36
     },
 
-    "Std, 12 Pruning, 12 Kernel": {
-      "regression_kernels": ["Standard_5CV"],
-      "pruning": 12,
+    "All, 84 Pruning": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 84,
+      "postpruning": 0,
+      "kernel_width": 9
+    },
+    "All, 84 Pruning, 12 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 84,
       "postpruning": 0,
       "kernel_width": 12
     },
-    "Std, 12 Pruning, 12 Kernel, 36 Postpruning": {
-      "regression_kernels": ["Standard_5CV"],
-      "pruning": 12,
-      "postpruning": 36,
+    "All, 84 Pruning, 36 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 84,
+      "postpruning": 0,
+      "kernel_width": 36
+    },
+
+    "All, 96 Pruning": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 96,
+      "postpruning": 0,
+      "kernel_width": 9
+    },
+    "All, 96 Pruning, 12 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 96,
+      "postpruning": 0,
       "kernel_width": 12
     },
-    "Std, 12 Pruning, 12 Kernel, 48 Postpruning": {
-      "regression_kernels": ["Standard_5CV"],
-      "pruning": 12,
-      "postpruning": 48,
+    "All, 96 Pruning, 36 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 96,
+      "postpruning": 0,
+      "kernel_width": 36
+    },
+
+    "All, 120 Pruning": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 120,
+      "postpruning": 0,
+      "kernel_width": 9
+    },
+    "All, 120 Pruning, 12 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 120,
+      "postpruning": 0,
       "kernel_width": 12
     },
-    "Std, 12 Pruning, 12 Kernel, 60 Postpruning": {
-      "regression_kernels": ["Standard_5CV"],
-      "pruning": 12,
-      "postpruning": 60,
+    "All, 120 Pruning, 36 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 120,
+      "postpruning": 0,
+      "kernel_width": 36
+    },
+
+    "All, 180 Pruning": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 180,
+      "postpruning": 0,
+      "kernel_width": 9
+    },
+    "All, 180 Pruning, 12 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 180,
+      "postpruning": 0,
       "kernel_width": 12
     },
-    "Std, 12 Pruning, 12 Kernel, 72 Postpruning": {
-      "regression_kernels": ["Standard_5CV"],
-      "pruning": 12,
-      "postpruning": 72,
-      "kernel_width": 12
+    "All, 180 Pruning, 36 Kernel": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 180,
+      "postpruning": 0,
+      "kernel_width": 36
     }
   },
   "densities": {
@@ -83,6 +161,9 @@
     },
     "3L ENMO": {
       "density_results": ["event5fold_enmo_density_3length_8stride"]
+    },
+    "3L Combo": {
+      "density_results": ["event5fold_density_3length_8stride", "event5fold_enmo_density_3length_8stride"]
     },
     "ALL": {
       "density_results": ["event5fold_density_3length_8stride", "event5fold_density_time_2length_8stride", "event5fold_enmo_density_3length_8stride"]
@@ -97,6 +178,9 @@
     "3L ENMO Best": {
       "density_results": ["event5fold_enmo_density_3length_best_8stride"]
     },
+    "3L Combo Best": {
+      "density_results": ["event5fold_density_3length_best_8stride", "event5fold_enmo_density_3length_best_8stride"]
+    },
     "ALL Best": {
       "density_results": ["event5fold_density_3length_best_8stride", "event5fold_density_time_2length_best_8stride", "event5fold_enmo_density_3length_best_8stride"]
     },
@@ -110,6 +194,9 @@
     "3L ENMO Bdfix": {
       "density_results": ["event5fold_enmo_density_3length_8stride_bdfix"]
     },
+    "3L Combo Bdfix": {
+      "density_results": ["event5fold_density_3length_8stride_bdfix", "event5fold_enmo_density_3length_8stride_bdfix"]
+    },
     "ALL Bdfix": {
       "density_results": ["event5fold_density_3length_8stride_bdfix", "event5fold_density_time_2length_8stride_bdfix", "event5fold_enmo_density_3length_8stride_bdfix"]
     },
@@ -122,6 +209,9 @@
     },
     "3L Bdfix ENMO Best": {
       "density_results": ["event5fold_enmo_density_3length_best_8stride_bdfix"]
+    },
+    "3L Bdfix Combo Best": {
+      "density_results": ["event5fold_density_3length_best_8stride_bdfix", "event5fold_enmo_density_3length_best_8stride_bdfix"]
     },
     "ALL Bdfix Best": {
       "density_results": ["event5fold_density_3length_best_8stride_bdfix", "event5fold_density_time_2length_best_8stride_bdfix", "event5fold_enmo_density_3length_best_8stride_bdfix"]
