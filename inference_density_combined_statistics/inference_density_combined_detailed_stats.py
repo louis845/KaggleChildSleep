@@ -31,9 +31,6 @@ def plot_single_precision_recall_curve(ax, precisions, recalls, ap, proba, title
     ax.text(0.5, 0.5, "AP: {:.4f}".format(ap), horizontalalignment="center", verticalalignment="center")
 
 validation_AP_tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30][::-1]
-regression_labels_folders = [os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV", "gaussian_kernel9"),
-                             os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV_Mid", "gaussian_kernel9"),
-                             os.path.join("./inference_regression_statistics", "regression_labels", "Standard_5CV_Wide", "gaussian_kernel9")]
 
 def get_regression_preds_locs(selected_regression_folders: list[str], series_id: str, alignment=True):
     # regression settings

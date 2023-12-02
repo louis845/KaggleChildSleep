@@ -13,7 +13,7 @@ def find_closest(Z: np.ndarray, x: np.ndarray):
     i[mask] -= 1
     return i
 
-def prune(event_locs, event_vals, pruning_radius):
+def prune(event_locs, event_vals, pruning_radius, return_idx=False): # if return_idx, return a boolean array with the same length as event_locs
     # assumes the indices (event_locs) are sorted
     # event locs same length as event vals, prunes event locs according to radius
     descending_order = np.argsort(event_vals)[::-1]
@@ -26,6 +26,9 @@ def prune(event_locs, event_vals, pruning_radius):
             if right_idx - left_idx > 1:
                 keeps[left_idx:right_idx] = False
                 keeps[descending_order[k]] = True
+
+    if return_idx:
+        return keeps
     return event_locs[keeps]
 
 def prune_relative(reference_event_locs, event_locs, pruning_radius=60):
@@ -201,7 +204,7 @@ def index_probas_distance_based(locs, pred_probas, proba_threshold: float, dropo
 def compute_first_zero(series_secs):
     return np.argwhere(series_secs == 0).flatten()[0]
 
-def align_predictions(preds_locs, preds_local_kernel, first_zero):
+def align_predictions(preds_locs, preds_local_kernel, first_zero, return_sorted=True):
     align_mod6 = (first_zero + 3) % 6
 
     # align predictions
@@ -229,7 +232,10 @@ def align_predictions(preds_locs, preds_local_kernel, first_zero):
         preds_locs[increase_locs2] = increase_preds_locs[increase_locs2]
         preds_locs[decrease_locs2] = decrease_preds_locs[decrease_locs2]
 
-    return np.unique(preds_locs)
+    if return_sorted:
+        return np.unique(preds_locs)
+    else:
+        return preds_locs
 
 def augment_left_right(preds_locs, preds_probas, preds_local_kernel):
     preds_left = preds_locs - 12
