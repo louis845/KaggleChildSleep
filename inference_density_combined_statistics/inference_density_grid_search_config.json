@@ -16,21 +16,13 @@
       "augmentation": true,
       "augmentation_cutoff": 1.0
     },
-    "All, 72 Pruning, 12 Kernel, 0.25 Augmentation": {
+    "All, 72 Pruning, 12 Kernel, 0.875 Augmentation": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
       "pruning": 72,
       "postpruning": 0,
       "kernel_width": 12,
       "augmentation": true,
-      "augmentation_cutoff": 0.25
-    },
-    "All, 72 Pruning, 12 Kernel, 0.5 Augmentation": {
-      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
-      "pruning": 72,
-      "postpruning": 0,
-      "kernel_width": 12,
-      "augmentation": true,
-      "augmentation_cutoff": 0.5
+      "augmentation_cutoff": 0.875
     },
     "All, 72 Pruning, 12 Kernel, 0.75 Augmentation": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
@@ -40,37 +32,53 @@
       "augmentation": true,
       "augmentation_cutoff": 0.75
     },
-    "All, 72 Pruning, 12 Kernel, 1.25 Augmentation": {
+    "All, 72 Pruning, 12 Kernel, 0.625 Augmentation": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
       "pruning": 72,
       "postpruning": 0,
       "kernel_width": 12,
       "augmentation": true,
-      "augmentation_cutoff": 1.25
+      "augmentation_cutoff": 0.625
     },
-    "All, 72 Pruning, 12 Kernel, 1.5 Augmentation": {
+    "All, 72 Pruning, 12 Kernel, 0.5 Augmentation": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
       "pruning": 72,
       "postpruning": 0,
       "kernel_width": 12,
       "augmentation": true,
-      "augmentation_cutoff": 1.5
+      "augmentation_cutoff": 0.5
     },
-    "All, 72 Pruning, 12 Kernel, 1.75 Augmentation": {
+    "All, 72 Pruning, 12 Kernel, 0.375 Augmentation": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
       "pruning": 72,
       "postpruning": 0,
       "kernel_width": 12,
       "augmentation": true,
-      "augmentation_cutoff": 1.75
+      "augmentation_cutoff": 0.375
     },
-    "All, 72 Pruning, 12 Kernel, 2.0 Augmentation": {
+    "All, 72 Pruning, 12 Kernel, 0.25 Augmentation": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
       "pruning": 72,
       "postpruning": 0,
       "kernel_width": 12,
       "augmentation": true,
-      "augmentation_cutoff": 2.0
+      "augmentation_cutoff": 0.25
+    },
+    "All, 72 Pruning, 12 Kernel, 0.125 Augmentation": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 72,
+      "postpruning": 0,
+      "kernel_width": 12,
+      "augmentation": true,
+      "augmentation_cutoff": 0.125
+    },
+    "All, 72 Pruning, 12 Kernel, 0.0 Augmentation": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 72,
+      "postpruning": 0,
+      "kernel_width": 12,
+      "augmentation": true,
+      "augmentation_cutoff": 0.0
     }
   },
   "densities": {
