@@ -199,15 +199,8 @@ class MainWidget(QWidget):
         self.selection_slider.setMaximum(len(self.preloaded_intervals) - 1)
 
         # Set fixed width height
-        min_anglez, max_anglez = anglez.min() / 35.52, anglez.max() / 35.52
-        min_y = min_anglez
-        max_y = max_anglez
-        length = max_y - min_y
-        min_y -= length * 0.1
-        max_y += length * 0.1
-
-        self.display_widget.min_y = min_y
-        self.display_widget.max_y = max_y
+        self.display_widget.min_y = -5
+        self.display_widget.max_y = 20
 
         # Set fixed height for matrix profile
         min_y = matrix_profile.min()
@@ -220,8 +213,8 @@ class MainWidget(QWidget):
         self.profile_widget.max_y = max_y
 
         # Set fixed height for discrepancy
-        min_y = matrix_profile2.min()
-        max_y = matrix_profile2.max()
+        min_y = enmo.min()
+        max_y = enmo.max()
         length = max_y - min_y
         min_y -= length * 0.1
         max_y += length * 0.1
