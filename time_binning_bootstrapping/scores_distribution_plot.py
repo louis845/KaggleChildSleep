@@ -204,17 +204,33 @@ if __name__ == "__main__":
 
         out_numpy_file = os.path.join(output_folder, "probas_{}.npy".format(entry_name_formatted))
         out_distribution_file = os.path.join(output_folder, "distribution_{}.png".format(entry_name_formatted))
+        out_trunc_distribution_file = os.path.join(output_folder, "trunc_distribution_{}.png".format(entry_name_formatted))
 
         np.save(out_numpy_file, scores_distribution)
+
         percentiles = np.linspace(0, 100, num=101)
         percentile_values = np.percentile(scores_distribution, percentiles)
-
         plt.figure(figsize=(16, 12))
         plt.plot(percentiles, percentile_values, marker=".", linestyle="-")
         plt.xlabel("Percentiles")
         plt.ylabel("Value")
         plt.title("Cumulative Distribution Plot")
         plt.xlim(0, 100)
+        plt.ylim(0, 70)
+        plt.yticks(np.arange(0, 70, 2))
         plt.savefig(out_distribution_file)
+        plt.close()
+
+        percentile_values = np.percentile(scores_distribution[scores_distribution > 0.1], percentiles)
+        plt.figure(figsize=(16, 12))
+        plt.plot(percentiles, percentile_values, marker=".", linestyle="-")
+        plt.xlabel("Percentiles")
+        plt.ylabel("Value (Truncated)")
+        plt.title("Cumulative Distribution Plot")
+        plt.xlim(0, 100)
+        plt.ylim(0, 70)
+        plt.yticks(np.arange(0, 70, 2))
+        plt.savefig(out_trunc_distribution_file)
+        plt.close()
 
     print("All done!")
