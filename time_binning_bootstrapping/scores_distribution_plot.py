@@ -159,7 +159,7 @@ if __name__ == "__main__":
     all_series_ids = [filename.split(".")[0] for filename in os.listdir("./individual_train_series")]
 
     # file locations
-    config_file = "./time_binning_bootstrapping/time_bootstrapping_config.json"
+    config_file = "./time_binning_bootstrapping/scores_distribution_config.json"
     output_folder = "./time_binning_bootstrapping/scores_distribution"
     if os.path.isdir(output_folder):
         shutil.rmtree(output_folder)
