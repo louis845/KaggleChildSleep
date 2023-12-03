@@ -1,0 +1,9 @@
+{
+  "regressions": {
+    "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+    "pruning": 72,
+    "postpruning": 0,
+    "kernel_width": 12
+  },
+  "densities": ["event5fold_density_3length_best_8stride_bdfix", "event5fold_density_time_2length_best_8stride_bdfix", "event5fold_enmo_density_3length_best_8stride_bdfix"]
+}
