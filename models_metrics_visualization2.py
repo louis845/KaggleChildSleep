@@ -2,10 +2,10 @@ import sys
 import os
 
 import pandas as pd
+import numpy as np
 from PySide2.QtWidgets import (QWidget, QVBoxLayout, QComboBox, QTableWidget,
                                QTableWidgetItem, QHeaderView, QScrollArea, QApplication, QMainWindow, QHBoxLayout)
 from PySide2.QtCore import Qt
-from PySide2.QtGui import QPalette, QColor
 
 
 class ModelMetricsVisualizerWidget(QWidget):
@@ -46,8 +46,13 @@ class ModelMetricsVisualizerWidget(QWidget):
         model = self.model_selector.currentText()
         if model:
             try:
-                file_path = f"./models/{model}/val_metrics.csv"
-                self.loaded_metrics = pd.read_csv(file_path, index_col=0)
+                file_path = "./models/{}/val_metrics.csv".format(model)
+                loaded_metrics = pd.read_csv(file_path, index_col=0)
+                loaded_metrics["epoch"] = np.arange(1, loaded_metrics.shape[0] + 1)
+                loaded_metrics = loaded_metrics[["epoch", "val_loss", "val_class_loss", "val_entropy_loss",
+                                                 "val_class_metric_tpr", "val_class_metric_fpr",
+                                                 "val_onset_dense_loc_softmax_mAP", "val_wakeup_dense_loc_softmax_mAP"]]
+                self.loaded_metrics = loaded_metrics
                 self.update_metrics_table(self.loaded_metrics)
             except Exception as e:
                 print(f"An error occurred while loading metrics: {e}")
