@@ -126,6 +126,9 @@
     "3L Combo Bdfix": {
       "density_results": ["event5fold_density_3length_8stride_bdfix", "event5fold_enmo_density_3length_8stride_bdfix"]
     },
+    "3L T2L Bdfix": {
+      "density_results": ["event5fold_density_3length_8stride_bdfix", "event5fold_density_time_2length_8stride_bdfix"]
+    },
     "ALL Bdfix": {
       "density_results": ["event5fold_density_3length_8stride_bdfix", "event5fold_density_time_2length_8stride_bdfix", "event5fold_enmo_density_3length_8stride_bdfix"]
     },
@@ -141,6 +144,9 @@
     },
     "3L Bdfix Combo Best": {
       "density_results": ["event5fold_density_3length_best_8stride_bdfix", "event5fold_enmo_density_3length_best_8stride_bdfix"]
+    },
+    "3L T2L Bdfix Best": {
+      "density_results": ["event5fold_density_3length_best_8stride_bdfix", "event5fold_density_time_2length_best_8stride_bdfix"]
     },
     "ALL Bdfix Best": {
       "density_results": ["event5fold_density_3length_best_8stride_bdfix", "event5fold_density_time_2length_best_8stride_bdfix", "event5fold_enmo_density_3length_best_8stride_bdfix"]
