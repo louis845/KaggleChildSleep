@@ -256,7 +256,7 @@ def load_file(item):
     extras["onset_locs"] = np.load("./inference_regression_statistics/regression_preds_dense/{}_onset_locs.npy".format(item))
     extras["wakeup_locs"] = np.load("./inference_regression_statistics/regression_preds_dense/{}_wakeup_locs.npy".format(item))
 
-    confidence_pred_folder = "./inference_density_statistics/density_labels/event5fold_density_3length"
+    confidence_pred_folder = "./inference_density_statistics/density_labels/event5fold_density_time_2length_8stride_bdfix"
     probas = np.load(os.path.join(confidence_pred_folder, "{}/probas.npy".format(item)))
     extras["onset_IOU_conf"] = probas[0, :]
     extras["wakeup_IOU_conf"] = probas[1, :]

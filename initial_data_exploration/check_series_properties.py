@@ -16,6 +16,7 @@ if __name__ == "__main__":
 
     print("Max length: {}".format(np.max(lengths)))
     print("Min length: {}".format(np.min(lengths)))
+    print("Median length: {}".format(np.median(lengths)))
     print("Mean length: {}".format(np.mean(lengths)))
 
     all_series_info = pd.read_parquet(os.path.join("../data", "train_series.parquet"))
