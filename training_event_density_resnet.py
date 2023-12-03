@@ -696,7 +696,7 @@ if __name__ == "__main__":
     # create SWA if necessary
     if use_swa:
         swa_model = torch.optim.swa_utils.AveragedModel(model)
-        swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, swa_lr=5 * learning_rate, anneal_strategy="linear", anneal_epochs=5)
+        swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, swa_lr=4 * learning_rate, anneal_strategy="linear", anneal_epochs=10)
         swa_start = args.swa_start
 
     model_config = {
@@ -797,6 +797,9 @@ if __name__ == "__main__":
     memory_logger = logging_memory_utils.obtain_memory_logger(model_dir)
 
     try:
+        if swa_start == -1:
+            swa_model.update_parameters(model)
+
         for epoch in range(epochs):
             memory_logger.log("Epoch {}".format(epoch))
             print("------------------------------------ Epoch {} ------------------------------------".format(epoch))
