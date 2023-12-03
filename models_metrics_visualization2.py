@@ -40,10 +40,7 @@ class ModelMetricsVisualizerWidget(QWidget):
         self.set_etched_border()
 
     def set_etched_border(self):
-        palette = QPalette()
-        palette.setColor(QPalette.Window, QColor('white'))
-        self.setPalette(palette)
-        self.setFrameStyle(QWidget.Box | QWidget.Plain)
+        self.setStyleSheet("QWidget { border: 2px groove gray; }")
 
     def load_metrics(self):
         model = self.model_selector.currentText()
@@ -64,7 +61,8 @@ class ModelMetricsVisualizerWidget(QWidget):
         for row in range(table.shape[0]):
             for col in range(table.shape[1]):
                 value = table.iloc[row, col]
-                self.table_widget.setItem(row, col, QTableWidgetItem(str(value)))
+                formatted_value = "{:.5g}".format(value) if isinstance(value, float) else str(value)
+                self.table_widget.setItem(row, col, QTableWidgetItem(formatted_value))
 
         # Hide index column
         self.table_widget.verticalHeader().setVisible(False)
@@ -125,5 +123,11 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     visualizer = ModelMetricsVisualizer(models, 3)
+    visualizer.resize(1080, 720)
     visualizer.show()
+    visualizer.raise_()
+    visualizer.activateWindow()
+    screens = app.screens()[0]
+    screen_geometry = screens.geometry()
+    visualizer.move((screen_geometry.width() - visualizer.width()) / 2, (screen_geometry.height() - visualizer.height()) / 2)
     sys.exit(app.exec_())
