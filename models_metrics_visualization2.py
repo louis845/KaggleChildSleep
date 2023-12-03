@@ -49,9 +49,13 @@ class ModelMetricsVisualizerWidget(QWidget):
                 file_path = "./models/{}/val_metrics.csv".format(model)
                 loaded_metrics = pd.read_csv(file_path, index_col=0)
                 loaded_metrics["epoch"] = np.arange(1, loaded_metrics.shape[0] + 1)
-                loaded_metrics = loaded_metrics[["epoch", "val_loss", "val_class_loss", "val_entropy_loss",
-                                                 "val_class_metric_tpr", "val_class_metric_fpr",
-                                                 "val_onset_dense_loc_softmax_mAP", "val_wakeup_dense_loc_softmax_mAP"]]
+                loaded_metrics["val_mAP"] = (loaded_metrics["val_onset_dense_loc_softmax_mAP"] +
+                                                loaded_metrics["val_wakeup_dense_loc_softmax_mAP"]) / 2
+                loaded_metrics = loaded_metrics[["epoch", "val_mAP",
+                                                 "val_onset_dense_loc_softmax_mAP", "val_wakeup_dense_loc_softmax_mAP",
+                                                 "val_loss", "val_class_loss", "val_entropy_loss",
+                                                 "val_class_metric_tpr", "val_class_metric_fpr"]]
+                loaded_metrics = loaded_metrics.sort_values(by=["val_mAP"], ascending=False)
                 self.loaded_metrics = loaded_metrics
                 self.update_metrics_table(self.loaded_metrics)
             except Exception as e:
@@ -125,9 +129,10 @@ if __name__ == "__main__":
     models = [model for model in os.listdir("./models") if
                 (os.path.isdir(os.path.join("./models", model)) and ("density" in model or "event10fold" in model))
              ]
+    models.sort()
 
     app = QApplication(sys.argv)
-    visualizer = ModelMetricsVisualizer(models, 3)
+    visualizer = ModelMetricsVisualizer(models, 2)
     visualizer.resize(1080, 720)
     visualizer.show()
     visualizer.raise_()
