@@ -1,4 +1,3 @@
-import shutil
 import sys
 import os
 import json
@@ -8,7 +7,6 @@ import numpy as np
 import h5py
 import pandas as pd
 import tqdm
-import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 
 import postprocessing
@@ -98,16 +96,31 @@ def event_density_file_logit_iterator(selected_density_folder, series_id) -> Ite
             "interval_event_presence": interval_event_presence
         }
 
-def get_scores(all_series_ids,
-              selected_density_folders: list[str], selected_regression_folders: list[str],
+def validation_ap(gt_events, all_series_ids,
+                  selected_density_folders: list[str], selected_regression_folders: list[str],
+                  cutoff,
 
-              regression_pruning):
+                  regression_pruning,
+
+                  exclude_bad_segmentations: bool=True):
     selected_series_ids = all_series_ids
 
-    combined_onset_probas = []
-    combined_wakeup_probas = []
+    ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+    ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
 
+    cutoff_onset_values = 0
+    cutoff_wakeup_values = 0
+    total_onset_values = 0
+    total_wakeup_values = 0
+
+    idx_to_series_ids = []
+    global_preds_locs_onsets, global_preds_probas_onsets = [], []
+    global_preds_locs_wakeups, global_preds_probas_wakeups = [], []
     for series_id in selected_series_ids:
+        if exclude_bad_segmentations and series_id in bad_series_list.noisy_bad_segmentations:
+            continue
+        idx_to_series_ids.append(series_id)
+
         # compute the regression predictions
         preds_locs_onset, preds_locs_wakeup, onset_kernel_vals, wakeup_kernel_vals = get_regression_preds_locs(selected_regression_folders, series_id,
                                                                                                                alignment=False, pruning=regression_pruning)
@@ -134,36 +147,100 @@ def get_scores(all_series_ids,
         onset_locs_all_probas /= len(selected_density_folders)
         wakeup_locs_all_probas /= len(selected_density_folders)
 
-        combined_onset_probas.append(onset_locs_all_probas)
-        combined_wakeup_probas.append(wakeup_locs_all_probas)
+        # prune using cutoff. also compute cutoff stats
+        total_onset_values += len(preds_locs_onset)
+        total_wakeup_values += len(preds_locs_wakeup)
+        if cutoff > 0:
+            cutoff_onset_values += np.sum(onset_locs_all_probas > cutoff)
+            cutoff_wakeup_values += np.sum(wakeup_locs_all_probas > cutoff)
 
-    return np.concatenate(combined_onset_probas + combined_wakeup_probas, axis=0)
+            preds_locs_onset = preds_locs_onset[onset_locs_all_probas > cutoff]
+            onset_locs_all_probas = onset_locs_all_probas[onset_locs_all_probas > cutoff]
+            preds_locs_wakeup = preds_locs_wakeup[wakeup_locs_all_probas > cutoff]
+            wakeup_locs_all_probas = wakeup_locs_all_probas[wakeup_locs_all_probas > cutoff]
+
+        # align
+        seconds_values = np.load("./data_naive/{}/secs.npy".format(series_id))
+        first_zero = postprocessing.compute_first_zero(seconds_values)
+        if len(preds_locs_onset) > 0:
+            preds_locs_onset = postprocessing.align_predictions(preds_locs_onset, onset_kernel_vals, first_zero=first_zero,
+                                                                return_sorted=False)
+            if not np.all(preds_locs_onset[1:] >= preds_locs_onset[:-1]):
+                idxsort = np.argsort(preds_locs_onset)
+                preds_locs_onset = preds_locs_onset[idxsort]
+                onset_locs_all_probas = onset_locs_all_probas[idxsort]
+        if len(preds_locs_wakeup) > 0:
+            preds_locs_wakeup = postprocessing.align_predictions(preds_locs_wakeup, wakeup_kernel_vals, first_zero=first_zero,
+                                                                 return_sorted=False)
+            if not np.all(preds_locs_wakeup[1:] >= preds_locs_wakeup[:-1]):
+                idxsort = np.argsort(preds_locs_wakeup)
+                preds_locs_wakeup = preds_locs_wakeup[idxsort]
+                wakeup_locs_all_probas = wakeup_locs_all_probas[idxsort]
+
+        # get the ground truth
+        gt_onset_locs = gt_events[series_id]["onset"]
+        gt_wakeup_locs = gt_events[series_id]["wakeup"]
+
+        # exclude end if excluding bad segmentations
+        if exclude_bad_segmentations and series_id in bad_series_list.bad_segmentations_tail:
+            if len(gt_onset_locs) > 0 and len(gt_wakeup_locs) > 0:
+                last = gt_wakeup_locs[-1] + 8640
+
+                onset_cutoff = np.searchsorted(preds_locs_onset, last, side="right")
+                wakeup_cutoff = np.searchsorted(preds_locs_wakeup, last, side="right")
+                preds_locs_onset = preds_locs_onset[:onset_cutoff]
+                preds_locs_wakeup = preds_locs_wakeup[:wakeup_cutoff]
+                onset_locs_all_probas = onset_locs_all_probas[:onset_cutoff]
+                wakeup_locs_all_probas = wakeup_locs_all_probas[:wakeup_cutoff]
 
 
-def run_score_convert(config, all_series_ids):
+
+        # add info
+        for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+            ap_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_locs_all_probas, gt_locs=gt_onset_locs)
+            ap_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_locs_all_probas, gt_locs=gt_wakeup_locs)
+
+    # compute average precision
+    ap_onset_average_precisions, ap_wakeup_average_precisions = [], []
+    for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+        ap_onset_precision, ap_onset_recall, ap_onset_average_precision, ap_onset_proba = ap_onset_metric.get()
+        ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision, ap_wakeup_proba = ap_wakeup_metric.get()
+        ap_onset_average_precisions.append(ap_onset_average_precision)
+        ap_wakeup_average_precisions.append(ap_wakeup_average_precision)
+
+    onset_mAP = np.mean(ap_onset_average_precisions)
+    wakeup_mAP = np.mean(ap_wakeup_average_precisions)
+
+    general_mAP = (onset_mAP + wakeup_mAP) / 2
+
+    return {"onset_mAP": onset_mAP,
+            "wakeup_mAP": wakeup_mAP,
+            "general_mAP": general_mAP}
+
+def run_validation_AP(config, all_series_ids, per_series_id_events):
     regression_cfg_content = config["regression_cfg_content"]
-    density_cfg_content = config["density_cfg_content"]
 
     regression_kernels = regression_cfg_content["regression_kernels"]
     regression_pruning = regression_cfg_content["pruning"]
 
-    density_results = density_cfg_content["density_results"]
+    density_results = config["density_results"]
 
-    return get_scores(all_series_ids=all_series_ids,
+    return validation_ap(gt_events=per_series_id_events, all_series_ids=all_series_ids,
                   selected_density_folders=density_results,
                   selected_regression_folders=regression_kernels,
+                  cutoff=0.0,
+
                   regression_pruning=regression_pruning)
 
 if __name__ == "__main__":
     # load gt values and list of series ids
     all_series_ids = [filename.split(".")[0] for filename in os.listdir("./individual_train_series")]
+    per_series_id_events = convert_to_seriesid_events.get_events_per_seriesid()
+
 
     # file locations
-    config_file = "./time_binning_bootstrapping/scores_distribution_config.json"
-    output_folder = "./time_binning_bootstrapping/scores_distribution"
-    if os.path.isdir(output_folder):
-        shutil.rmtree(output_folder)
-    os.mkdir(output_folder)
+    config_file = "./time_binning_bootstrapping/time_bootstrapping_config.json"
+    output_file = "./time_binning_bootstrapping/bootstrap_result.csv"
 
     # load files
     with open(config_file, "r") as f:
@@ -178,59 +255,19 @@ if __name__ == "__main__":
         regression_kernel_list[k] = convert_to_regression_folder(regression_kernel_list[k], kernel_width=regression_kernel_width,
                                                                  kernel_shape="gaussian")
 
-    for entry_name in config["densities"]:
-        entry = config["densities"][entry_name]
-        density_list = entry["density_results"]
-        for k in range(len(density_list)):
-            density_list[k] = convert_to_density_folder(density_list[k])
+    density_list = config["densities"]
+    for k in range(len(density_list)):
+        density_list[k] = convert_to_density_folder(density_list[k])
 
-    # generate general config
-    run_configs = []
-    for entry_name in config["densities"]:
-        cfg = {
-            "regression_cfg_content": config["regressions"],
-            "density_cfg_content": config["densities"][entry_name]
-        }
-        run_configs.append(cfg)
+    cfg = {
+        "regression_cfg_content": config["regressions"],
+        "density_results": config["densities"]
+    }
 
-    # get scores now
-    tasks = [delayed(run_score_convert)(entry, all_series_ids) for entry in run_configs]
+    # generate the values
+    for k in [10, 15, 20, 35, 40, 45, 50, 60, 70]:
+        pass
+    tasks = [delayed(run_validation_AP)(entry, all_series_ids, per_series_id_events) for entry in write_entries]
     results = Parallel(n_jobs=10, verbose=50)(tasks)
-
-    # save the score to output folder
-    for i, entry_name in tqdm.tqdm(enumerate(config["densities"])):
-        entry_name_formatted = entry_name.replace(" ", "_")
-        scores_distribution = results[i]
-
-        out_numpy_file = os.path.join(output_folder, "probas_{}.npy".format(entry_name_formatted))
-        out_distribution_file = os.path.join(output_folder, "distribution_{}.png".format(entry_name_formatted))
-        out_trunc_distribution_file = os.path.join(output_folder, "trunc_distribution_{}.png".format(entry_name_formatted))
-
-        np.save(out_numpy_file, scores_distribution)
-
-        percentiles = np.linspace(0, 100, num=101)
-        percentile_values = np.percentile(scores_distribution, percentiles)
-        plt.figure(figsize=(16, 12))
-        plt.plot(percentiles, percentile_values, marker=".", linestyle="-")
-        plt.xlabel("Percentiles")
-        plt.ylabel("Value")
-        plt.title("Cumulative Distribution Plot")
-        plt.xlim(0, 100)
-        plt.ylim(0, 70)
-        plt.yticks(np.arange(0, 70, 2))
-        plt.savefig(out_distribution_file)
-        plt.close()
-
-        percentile_values = np.percentile(scores_distribution[scores_distribution > 0.1], percentiles)
-        plt.figure(figsize=(16, 12))
-        plt.plot(percentiles, percentile_values, marker=".", linestyle="-")
-        plt.xlabel("Percentiles")
-        plt.ylabel("Value (Truncated)")
-        plt.title("Cumulative Distribution Plot")
-        plt.xlim(0, 100)
-        plt.ylim(0, 70)
-        plt.yticks(np.arange(0, 70, 2))
-        plt.savefig(out_trunc_distribution_file)
-        plt.close()
 
     print("All done!")
