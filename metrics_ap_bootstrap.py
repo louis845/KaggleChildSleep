@@ -157,9 +157,6 @@ class EventMetricsBootstrap:
 
         return matches, probas
 
-    def write_to_dict(self, x: dict):
-        x[self.name] = self.get()
-
     def reset(self):
         self.matches.clear()
         self.probas.clear()
