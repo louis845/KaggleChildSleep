@@ -89,6 +89,28 @@ def get_upper_bound(matches, probas, cutoffs):
             matches2[high_idx - num_matches:high_idx] = True
     return matches2[::-1], probas2[::-1]
 
+def get_mean(matches, probas, cutoffs):
+    assert np.all(cutoffs[1:] > cutoffs[:-1]), "cutoffs must be strictly increasing"
+
+    matches2 = matches[::-1].copy()  # increasing order by probas
+    probas2 = probas[::-1].copy()
+    for k in range(len(cutoffs) - 1):
+        cutlow, cuthigh = cutoffs[k], cutoffs[k + 1]
+        low_idx, high_idx = np.searchsorted(probas2, [cutlow, cuthigh],
+                                            side="left")  # find the indices between [cutlow, cuthigh)
+        if low_idx + 1 < high_idx:
+            low_proba_val = probas2[low_idx]
+            high_proba_val = probas2[high_idx - 1]
+            proba_diff = high_proba_val - low_proba_val
+            low_proba_val += proba_diff * 0.1
+            high_proba_val -= proba_diff * 0.1
+            num_matches = np.sum(matches2[low_idx:high_idx])
+
+            probas2[low_idx:high_idx] = np.linspace(low_proba_val, high_proba_val, high_idx - low_idx)
+            matches2[low_idx:high_idx] = False
+            matches2[high_idx - num_matches:high_idx] = True
+    return matches2[::-1], probas2[::-1]
+
 def get_single_bootstrap(series_ids: np.ndarray, series_locs: np.ndarray, series_probas: np.ndarray, cutoffs: np.ndarray):
     idxsort = np.argsort(series_probas)
     series_ids = series_ids[idxsort]
