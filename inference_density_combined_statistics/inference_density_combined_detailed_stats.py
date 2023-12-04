@@ -408,7 +408,7 @@ class MainWindow(QMainWindow):
                 if os.path.isdir(os.path.join(folder, "{}_kernel".format(selected_kernel_shape))):
                     folder = os.path.join(folder, "{}_kernel".format(selected_kernel_shape))
                 else:
-                    folder = os.path.join(folder, "{}_kernel9".format(selected_kernel_shape))
+                    folder = os.path.join(folder, "{}_kernel12".format(selected_kernel_shape))
                 assert os.path.isdir(folder)
                 selected_regression_folders.append(folder)
 
