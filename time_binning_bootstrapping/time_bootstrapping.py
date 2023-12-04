@@ -1,3 +1,4 @@
+import shutil
 import sys
 import os
 import json
@@ -7,11 +8,13 @@ import numpy as np
 import h5py
 import pandas as pd
 import tqdm
+import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 
+import convert_to_seriesid_events
 import postprocessing
 import metrics_ap
-import convert_to_seriesid_events
+import metrics_ap_bootstrap
 import model_event_density_unet
 import bad_series_list
 
@@ -96,17 +99,14 @@ def event_density_file_logit_iterator(selected_density_folder, series_id) -> Ite
             "interval_event_presence": interval_event_presence
         }
 
-def validation_ap(gt_events, all_series_ids,
+def validation_ap_bootstrap(gt_events, all_series_ids,
                   selected_density_folders: list[str], selected_regression_folders: list[str],
-                  cutoff,
+                  cutoff, regression_pruning,
 
-                  regression_pruning,
+                  binning_cutoffs: np.ndarray, num_bootstraps: int,
 
                   exclude_bad_segmentations: bool=True):
     selected_series_ids = all_series_ids
-
-    ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
-    ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
 
     cutoff_onset_values = 0
     cutoff_wakeup_values = 0
@@ -114,11 +114,15 @@ def validation_ap(gt_events, all_series_ids,
     total_wakeup_values = 0
 
     idx_to_series_ids = []
-    global_preds_locs_onsets, global_preds_probas_onsets = [], []
-    global_preds_locs_wakeups, global_preds_probas_wakeups = [], []
+    series_ids_to_idx = {}
+
+    all_onset_series_ids_idxs, all_wakeup_series_ids_idxs = [], []
+    all_onset_series_locs, all_wakeup_series_locs = [], []
+    all_onset_series_probas, all_wakeup_series_probas = [], []
     for series_id in selected_series_ids:
         if exclude_bad_segmentations and series_id in bad_series_list.noisy_bad_segmentations:
             continue
+        series_ids_to_idx[series_id] = len(idx_to_series_ids)
         idx_to_series_ids.append(series_id)
 
         # compute the regression predictions
@@ -193,54 +197,124 @@ def validation_ap(gt_events, all_series_ids,
                 onset_locs_all_probas = onset_locs_all_probas[:onset_cutoff]
                 wakeup_locs_all_probas = wakeup_locs_all_probas[:wakeup_cutoff]
 
-
-
         # add info
-        for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
-            ap_onset_metric.add(pred_locs=preds_locs_onset, pred_probas=onset_locs_all_probas, gt_locs=gt_onset_locs)
-            ap_wakeup_metric.add(pred_locs=preds_locs_wakeup, pred_probas=wakeup_locs_all_probas, gt_locs=gt_wakeup_locs)
+        all_onset_series_locs.append(preds_locs_onset)
+        all_onset_series_probas.append(onset_locs_all_probas)
+        all_onset_series_ids_idxs.append(np.full(len(preds_locs_onset), fill_value=series_ids_to_idx[series_id], dtype=np.int32))
 
-    # compute average precision
-    ap_onset_average_precisions, ap_wakeup_average_precisions = [], []
-    for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
-        ap_onset_precision, ap_onset_recall, ap_onset_average_precision, ap_onset_proba = ap_onset_metric.get()
-        ap_wakeup_precision, ap_wakeup_recall, ap_wakeup_average_precision, ap_wakeup_proba = ap_wakeup_metric.get()
-        ap_onset_average_precisions.append(ap_onset_average_precision)
-        ap_wakeup_average_precisions.append(ap_wakeup_average_precision)
+        all_wakeup_series_locs.append(preds_locs_wakeup)
+        all_wakeup_series_probas.append(wakeup_locs_all_probas)
+        all_wakeup_series_ids_idxs.append(np.full(len(preds_locs_wakeup), fill_value=series_ids_to_idx[series_id], dtype=np.int32))
 
-    onset_mAP = np.mean(ap_onset_average_precisions)
-    wakeup_mAP = np.mean(ap_wakeup_average_precisions)
+    # concatenate
+    all_onset_series_locs = np.concatenate(all_onset_series_locs, axis=0)
+    all_onset_series_probas = np.concatenate(all_onset_series_probas, axis=0)
+    all_onset_series_ids_idxs = np.concatenate(all_onset_series_ids_idxs, axis=0)
 
-    general_mAP = (onset_mAP + wakeup_mAP) / 2
+    all_wakeup_series_locs = np.concatenate(all_wakeup_series_locs, axis=0)
+    all_wakeup_series_probas = np.concatenate(all_wakeup_series_probas, axis=0)
+    all_wakeup_series_ids_idxs = np.concatenate(all_wakeup_series_ids_idxs, axis=0)
 
-    return {"onset_mAP": onset_mAP,
-            "wakeup_mAP": wakeup_mAP,
-            "general_mAP": general_mAP}
+    # bootstrap and get metrics
+    boostrapped_all_mAPs = np.zeros((num_bootstraps,), dtype=np.float32)
+    for k in tqdm.tqdm(range(num_bootstraps)):
+        all_onset_series_ids_boot, all_onset_series_locs_boot, all_onset_series_probas_boot = metrics_ap_bootstrap.get_single_bootstrap(
+            all_onset_series_ids_idxs, all_onset_series_locs, all_onset_series_probas, cutoffs=binning_cutoffs)
+        all_wakeup_series_ids_boot, all_wakeup_series_locs_boot, all_wakeup_series_probas_boot = metrics_ap_bootstrap.get_single_bootstrap(
+            all_wakeup_series_ids_idxs, all_wakeup_series_locs, all_wakeup_series_probas, cutoffs=binning_cutoffs)
 
-def run_validation_AP(config, all_series_ids, per_series_id_events):
+        ap_onset_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+        ap_wakeup_metrics = [metrics_ap.EventMetrics(name="", tolerance=tolerance * 12) for tolerance in validation_AP_tolerances]
+
+        for series_id in selected_series_ids:
+            if exclude_bad_segmentations and series_id in bad_series_list.noisy_bad_segmentations:
+                continue
+
+            # get the ground truth
+            gt_onset_locs = gt_events[series_id]["onset"]
+            gt_wakeup_locs = gt_events[series_id]["wakeup"]
+
+            onset_series_ids_idx = all_onset_series_ids_boot == series_ids_to_idx[series_id]
+            series_onset_locs = all_onset_series_locs_boot[onset_series_ids_idx]
+            series_onset_probas = all_onset_series_probas_boot[onset_series_ids_idx]
+
+            wakeup_series_ids_idx = all_wakeup_series_ids_boot == series_ids_to_idx[series_id]
+            series_wakeup_locs = all_wakeup_series_locs_boot[wakeup_series_ids_idx]
+            series_wakeup_probas = all_wakeup_series_probas_boot[wakeup_series_ids_idx]
+
+            # add to metrics
+            for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+                ap_onset_metric.add(series_onset_locs, series_onset_probas, gt_onset_locs)
+                ap_wakeup_metric.add(series_wakeup_locs, series_wakeup_probas, gt_wakeup_locs)
+
+            # compute mAP
+            all_mAPs = []
+            for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
+                _, _, onsetAP, _ = ap_onset_metric.get()
+                _, _, wakeupAP, _ = ap_wakeup_metric.get()
+                all_mAPs.append(onsetAP)
+                all_mAPs.append(wakeupAP)
+
+            mAP = np.mean(all_mAPs)
+            boostrapped_all_mAPs[k] = mAP
+
+    return boostrapped_all_mAPs
+
+"""
+gt_events, all_series_ids,
+                  selected_density_folders: list[str], selected_regression_folders: list[str],
+                  cutoff, regression_pruning,
+
+                  binning_cutoffs: np.ndarray,
+
+                  exclude_bad_segmentations: bool=True
+"""
+
+
+def run_min_max_AP(config, all_series_ids, binning_cutoffs: np.ndarray,
+                   gt_events: np.ndarray):
     regression_cfg_content = config["regression_cfg_content"]
+    density_cfg_content = config["density_cfg_content"]
 
     regression_kernels = regression_cfg_content["regression_kernels"]
     regression_pruning = regression_cfg_content["pruning"]
 
-    density_results = config["density_results"]
+    density_results = density_cfg_content["density_results"]
 
-    return validation_ap(gt_events=per_series_id_events, all_series_ids=all_series_ids,
+    result_bootstrap_values = validation_ap_bootstrap(gt_events=gt_events, all_series_ids=all_series_ids,
                   selected_density_folders=density_results,
                   selected_regression_folders=regression_kernels,
-                  cutoff=0.0,
+                  cutoff=0.0, regression_pruning=regression_pruning,
 
-                  regression_pruning=regression_pruning)
+                  binning_cutoffs=binning_cutoffs, num_bootstraps=100,
+
+                  exclude_bad_segmentations=True)
+
+    result_bootstrap_values_noexclude = validation_ap_bootstrap(gt_events=gt_events, all_series_ids=all_series_ids,
+                                  selected_density_folders=density_results,
+                                  selected_regression_folders=regression_kernels,
+                                  cutoff=0.0, regression_pruning=regression_pruning,
+
+                                  binning_cutoffs=binning_cutoffs, num_bootstraps=100,
+
+                                  exclude_bad_segmentations=False)
+
+    return {
+        "result": result_bootstrap_values,
+        "result_noexclude": result_bootstrap_values_noexclude
+    }
 
 if __name__ == "__main__":
     # load gt values and list of series ids
     all_series_ids = [filename.split(".")[0] for filename in os.listdir("./individual_train_series")]
-    per_series_id_events = convert_to_seriesid_events.get_events_per_seriesid()
-
+    gt_events = convert_to_seriesid_events.get_events_per_seriesid()
 
     # file locations
-    config_file = "./time_binning_bootstrapping/time_bootstrapping_config.json"
-    output_file = "./time_binning_bootstrapping/bootstrap_result.csv"
+    config_file = "./time_binning_bootstrapping/scores_maxmin_plot_config.json"
+    output_folder = "./time_binning_bootstrapping/raw_bootstrapping"
+    if os.path.isdir(output_folder):
+        shutil.rmtree(output_folder)
+    os.mkdir(output_folder)
 
     # load files
     with open(config_file, "r") as f:
@@ -255,19 +329,97 @@ if __name__ == "__main__":
         regression_kernel_list[k] = convert_to_regression_folder(regression_kernel_list[k], kernel_width=regression_kernel_width,
                                                                  kernel_shape="gaussian")
 
-    density_list = config["densities"]
-    for k in range(len(density_list)):
-        density_list[k] = convert_to_density_folder(density_list[k])
+    for entry_name in config["densities"]:
+        entry = config["densities"][entry_name]
+        density_list = entry["density_results"]
+        for k in range(len(density_list)):
+            density_list[k] = convert_to_density_folder(density_list[k])
 
-    cfg = {
-        "regression_cfg_content": config["regressions"],
-        "density_results": config["densities"]
-    }
+    # generate general config
+    run_configs = []
+    for entry_name in config["densities"]:
+        cfg = {
+            "regression_cfg_content": config["regressions"],
+            "density_cfg_content": config["densities"][entry_name]
+        }
+        run_configs.append(cfg)
+    run_cuts = [20, 15, 10, 5, 3, 2, 1]
 
-    # generate the values
-    for k in [10, 15, 20, 35, 40, 45, 50, 60, 70]:
-        pass
-    tasks = [delayed(run_validation_AP)(entry, all_series_ids, per_series_id_events) for entry in write_entries]
-    results = Parallel(n_jobs=10, verbose=50)(tasks)
+    # get scores now
+    tasks = []
+    for i in range(len(run_configs)):
+        for j in range(len(run_cuts)):
+            tasks.append(
+                delayed(run_min_max_AP)(run_configs[i], all_series_ids,
+                                    np.arange(0, 61, run_cuts[j], dtype=np.float32),
+                                    gt_events)
+            )
+    results = Parallel(n_jobs=20, verbose=50)(tasks)
+
+    # save the score to output folder
+    result_bootstrap_mean = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_bootstrap_median = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_bootstrap_upper_quartile = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_bootstrap_lower_quartile = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_bootstrap_10percentile = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_bootstrap_90percentile = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+
+    result_noexcl_bootstrap_mean = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_noexcl_bootstrap_median = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_noexcl_bootstrap_upper_quartile = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_noexcl_bootstrap_lower_quartile = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_noexcl_bootstrap_10percentile = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_noexcl_bootstrap_90percentile = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+
+    for i, entry_name in tqdm.tqdm(enumerate(config["densities"])):
+        entry_name_formatted = entry_name.replace(" ", "_")
+        for j in range(len(run_cuts)):
+            cut = run_cuts[j]
+            bootstrap_info = results[i * len(run_cuts) + j]
+
+            # write to matrix
+            result_bootstrap_mean[i, j] = np.mean(bootstrap_info["result"])
+            result_bootstrap_median[i, j] = np.median(bootstrap_info["result"])
+            result_bootstrap_upper_quartile[i, j] = np.percentile(bootstrap_info["result"], 75)
+            result_bootstrap_lower_quartile[i, j] = np.percentile(bootstrap_info["result"], 25)
+            result_bootstrap_10percentile[i, j] = np.percentile(bootstrap_info["result"], 10)
+            result_bootstrap_90percentile[i, j] = np.percentile(bootstrap_info["result"], 90)
+
+            result_noexcl_bootstrap_mean[i, j] = np.mean(bootstrap_info["result_noexclude"])
+            result_noexcl_bootstrap_median[i, j] = np.median(bootstrap_info["result_noexclude"])
+            result_noexcl_bootstrap_upper_quartile[i, j] = np.percentile(bootstrap_info["result_noexclude"], 75)
+            result_noexcl_bootstrap_lower_quartile[i, j] = np.percentile(bootstrap_info["result_noexclude"], 25)
+            result_noexcl_bootstrap_10percentile[i, j] = np.percentile(bootstrap_info["result_noexclude"], 10)
+            result_noexcl_bootstrap_90percentile[i, j] = np.percentile(bootstrap_info["result_noexclude"], 90)
+
+    # save gaps gains matrix to pandas dataframe
+    result_bootstrap_mean_df = pd.DataFrame(result_bootstrap_mean, index=config["densities"], columns=run_cuts)
+    result_bootstrap_median_df = pd.DataFrame(result_bootstrap_median, index=config["densities"], columns=run_cuts)
+    result_bootstrap_upper_quartile_df = pd.DataFrame(result_bootstrap_upper_quartile, index=config["densities"], columns=run_cuts)
+    result_bootstrap_lower_quartile_df = pd.DataFrame(result_bootstrap_lower_quartile, index=config["densities"], columns=run_cuts)
+    result_bootstrap_10percentile_df = pd.DataFrame(result_bootstrap_10percentile, index=config["densities"], columns=run_cuts)
+    result_bootstrap_90percentile_df = pd.DataFrame(result_bootstrap_90percentile, index=config["densities"], columns=run_cuts)
+
+    result_noexcl_bootstrap_mean_df = pd.DataFrame(result_noexcl_bootstrap_mean, index=config["densities"], columns=run_cuts)
+    result_noexcl_bootstrap_median_df = pd.DataFrame(result_noexcl_bootstrap_median, index=config["densities"], columns=run_cuts)
+    result_noexcl_bootstrap_upper_quartile_df = pd.DataFrame(result_noexcl_bootstrap_upper_quartile, index=config["densities"], columns=run_cuts)
+    result_noexcl_bootstrap_lower_quartile_df = pd.DataFrame(result_noexcl_bootstrap_lower_quartile, index=config["densities"], columns=run_cuts)
+    result_noexcl_bootstrap_10percentile_df = pd.DataFrame(result_noexcl_bootstrap_10percentile, index=config["densities"], columns=run_cuts)
+    result_noexcl_bootstrap_90percentile_df = pd.DataFrame(result_noexcl_bootstrap_90percentile, index=config["densities"], columns=run_cuts)
+
+    # save to csv
+    result_bootstrap_mean_df.to_csv(os.path.join(output_folder, "bootstrap_mean.csv"))
+    result_bootstrap_median_df.to_csv(os.path.join(output_folder, "bootstrap_median.csv"))
+    result_bootstrap_upper_quartile_df.to_csv(os.path.join(output_folder, "bootstrap_upper_quartile.csv"))
+    result_bootstrap_lower_quartile_df.to_csv(os.path.join(output_folder, "bootstrap_lower_quartile.csv"))
+    result_bootstrap_10percentile_df.to_csv(os.path.join(output_folder, "bootstrap_10percentile.csv"))
+    result_bootstrap_90percentile_df.to_csv(os.path.join(output_folder, "bootstrap_90percentile.csv"))
+
+    result_noexcl_bootstrap_mean_df.to_csv(os.path.join(output_folder, "bootstrap_mean_noexcl.csv"))
+    result_noexcl_bootstrap_median_df.to_csv(os.path.join(output_folder, "bootstrap_median_noexcl.csv"))
+    result_noexcl_bootstrap_upper_quartile_df.to_csv(os.path.join(output_folder, "bootstrap_upper_quartile_noexcl.csv"))
+    result_noexcl_bootstrap_lower_quartile_df.to_csv(os.path.join(output_folder, "bootstrap_lower_quartile_noexcl.csv"))
+    result_noexcl_bootstrap_10percentile_df.to_csv(os.path.join(output_folder, "bootstrap_10percentile_noexcl.csv"))
+    result_noexcl_bootstrap_90percentile_df.to_csv(os.path.join(output_folder, "bootstrap_90percentile_noexcl.csv"))
 
     print("All done!")
