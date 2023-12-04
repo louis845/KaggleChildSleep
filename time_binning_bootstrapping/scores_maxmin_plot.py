@@ -427,19 +427,24 @@ if __name__ == "__main__":
     results = Parallel(n_jobs=10, verbose=50)(tasks)
 
     # save the score to output folder
+    result_gaps_matrix = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_gains_matrix = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_noexcl_gaps_matrix = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_noexcl_gains_matrix = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+
     for i, entry_name in tqdm.tqdm(enumerate(config["densities"])):
         entry_name_formatted = entry_name.replace(" ", "_")
         for j in range(len(run_cuts)):
             cut = run_cuts[j]
             maxmin_risk_info = results[i * len(run_cuts) + j]
 
-            out_distribution_file = os.path.join(output_folder, "{}_distribution.png".format(entry_name_formatted))
-            out_min_distribution_file = os.path.join(output_folder, "{}_distribution_min.png".format(entry_name_formatted))
-            out_max_distribution_file = os.path.join(output_folder, "{}_distribution_max.png".format(entry_name_formatted))
+            out_distribution_file = os.path.join(output_folder, "{}_cut{}_distribution.png".format(entry_name_formatted, cut))
+            out_min_distribution_file = os.path.join(output_folder, "{}_cut{}_distribution_min.png".format(entry_name_formatted, cut))
+            out_max_distribution_file = os.path.join(output_folder, "{}_cut{}_distribution_max.png".format(entry_name_formatted, cut))
 
-            out_noexcl_distribution_file = os.path.join(output_folder, "{}_noexcl_distribution.png".format(entry_name_formatted))
-            out_noexcl_min_distribution_file = os.path.join(output_folder, "{}_noexcl_distribution_min.png".format(entry_name_formatted))
-            out_noexcl_max_distribution_file = os.path.join(output_folder, "{}_noexcl_distribution_max.png".format(entry_name_formatted))
+            out_noexcl_distribution_file = os.path.join(output_folder, "{}_cut{}_noexcl_distribution.png".format(entry_name_formatted, cut))
+            out_noexcl_min_distribution_file = os.path.join(output_folder, "{}_cut{}_noexcl_distribution_min.png".format(entry_name_formatted, cut))
+            out_noexcl_max_distribution_file = os.path.join(output_folder, "{}_cut{}_noexcl_distribution_max.png".format(entry_name_formatted, cut))
 
             # plot the distributions
             titlestr = "{} Cut {} (Onset: {}, Wakeup: {})".format(entry_name, cut, maxmin_risk_info["result"]["onset_mAP"], maxmin_risk_info["result"]["wakeup_mAP"])
@@ -508,6 +513,33 @@ if __name__ == "__main__":
                           ap_wakeup_precisions=maxmin_risk_info["result_noexclude"]["wakeup_max_precisions"],
                           ap_wakeup_recalls=maxmin_risk_info["result_noexclude"]["wakeup_max_recalls"],
                           ap_wakeup_average_precisions=maxmin_risk_info["result_noexclude"]["wakeup_max_aps"])
+
+            mean_result_gap = (maxmin_risk_info["result"]["onset_mAP"] - maxmin_risk_info["result"]["onset_min_mAP"] +
+                                maxmin_risk_info["result"]["wakeup_mAP"] - maxmin_risk_info["result"]["wakeup_min_mAP"]) / 2
+            mean_result_gain = (maxmin_risk_info["result"]["onset_max_mAP"] - maxmin_risk_info["result"]["onset_mAP"] +
+                                maxmin_risk_info["result"]["wakeup_max_mAP"] - maxmin_risk_info["result"]["wakeup_mAP"]) / 2
+            mean_result_noexcl_gap = (maxmin_risk_info["result_noexclude"]["onset_mAP"] - maxmin_risk_info["result_noexclude"]["onset_min_mAP"] +
+                                maxmin_risk_info["result_noexclude"]["wakeup_mAP"] - maxmin_risk_info["result_noexclude"]["wakeup_min_mAP"]) / 2
+            mean_result_noexcl_gain = (maxmin_risk_info["result_noexclude"]["onset_max_mAP"] - maxmin_risk_info["result_noexclude"]["onset_mAP"] +
+                                maxmin_risk_info["result_noexclude"]["wakeup_max_mAP"] - maxmin_risk_info["result_noexclude"]["wakeup_mAP"]) / 2
+
+            # write to matrix
+            result_gaps_matrix[i, j] = mean_result_gap
+            result_gains_matrix[i, j] = mean_result_gain
+            result_noexcl_gaps_matrix[i, j] = mean_result_noexcl_gap
+            result_noexcl_gains_matrix[i, j] = mean_result_noexcl_gain
+
+    # save gaps gains matrix to pandas dataframe
+    result_gaps_df = pd.DataFrame(result_gaps_matrix, index=list(config["densities"].keys()), columns=run_cuts)
+    result_gains_df = pd.DataFrame(result_gains_matrix, index=list(config["densities"].keys()), columns=run_cuts)
+    result_noexcl_gaps_df = pd.DataFrame(result_noexcl_gaps_matrix, index=list(config["densities"].keys()), columns=run_cuts)
+    result_noexcl_gains_df = pd.DataFrame(result_noexcl_gains_matrix, index=list(config["densities"].keys()), columns=run_cuts)
+
+    # save to csv
+    result_gaps_df.to_csv(os.path.join(output_folder, "gaps.csv"))
+    result_gains_df.to_csv(os.path.join(output_folder, "gains.csv"))
+    result_noexcl_gaps_df.to_csv(os.path.join(output_folder, "noexcl_gaps.csv"))
+    result_noexcl_gains_df.to_csv(os.path.join(output_folder, "noexcl_gains.csv"))
 
     print("All done!")
 
