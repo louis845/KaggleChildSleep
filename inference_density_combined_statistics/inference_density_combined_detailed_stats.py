@@ -235,7 +235,7 @@ def validation_ap(fig: matplotlib.figure.Figure, gt_events,
         ap_wakeup_average_precisions.append(ap_wakeup_average_precision)
         ap_wakeup_probas.append(ap_wakeup_proba)
 
-    # draw the precision-recall curve using matplotlib onto file "epoch{}_AP.png".format(epoch) inside the ap_log_dir
+
     axes = fig.subplots(4, 5)
     fig.suptitle("Cutoff: {}, Augmentation: {} (Onset mAP: {}, Wakeup mAP: {})".format(cutoff, augmentation,
                                                                 np.mean(ap_onset_average_precisions), np.mean(ap_wakeup_average_precisions)))

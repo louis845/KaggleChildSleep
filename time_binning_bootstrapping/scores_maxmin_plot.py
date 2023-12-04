@@ -11,6 +11,7 @@ import tqdm
 import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 
+import convert_to_seriesid_events
 import postprocessing
 import metrics_ap_bootstrap
 import model_event_density_unet
@@ -18,6 +19,34 @@ import bad_series_list
 
 
 validation_AP_tolerances = [1, 3, 5, 7.5, 10, 12.5, 15, 20, 25, 30][::-1]
+
+def plot_single_precision_recall_curve(ax, precisions, recalls, ap, title):
+    ax.plot(recalls, precisions)
+    #ax.scatter(recalls, precisions, c=proba, cmap="coolwarm")
+    ax.set_title(title)
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.text(0.5, 0.5, "AP: {:.4f}".format(ap), horizontalalignment="center", verticalalignment="center")
+
+def plot_ap_curve(title: str, out_file: str,
+         ap_onset_precisions: list[np.ndarray], ap_onset_recalls: list[np.ndarray], ap_onset_average_precisions: list[float],
+         ap_wakeup_precisions: list[np.ndarray], ap_wakeup_recalls: list[np.ndarray], ap_wakeup_average_precisions: list[float]):
+    fig, axes = plt.subplots(4, 5, figsize=(20, 16))
+    plt.suptitle(title)
+    for k in range(len(validation_AP_tolerances)):
+        ax = axes[k // 5, k % 5]
+        plot_single_precision_recall_curve(ax, ap_onset_precisions[k], ap_onset_recalls[k],
+                                           ap_onset_average_precisions[k],
+                                           "Onset AP{}".format(validation_AP_tolerances[k]))
+        ax = axes[(k + 10) // 5, (k + 10) % 5]
+        plot_single_precision_recall_curve(ax, ap_wakeup_precisions[k], ap_wakeup_recalls[k],
+                                           ap_wakeup_average_precisions[k],
+                                           "Wakeup AP{}".format(validation_AP_tolerances[k]))
+    plt.subplots_adjust(wspace=0.3, hspace=0.3)
+    plt.savefig(out_file)
+    plt.close()
 
 def convert_to_regression_folder(regression_labels_name: str, kernel_shape: str, kernel_width: int):
     regression_folder = os.path.join("./inference_regression_statistics/regression_labels", regression_labels_name,
@@ -301,8 +330,19 @@ def validation_ap(gt_events, all_series_ids,
             "onset_precisions": all_onset_precisions, "onset_min_precisions": all_onset_min_precisions, "onset_max_precisions": all_onset_max_precisions,
             "wakeup_precisions": all_wakeup_precisions, "wakeup_min_precisions": all_wakeup_min_precisions, "wakeup_max_precisions": all_wakeup_max_precisions}
 
+"""
+gt_events, all_series_ids,
+                  selected_density_folders: list[str], selected_regression_folders: list[str],
+                  cutoff, regression_pruning,
 
-def run_min_max_AP(config, all_series_ids):
+                  binning_cutoffs: np.ndarray,
+
+                  exclude_bad_segmentations: bool=True
+"""
+
+
+def run_min_max_AP(config, all_series_ids, binning_cutoffs: np.ndarray,
+                   gt_events: np.ndarray):
     regression_cfg_content = config["regression_cfg_content"]
     density_cfg_content = config["density_cfg_content"]
 
@@ -311,18 +351,37 @@ def run_min_max_AP(config, all_series_ids):
 
     density_results = density_cfg_content["density_results"]
 
-    return validation_ap(all_series_ids=all_series_ids,
+    result_graphs = validation_ap(gt_events=gt_events, all_series_ids=all_series_ids,
                   selected_density_folders=density_results,
                   selected_regression_folders=regression_kernels,
-                  regression_pruning=regression_pruning)
+                  cutoff=0.0, regression_pruning=regression_pruning,
+
+                  binning_cutoffs=binning_cutoffs,
+
+                  exclude_bad_segmentations=True)
+
+    result_graphs_noexclude = validation_ap(gt_events=gt_events, all_series_ids=all_series_ids,
+                                  selected_density_folders=density_results,
+                                  selected_regression_folders=regression_kernels,
+                                  cutoff=0.0, regression_pruning=regression_pruning,
+
+                                  binning_cutoffs=binning_cutoffs,
+
+                                  exclude_bad_segmentations=False)
+
+    return {
+        "result": result_graphs,
+        "result_noexclude": result_graphs_noexclude
+    }
 
 if __name__ == "__main__":
     # load gt values and list of series ids
     all_series_ids = [filename.split(".")[0] for filename in os.listdir("./individual_train_series")]
+    gt_events = convert_to_seriesid_events.get_events_per_seriesid()
 
     # file locations
-    config_file = "./time_binning_bootstrapping/scores_distribution_config.json"
-    output_folder = "./time_binning_bootstrapping/scores_distribution"
+    config_file = "./time_binning_bootstrapping/scores_maxmin_plot_config.json"
+    output_folder = "./time_binning_bootstrapping/maxmin_risk"
     if os.path.isdir(output_folder):
         shutil.rmtree(output_folder)
     os.mkdir(output_folder)
@@ -354,46 +413,101 @@ if __name__ == "__main__":
             "density_cfg_content": config["densities"][entry_name]
         }
         run_configs.append(cfg)
+    run_cuts = [20, 15, 10, 5, 3, 2, 1]
 
     # get scores now
-    tasks = [delayed(run_score_convert)(entry, all_series_ids) for entry in run_configs]
+    tasks = []
+    for i in range(len(run_configs)):
+        for j in range(len(run_cuts)):
+            tasks.append(
+                delayed(run_min_max_AP)(run_configs[i], all_series_ids,
+                                    np.arange(0, 61, run_cuts[j], dtype=np.float32),
+                                    gt_events)
+            )
     results = Parallel(n_jobs=10, verbose=50)(tasks)
 
     # save the score to output folder
     for i, entry_name in tqdm.tqdm(enumerate(config["densities"])):
         entry_name_formatted = entry_name.replace(" ", "_")
-        scores_distribution = results[i]
+        for j in range(len(run_cuts)):
+            cut = run_cuts[j]
+            maxmin_risk_info = results[i * len(run_cuts) + j]
 
-        out_numpy_file = os.path.join(output_folder, "probas_{}.npy".format(entry_name_formatted))
-        out_distribution_file = os.path.join(output_folder, "distribution_{}.png".format(entry_name_formatted))
-        out_trunc_distribution_file = os.path.join(output_folder, "trunc_distribution_{}.png".format(entry_name_formatted))
+            out_distribution_file = os.path.join(output_folder, "{}_distribution.png".format(entry_name_formatted))
+            out_min_distribution_file = os.path.join(output_folder, "{}_distribution_min.png".format(entry_name_formatted))
+            out_max_distribution_file = os.path.join(output_folder, "{}_distribution_max.png".format(entry_name_formatted))
 
-        np.save(out_numpy_file, scores_distribution)
+            out_noexcl_distribution_file = os.path.join(output_folder, "{}_noexcl_distribution.png".format(entry_name_formatted))
+            out_noexcl_min_distribution_file = os.path.join(output_folder, "{}_noexcl_distribution_min.png".format(entry_name_formatted))
+            out_noexcl_max_distribution_file = os.path.join(output_folder, "{}_noexcl_distribution_max.png".format(entry_name_formatted))
 
-        percentiles = np.linspace(0, 100, num=101)
-        percentile_values = np.percentile(scores_distribution, percentiles)
-        plt.figure(figsize=(16, 12))
-        plt.plot(percentiles, percentile_values, marker=".", linestyle="-")
-        plt.xlabel("Percentiles")
-        plt.ylabel("Value")
-        plt.title("Cumulative Distribution Plot")
-        plt.xlim(0, 100)
-        plt.ylim(0, 70)
-        plt.yticks(np.arange(0, 70, 2))
-        plt.savefig(out_distribution_file)
-        plt.close()
+            # plot the distributions
+            titlestr = "{} Cut {} (Onset: {}, Wakeup: {})".format(entry_name, cut, maxmin_risk_info["result"]["onset_mAP"], maxmin_risk_info["result"]["wakeup_mAP"])
+            plot_ap_curve(title=titlestr,
+                          out_file=out_distribution_file,
+                          ap_onset_precisions=maxmin_risk_info["result"]["onset_precisions"],
+                          ap_onset_recalls=maxmin_risk_info["result"]["onset_recalls"],
+                          ap_onset_average_precisions=maxmin_risk_info["result"]["onset_aps"],
+                          ap_wakeup_precisions=maxmin_risk_info["result"]["wakeup_precisions"],
+                          ap_wakeup_recalls=maxmin_risk_info["result"]["wakeup_recalls"],
+                          ap_wakeup_average_precisions=maxmin_risk_info["result"]["wakeup_aps"])
+            titlestr = "{} Cut {} Min (Onset Gap: {}, Wakeup Gap: {})".format(entry_name, cut,
+                                                                 maxmin_risk_info["result"]["onset_mAP"] - maxmin_risk_info["result"]["onset_min_mAP"],
+                                                                 maxmin_risk_info["result"]["wakeup_mAP"] - maxmin_risk_info["result"]["wakeup_min_mAP"])
+            plot_ap_curve(title=titlestr,
+                          out_file=out_min_distribution_file,
+                          ap_onset_precisions=maxmin_risk_info["result"]["onset_min_precisions"],
+                          ap_onset_recalls=maxmin_risk_info["result"]["onset_min_recalls"],
+                          ap_onset_average_precisions=maxmin_risk_info["result"]["onset_min_aps"],
+                          ap_wakeup_precisions=maxmin_risk_info["result"]["wakeup_min_precisions"],
+                          ap_wakeup_recalls=maxmin_risk_info["result"]["wakeup_min_recalls"],
+                          ap_wakeup_average_precisions=maxmin_risk_info["result"]["wakeup_min_aps"])
+            titlestr = "{} Cut {} Max (Onset Gain: {}, Wakeup Gain: {})".format(entry_name, cut,
+                                                                          maxmin_risk_info["result"]["onset_max_mAP"] - maxmin_risk_info["result"]["onset_mAP"],
+                                                                          maxmin_risk_info["result"]["wakeup_max_mAP"] - maxmin_risk_info["result"]["wakeup_mAP"])
+            plot_ap_curve(title=titlestr,
+                          out_file=out_max_distribution_file,
+                          ap_onset_precisions=maxmin_risk_info["result"]["onset_max_precisions"],
+                          ap_onset_recalls=maxmin_risk_info["result"]["onset_max_recalls"],
+                          ap_onset_average_precisions=maxmin_risk_info["result"]["onset_max_aps"],
+                          ap_wakeup_precisions=maxmin_risk_info["result"]["wakeup_max_precisions"],
+                          ap_wakeup_recalls=maxmin_risk_info["result"]["wakeup_max_recalls"],
+                          ap_wakeup_average_precisions=maxmin_risk_info["result"]["wakeup_max_aps"])
 
-        percentile_values = np.percentile(scores_distribution[scores_distribution > 0.1], percentiles)
-        plt.figure(figsize=(16, 12))
-        plt.plot(percentiles, percentile_values, marker=".", linestyle="-")
-        plt.xlabel("Percentiles")
-        plt.ylabel("Value (Truncated)")
-        plt.title("Cumulative Distribution Plot")
-        plt.xlim(0, 100)
-        plt.ylim(0, 70)
-        plt.yticks(np.arange(0, 70, 2))
-        plt.savefig(out_trunc_distribution_file)
-        plt.close()
+
+
+            # plot the noexcl distributions
+            titlestr = "{} Cut {} (Onset: {}, Wakeup: {})".format(entry_name, cut, maxmin_risk_info["result_noexclude"]["onset_mAP"], maxmin_risk_info["result_noexclude"]["wakeup_mAP"])
+            plot_ap_curve(title=titlestr,
+                          out_file=out_noexcl_distribution_file,
+                          ap_onset_precisions=maxmin_risk_info["result_noexclude"]["onset_precisions"],
+                          ap_onset_recalls=maxmin_risk_info["result_noexclude"]["onset_recalls"],
+                          ap_onset_average_precisions=maxmin_risk_info["result_noexclude"]["onset_aps"],
+                          ap_wakeup_precisions=maxmin_risk_info["result_noexclude"]["wakeup_precisions"],
+                          ap_wakeup_recalls=maxmin_risk_info["result_noexclude"]["wakeup_recalls"],
+                          ap_wakeup_average_precisions=maxmin_risk_info["result_noexclude"]["wakeup_aps"])
+            titlestr = "{} Cut {} Min (Onset Gap: {}, Wakeup Gap: {})".format(entry_name, cut,
+                                                                 maxmin_risk_info["result_noexclude"]["onset_mAP"] - maxmin_risk_info["result_noexclude"]["onset_min_mAP"],
+                                                                 maxmin_risk_info["result_noexclude"]["wakeup_mAP"] - maxmin_risk_info["result_noexclude"]["wakeup_min_mAP"])
+            plot_ap_curve(title=titlestr,
+                          out_file=out_noexcl_min_distribution_file,
+                          ap_onset_precisions=maxmin_risk_info["result_noexclude"]["onset_min_precisions"],
+                          ap_onset_recalls=maxmin_risk_info["result_noexclude"]["onset_min_recalls"],
+                          ap_onset_average_precisions=maxmin_risk_info["result_noexclude"]["onset_min_aps"],
+                          ap_wakeup_precisions=maxmin_risk_info["result_noexclude"]["wakeup_min_precisions"],
+                          ap_wakeup_recalls=maxmin_risk_info["result_noexclude"]["wakeup_min_recalls"],
+                          ap_wakeup_average_precisions=maxmin_risk_info["result_noexclude"]["wakeup_min_aps"])
+            titlestr = "{} Cut {} Max (Onset Gain: {}, Wakeup Gain: {})".format(entry_name, cut,
+                                                                          maxmin_risk_info["result_noexclude"]["onset_max_mAP"] - maxmin_risk_info["result_noexclude"]["onset_mAP"],
+                                                                          maxmin_risk_info["result_noexclude"]["wakeup_max_mAP"] - maxmin_risk_info["result_noexclude"]["wakeup_mAP"])
+            plot_ap_curve(title=titlestr,
+                          out_file=out_noexcl_max_distribution_file,
+                          ap_onset_precisions=maxmin_risk_info["result_noexclude"]["onset_max_precisions"],
+                          ap_onset_recalls=maxmin_risk_info["result_noexclude"]["onset_max_recalls"],
+                          ap_onset_average_precisions=maxmin_risk_info["result_noexclude"]["onset_max_aps"],
+                          ap_wakeup_precisions=maxmin_risk_info["result_noexclude"]["wakeup_max_precisions"],
+                          ap_wakeup_recalls=maxmin_risk_info["result_noexclude"]["wakeup_max_recalls"],
+                          ap_wakeup_average_precisions=maxmin_risk_info["result_noexclude"]["wakeup_max_aps"])
 
     print("All done!")
 
