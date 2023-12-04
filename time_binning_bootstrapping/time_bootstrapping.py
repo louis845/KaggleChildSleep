@@ -237,10 +237,15 @@ def validation_ap_bootstrap(gt_events, all_series_ids,
             onset_series_ids_idx = all_onset_series_ids_boot == series_ids_to_idx[series_id]
             series_onset_locs = all_onset_series_locs_boot[onset_series_ids_idx]
             series_onset_probas = all_onset_series_probas_boot[onset_series_ids_idx]
+            onset_locs_argsort_idx = np.argsort(series_onset_locs)
+            series_onset_locs = series_onset_locs[onset_locs_argsort_idx]
+            series_onset_probas = series_onset_probas[onset_locs_argsort_idx]
 
             wakeup_series_ids_idx = all_wakeup_series_ids_boot == series_ids_to_idx[series_id]
             series_wakeup_locs = all_wakeup_series_locs_boot[wakeup_series_ids_idx]
             series_wakeup_probas = all_wakeup_series_probas_boot[wakeup_series_ids_idx]
+            wakeup_locs_argsort_idx = np.argsort(series_wakeup_locs)
+            series_wakeup_locs = series_wakeup_locs[wakeup_locs_argsort_idx]
 
             # add to metrics
             for ap_onset_metric, ap_wakeup_metric in zip(ap_onset_metrics, ap_wakeup_metrics):
