@@ -241,13 +241,13 @@ def validation_ap(gt_events, all_series_ids,
 
     # compute mAP, mAP lower bound, mAP upper bound
     num_tolerances = len(validation_AP_tolerances)
-    all_onset_aps, all_onset_min_aps, all_onset_max_aps = [], [], []
-    all_onset_recalls, all_onset_min_recalls, all_onset_max_recalls = [], [], []
-    all_onset_precisions, all_onset_min_precisions, all_onset_max_precisions = [], [], []
+    all_onset_aps, all_onset_min_aps, all_onset_max_aps, all_onset_mean_aps = [], [], [], []
+    all_onset_recalls, all_onset_min_recalls, all_onset_max_recalls, all_onset_mean_recalls = [], [], [], []
+    all_onset_precisions, all_onset_min_precisions, all_onset_max_precisions, all_onset_mean_precisions = [], [], [], []
 
-    all_wakeup_aps, all_wakeup_min_aps, all_wakeup_max_aps = [], [], []
-    all_wakeup_recalls, all_wakeup_min_recalls, all_wakeup_max_recalls = [], [], []
-    all_wakeup_precisions, all_wakeup_min_precisions, all_wakeup_max_precisions = [], [], []
+    all_wakeup_aps, all_wakeup_min_aps, all_wakeup_max_aps, all_wakeup_mean_aps = [], [], [], []
+    all_wakeup_recalls, all_wakeup_min_recalls, all_wakeup_max_recalls, all_wakeup_mean_recalls = [], [], [], []
+    all_wakeup_precisions, all_wakeup_min_precisions, all_wakeup_max_precisions, all_wakeup_mean_precisions = [], [], [], []
 
     for k in range(num_tolerances):
         # get matches and probas, and resp. for lower and upper bounds
@@ -258,6 +258,8 @@ def validation_ap(gt_events, all_series_ids,
             onset_matches_per_tolerance, onset_probas_per_tolerance, binning_cutoffs)
         onset_matches_per_tolerance_upper, onset_probas_per_tolerance_upper = metrics_ap_bootstrap.get_upper_bound(
             onset_matches_per_tolerance, onset_probas_per_tolerance, binning_cutoffs)
+        onset_matches_per_tolerance_mean, onset_probas_per_tolerance_mean = metrics_ap_bootstrap.get_mean(
+            onset_matches_per_tolerance, onset_probas_per_tolerance, binning_cutoffs)
 
 
         wakeup_matches_per_tolerance = all_ap_wakeup_matches[k]
@@ -266,6 +268,8 @@ def validation_ap(gt_events, all_series_ids,
         wakeup_matches_per_tolerance_lower, wakeup_probas_per_tolerance_lower = metrics_ap_bootstrap.get_lower_bound(
             wakeup_matches_per_tolerance, wakeup_probas_per_tolerance, binning_cutoffs)
         wakeup_matches_per_tolerance_upper, wakeup_probas_per_tolerance_upper = metrics_ap_bootstrap.get_upper_bound(
+            wakeup_matches_per_tolerance, wakeup_probas_per_tolerance, binning_cutoffs)
+        wakeup_matches_per_tolerance_mean, wakeup_probas_per_tolerance_mean = metrics_ap_bootstrap.get_mean(
             wakeup_matches_per_tolerance, wakeup_probas_per_tolerance, binning_cutoffs)
 
 
@@ -291,6 +295,13 @@ def validation_ap(gt_events, all_series_ids,
         all_onset_max_aps.append(average_precision)
         all_onset_max_recalls.append(recall)
         all_onset_max_precisions.append(precision)
+        precision, recall, average_precision, _ = metrics_ap_bootstrap.compute_precision_recall_curve(
+                                                            onset_numpositive_per_tolerance,
+                                                            onset_matches_per_tolerance_mean,
+                                                            onset_probas_per_tolerance_mean)
+        all_onset_mean_aps.append(average_precision)
+        all_onset_mean_recalls.append(recall)
+        all_onset_mean_precisions.append(precision)
 
         precision, recall, average_precision, _ = metrics_ap_bootstrap.compute_precision_recall_curve(
                                                             wakeup_numpositive_per_tolerance,
@@ -313,22 +324,29 @@ def validation_ap(gt_events, all_series_ids,
         all_wakeup_max_aps.append(average_precision)
         all_wakeup_max_recalls.append(recall)
         all_wakeup_max_precisions.append(precision)
+        precision, recall, average_precision, _ = metrics_ap_bootstrap.compute_precision_recall_curve(
+                                                            wakeup_numpositive_per_tolerance,
+                                                            wakeup_matches_per_tolerance_mean,
+                                                            wakeup_probas_per_tolerance_mean)
+        all_wakeup_mean_aps.append(average_precision)
+        all_wakeup_mean_recalls.append(recall)
+        all_wakeup_mean_precisions.append(precision)
 
     # compute mAPs
-    onset_mAP, onset_min_mAP, onset_max_mAP = np.mean(all_onset_aps), np.mean(all_onset_min_aps), np.mean(all_onset_max_aps)
-    wakeup_mAP, wakeup_min_mAP, wakeup_max_mAP = np.mean(all_wakeup_aps), np.mean(all_wakeup_min_aps), np.mean(all_wakeup_max_aps)
+    onset_mAP, onset_min_mAP, onset_max_mAP, onset_mean_mAP = np.mean(all_onset_aps), np.mean(all_onset_min_aps), np.mean(all_onset_max_aps), np.mean(all_onset_mean_aps)
+    wakeup_mAP, wakeup_min_mAP, wakeup_max_mAP, wakeup_mean_mAP = np.mean(all_wakeup_aps), np.mean(all_wakeup_min_aps), np.mean(all_wakeup_max_aps), np.mean(all_wakeup_mean_aps)
 
-    return {"onset_mAP": onset_mAP, "onset_min_mAP": onset_min_mAP, "onset_max_mAP": onset_max_mAP,
-            "wakeup_mAP": wakeup_mAP, "wakeup_min_mAP": wakeup_min_mAP, "wakeup_max_mAP": wakeup_max_mAP,
+    return {"onset_mAP": onset_mAP, "onset_min_mAP": onset_min_mAP, "onset_max_mAP": onset_max_mAP, "onset_mean_mAP": onset_mean_mAP,
+            "wakeup_mAP": wakeup_mAP, "wakeup_min_mAP": wakeup_min_mAP, "wakeup_max_mAP": wakeup_max_mAP, "wakeup_mean_mAP": wakeup_mean_mAP,
 
-            "onset_aps": all_onset_aps, "onset_min_aps": all_onset_min_aps, "onset_max_aps": all_onset_max_aps,
-            "wakeup_aps": all_wakeup_aps, "wakeup_min_aps": all_wakeup_min_aps, "wakeup_max_aps": all_wakeup_max_aps,
+            "onset_aps": all_onset_aps, "onset_min_aps": all_onset_min_aps, "onset_max_aps": all_onset_max_aps, "onset_mean_aps": all_onset_mean_aps,
+            "wakeup_aps": all_wakeup_aps, "wakeup_min_aps": all_wakeup_min_aps, "wakeup_max_aps": all_wakeup_max_aps, "wakeup_mean_aps": all_wakeup_mean_aps,
 
-            "onset_recalls": all_onset_recalls, "onset_min_recalls": all_onset_min_recalls, "onset_max_recalls": all_onset_max_recalls,
-            "wakeup_recalls": all_wakeup_recalls, "wakeup_min_recalls": all_wakeup_min_recalls, "wakeup_max_recalls": all_wakeup_max_recalls,
+            "onset_recalls": all_onset_recalls, "onset_min_recalls": all_onset_min_recalls, "onset_max_recalls": all_onset_max_recalls, "onset_mean_recalls": all_onset_mean_recalls,
+            "wakeup_recalls": all_wakeup_recalls, "wakeup_min_recalls": all_wakeup_min_recalls, "wakeup_max_recalls": all_wakeup_max_recalls, "wakeup_mean_recalls": all_wakeup_mean_recalls,
 
-            "onset_precisions": all_onset_precisions, "onset_min_precisions": all_onset_min_precisions, "onset_max_precisions": all_onset_max_precisions,
-            "wakeup_precisions": all_wakeup_precisions, "wakeup_min_precisions": all_wakeup_min_precisions, "wakeup_max_precisions": all_wakeup_max_precisions}
+            "onset_precisions": all_onset_precisions, "onset_min_precisions": all_onset_min_precisions, "onset_max_precisions": all_onset_max_precisions, "onset_mean_precisions": all_onset_mean_precisions,
+            "wakeup_precisions": all_wakeup_precisions, "wakeup_min_precisions": all_wakeup_min_precisions, "wakeup_max_precisions": all_wakeup_max_precisions, "wakeup_mean_precisions": all_wakeup_mean_precisions,}
 
 """
 gt_events, all_series_ids,
@@ -429,8 +447,10 @@ if __name__ == "__main__":
     # save the score to output folder
     result_gaps_matrix = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
     result_gains_matrix = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_deviance_matrix = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
     result_noexcl_gaps_matrix = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
     result_noexcl_gains_matrix = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
+    result_noexcl_deviance_matrix = np.zeros((len(config["densities"]), len(run_cuts)), dtype=np.float32)
 
     for i, entry_name in tqdm.tqdm(enumerate(config["densities"])):
         entry_name_formatted = entry_name.replace(" ", "_")
@@ -441,10 +461,12 @@ if __name__ == "__main__":
             out_distribution_file = os.path.join(output_folder, "{}_cut{}_distribution.png".format(entry_name_formatted, cut))
             out_min_distribution_file = os.path.join(output_folder, "{}_cut{}_distribution_min.png".format(entry_name_formatted, cut))
             out_max_distribution_file = os.path.join(output_folder, "{}_cut{}_distribution_max.png".format(entry_name_formatted, cut))
+            out_mean_distribution_file = os.path.join(output_folder, "{}_cut{}_distribution_mean.png".format(entry_name_formatted, cut))
 
             out_noexcl_distribution_file = os.path.join(output_folder, "{}_cut{}_noexcl_distribution.png".format(entry_name_formatted, cut))
             out_noexcl_min_distribution_file = os.path.join(output_folder, "{}_cut{}_noexcl_distribution_min.png".format(entry_name_formatted, cut))
             out_noexcl_max_distribution_file = os.path.join(output_folder, "{}_cut{}_noexcl_distribution_max.png".format(entry_name_formatted, cut))
+            out_noexcl_mean_distribution_file = os.path.join(output_folder, "{}_cut{}_noexcl_distribution_mean.png".format(entry_name_formatted, cut))
 
             # plot the distributions
             titlestr = "{} Cut {} (Onset: {}, Wakeup: {})".format(entry_name, cut, maxmin_risk_info["result"]["onset_mAP"], maxmin_risk_info["result"]["wakeup_mAP"])
@@ -478,6 +500,17 @@ if __name__ == "__main__":
                           ap_wakeup_precisions=maxmin_risk_info["result"]["wakeup_max_precisions"],
                           ap_wakeup_recalls=maxmin_risk_info["result"]["wakeup_max_recalls"],
                           ap_wakeup_average_precisions=maxmin_risk_info["result"]["wakeup_max_aps"])
+            titlestr = "{} Cut {} Max (Onset Deviance: {}, Wakeup Deviance: {})".format(entry_name, cut,
+                                                                          maxmin_risk_info["result"]["onset_mean_mAP"] - maxmin_risk_info["result"]["onset_mAP"],
+                                                                          maxmin_risk_info["result"]["wakeup_mean_mAP"] - maxmin_risk_info["result"]["wakeup_mAP"])
+            plot_ap_curve(title=titlestr,
+                          out_file=out_mean_distribution_file,
+                          ap_onset_precisions=maxmin_risk_info["result"]["onset_mean_precisions"],
+                          ap_onset_recalls=maxmin_risk_info["result"]["onset_mean_recalls"],
+                          ap_onset_average_precisions=maxmin_risk_info["result"]["onset_mean_aps"],
+                          ap_wakeup_precisions=maxmin_risk_info["result"]["wakeup_mean_precisions"],
+                          ap_wakeup_recalls=maxmin_risk_info["result"]["wakeup_mean_recalls"],
+                          ap_wakeup_average_precisions=maxmin_risk_info["result"]["wakeup_mean_aps"])
 
 
 
@@ -513,33 +546,54 @@ if __name__ == "__main__":
                           ap_wakeup_precisions=maxmin_risk_info["result_noexclude"]["wakeup_max_precisions"],
                           ap_wakeup_recalls=maxmin_risk_info["result_noexclude"]["wakeup_max_recalls"],
                           ap_wakeup_average_precisions=maxmin_risk_info["result_noexclude"]["wakeup_max_aps"])
+            titlestr = "{} Cut {} Max (Onset Deviance: {}, Wakeup Deviance: {})".format(entry_name, cut,
+                                                                          maxmin_risk_info["result_noexclude"]["onset_mean_mAP"] - maxmin_risk_info["result_noexclude"]["onset_mAP"],
+                                                                          maxmin_risk_info["result_noexclude"]["wakeup_mean_mAP"] - maxmin_risk_info["result_noexclude"]["wakeup_mAP"])
+            plot_ap_curve(title=titlestr,
+                          out_file=out_noexcl_mean_distribution_file,
+                          ap_onset_precisions=maxmin_risk_info["result_noexclude"]["onset_mean_precisions"],
+                          ap_onset_recalls=maxmin_risk_info["result_noexclude"]["onset_mean_recalls"],
+                          ap_onset_average_precisions=maxmin_risk_info["result_noexclude"]["onset_mean_aps"],
+                          ap_wakeup_precisions=maxmin_risk_info["result_noexclude"]["wakeup_mean_precisions"],
+                          ap_wakeup_recalls=maxmin_risk_info["result_noexclude"]["wakeup_mean_recalls"],
+                          ap_wakeup_average_precisions=maxmin_risk_info["result_noexclude"]["wakeup_mean_aps"])
 
             mean_result_gap = (maxmin_risk_info["result"]["onset_mAP"] - maxmin_risk_info["result"]["onset_min_mAP"] +
                                 maxmin_risk_info["result"]["wakeup_mAP"] - maxmin_risk_info["result"]["wakeup_min_mAP"]) / 2
             mean_result_gain = (maxmin_risk_info["result"]["onset_max_mAP"] - maxmin_risk_info["result"]["onset_mAP"] +
                                 maxmin_risk_info["result"]["wakeup_max_mAP"] - maxmin_risk_info["result"]["wakeup_mAP"]) / 2
+            mean_result_deviance = (maxmin_risk_info["result"]["onset_mean_mAP"] - maxmin_risk_info["result"]["onset_mAP"] +
+                                    maxmin_risk_info["result"]["wakeup_mean_mAP"] - maxmin_risk_info["result"]["wakeup_mAP"]) / 2
             mean_result_noexcl_gap = (maxmin_risk_info["result_noexclude"]["onset_mAP"] - maxmin_risk_info["result_noexclude"]["onset_min_mAP"] +
                                 maxmin_risk_info["result_noexclude"]["wakeup_mAP"] - maxmin_risk_info["result_noexclude"]["wakeup_min_mAP"]) / 2
             mean_result_noexcl_gain = (maxmin_risk_info["result_noexclude"]["onset_max_mAP"] - maxmin_risk_info["result_noexclude"]["onset_mAP"] +
                                 maxmin_risk_info["result_noexclude"]["wakeup_max_mAP"] - maxmin_risk_info["result_noexclude"]["wakeup_mAP"]) / 2
+            mean_result_noexcl_deviance = (maxmin_risk_info["result_noexclude"]["onset_mean_mAP"] - maxmin_risk_info["result_noexclude"]["onset_mAP"] +
+                                            maxmin_risk_info["result_noexclude"]["wakeup_mean_mAP"] - maxmin_risk_info["result_noexclude"]["wakeup_mAP"]) / 2
 
             # write to matrix
             result_gaps_matrix[i, j] = mean_result_gap
             result_gains_matrix[i, j] = mean_result_gain
+            result_deviance_matrix[i, j] = mean_result_deviance
             result_noexcl_gaps_matrix[i, j] = mean_result_noexcl_gap
             result_noexcl_gains_matrix[i, j] = mean_result_noexcl_gain
+            result_noexcl_deviance_matrix[i, j] = mean_result_noexcl_deviance
 
     # save gaps gains matrix to pandas dataframe
     result_gaps_df = pd.DataFrame(result_gaps_matrix, index=list(config["densities"].keys()), columns=run_cuts)
     result_gains_df = pd.DataFrame(result_gains_matrix, index=list(config["densities"].keys()), columns=run_cuts)
+    result_deviance_df = pd.DataFrame(result_deviance_matrix, index=list(config["densities"].keys()), columns=run_cuts)
     result_noexcl_gaps_df = pd.DataFrame(result_noexcl_gaps_matrix, index=list(config["densities"].keys()), columns=run_cuts)
     result_noexcl_gains_df = pd.DataFrame(result_noexcl_gains_matrix, index=list(config["densities"].keys()), columns=run_cuts)
+    result_noexcl_deviance_df = pd.DataFrame(result_noexcl_deviance_matrix, index=list(config["densities"].keys()), columns=run_cuts)
 
     # save to csv
     result_gaps_df.to_csv(os.path.join(output_folder, "gaps.csv"))
     result_gains_df.to_csv(os.path.join(output_folder, "gains.csv"))
+    result_deviance_df.to_csv(os.path.join(output_folder, "deviance.csv"))
     result_noexcl_gaps_df.to_csv(os.path.join(output_folder, "noexcl_gaps.csv"))
     result_noexcl_gains_df.to_csv(os.path.join(output_folder, "noexcl_gains.csv"))
+    result_noexcl_deviance_df.to_csv(os.path.join(output_folder, "noexcl_deviance.csv"))
 
     print("All done!")
 

@@ -107,8 +107,13 @@ def get_mean(matches, probas, cutoffs):
             num_matches = np.sum(matches2[low_idx:high_idx])
 
             probas2[low_idx:high_idx] = np.linspace(low_proba_val, high_proba_val, high_idx - low_idx)
-            matches2[low_idx:high_idx] = False
-            matches2[high_idx - num_matches:high_idx] = True
+            if 0 < num_matches < high_idx - low_idx:
+                if num_matches == high_idx - low_idx - 1:
+                    matches2[low_idx: high_idx - 1] = True
+                    matches2[high_idx - 1] = False
+                else:
+                    matches2[low_idx:high_idx] = False
+                    matches2[np.linspace(low_idx, high_idx, num_matches + 2, dtype=np.int32)[1:-1]] = True
     return matches2[::-1], probas2[::-1]
 
 def get_single_bootstrap(series_ids: np.ndarray, series_locs: np.ndarray, series_probas: np.ndarray, cutoffs: np.ndarray):
