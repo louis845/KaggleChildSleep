@@ -106,6 +106,7 @@ def validation_ap(fig: matplotlib.figure.Figure, gt_events,
                   selected_density_folders: list[str], selected_regression_folders: list[str],
                   cutoff, augmentation, augmentation_cutoff, matrix_values_pruning,
                   linear_dropoff, postalignment,
+                  time_binning, time_binning_score_cut,
 
                   selected_fold: int,
 
@@ -174,7 +175,14 @@ def validation_ap(fig: matplotlib.figure.Figure, gt_events,
                 preds_locs_wakeup = postprocessing.align_predictions(preds_locs_wakeup, wakeup_kernel_vals, first_zero=first_zero)
                 assert len(preds_locs_wakeup) == original_length
 
-        if augmentation:
+        if time_binning:
+            onset_locs_all_probas = postprocessing.get_time_binned_probas(preds_locs_onset, onset_locs_all_probas,
+                                                                          score_cut=time_binning_score_cut,
+                                                                          day_multiple=3)
+            wakeup_locs_all_probas = postprocessing.get_time_binned_probas(preds_locs_wakeup, wakeup_locs_all_probas,
+                                                                            score_cut=time_binning_score_cut,
+                                                                            day_multiple=3)
+        elif augmentation:
             # augment and restrict the probas
             preds_locs_onset, onset_locs_all_probas = postprocessing.get_augmented_predictions_density(preds_locs_onset,
                                                             onset_kernel_vals, onset_locs_all_probas, cutoff_thresh=augmentation_cutoff)
@@ -255,6 +263,7 @@ def validation_ap(fig: matplotlib.figure.Figure, gt_events,
 
 class MainWindow(QMainWindow):
     union_width_values = [31, 35, 40, 45, 50, 55, 60, 70, 80, 90, 100, 120]
+    time_binning_values = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 0.6, 1.0, 2.0, 5.0, 6.0, 10.0, 15.0, 20.0]
 
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
@@ -317,6 +326,7 @@ class MainWindow(QMainWindow):
         self.checkbox_linear_dropoff = QCheckBox("Use Linear Dropoff")
         self.checkbox_postalignment = QCheckBox("Use Post Alignment")
         self.checkbox_exclude_bad = QCheckBox("Exclude Bad Segmentations")
+        self.checkbox_time_binning = QCheckBox("Use Time Binning")
         self.checkbox_layout.addStretch(1)
         self.checkbox_layout.addWidget(self.checkbox_augmentation)
         self.checkbox_layout.addStretch(1)
@@ -327,6 +337,8 @@ class MainWindow(QMainWindow):
         self.checkbox_layout.addWidget(self.checkbox_postalignment)
         self.checkbox_layout.addStretch(1)
         self.checkbox_layout.addWidget(self.checkbox_exclude_bad)
+        self.checkbox_layout.addStretch(1)
+        self.checkbox_layout.addWidget(self.checkbox_time_binning)
         self.checkbox_layout.addStretch(1)
         self.top_layout.addLayout(self.checkbox_layout)
 
@@ -354,6 +366,18 @@ class MainWindow(QMainWindow):
         self.slider_aug_cutoff.setMaximum(1000)
         self.slider_aug_cutoff.valueChanged.connect(self.update_aug_cutoff_value)
         self.top_layout.addWidget(self.slider_aug_cutoff)
+
+        self.slider_time_binning_cut_label = QLabel("Time binning cut: {}".format(self.time_binning_values[0]))
+        self.slider_time_binning_cut_label.setAlignment(Qt.AlignCenter)  # Centered the text for the slider label
+        font_metrics = QFontMetrics(self.slider_time_binning_cut_label.font())
+        self.slider_time_binning_cut_label.setFixedHeight(
+            font_metrics.height())  # Set the height of the label to the height of the text
+        self.top_layout.addWidget(self.slider_time_binning_cut_label)
+
+        self.slider_time_binning_cut = QSlider(Qt.Horizontal)
+        self.slider_time_binning_cut.setMaximum(len(self.time_binning_values))
+        self.slider_time_binning_cut.valueChanged.connect(self.update_time_binning_cut_value)
+        self.top_layout.addWidget(self.slider_time_binning_cut)
 
         # Create two list of checkboxes
         self.bottom_scroll_area = QScrollArea()
@@ -426,6 +450,7 @@ class MainWindow(QMainWindow):
                       self.checkbox_matrix_values_pruning.isChecked(),
 
                       self.checkbox_linear_dropoff.isChecked(), self.checkbox_postalignment.isChecked(),
+                      self.checkbox_time_binning.isChecked(), self.get_time_binning_cutoff(),
 
                       selected_fold=selected_fold,
 
@@ -443,6 +468,12 @@ class MainWindow(QMainWindow):
 
     def update_aug_cutoff_value(self, value):
         self.slider_aug_cutoff_label.setText("Aug Cutoff: " + str(self.get_aug_cutoff()))
+
+    def get_time_binning_cutoff(self):
+        return self.time_binning_values[self.slider_time_binning_cut.value()]
+
+    def update_time_binning_cut_value(self, value):
+        self.slider_time_binning_cut_label.setText("Time binning cutoff: " + self.get_time_binning_cutoff())
 
 def load_subfold(k):
     return manager_folds.load_dataset("fold_{}_val_5cv".format(k))

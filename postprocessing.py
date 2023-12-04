@@ -335,3 +335,26 @@ def get_augmented_predictions_density(preds_locs, preds_local_kernel, preds_scor
     sort_index = np.argsort(all_preds_locs)
     all_preds_locs, all_preds_probas = all_preds_locs[sort_index], all_preds_probas[sort_index]
     return all_preds_locs, all_preds_probas
+
+DAY_STEPS = 17280
+MAX_DAY_MULTIPLE = 50
+
+def get60cut(cut):
+    x = np.arange(0, 61, cut, dtype=np.float32)
+    return x[:np.searchsorted(x, 60.0, side="right")]
+
+def get_time_binned_probas(preds_locs, preds_score, score_cut: float, day_multiple: int):
+    time_bins = MAX_DAY_MULTIPLE - (preds_locs.astype(np.int32) // (DAY_STEPS * day_multiple))
+    time_bins = np.maximum(time_bins, 0)
+
+    time_proba_bins = time_bins
+    cutoffs = get60cut(score_cut)
+    for i in range(len(cutoffs) - 1):
+        cutoff_low = cutoffs[i]
+        cutoff_high = cutoffs[i + 1]
+        mask = np.logical_and(cutoff_low < preds_score, preds_score <= cutoff_high)
+
+        if np.any(mask):
+            time_proba_bins[mask] += (i * (MAX_DAY_MULTIPLE + 1))
+
+    return preds_score + time_proba_bins * 61.0
