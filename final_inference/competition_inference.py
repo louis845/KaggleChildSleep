@@ -179,13 +179,14 @@ if __name__ == "__main__":
     models_callable.set_parameters(regression_cutoff=0.01,
                                    regression_pruning=72,
                                    confidence_cutoff=0.01,
-                                   confidence_aug_cutoff=1.0)
+                                   confidence_aug_cutoff=1.0,
+                                   matrix_profile_downsampling_rate=12)
 
     # Load the data and run inference
     competition_inference = CompetitionInference(input_pq_file=input_pq_file,
                                                     models_callable=models_callable)
     competition_inference.inference_all(out_file_path=out_file_path, log_debug=True, show_tqdm_bar=True, model_filter=model_filter_func,
-                                        cache=True, use_matrix_profile_pruning=True)
+                                        cache=True, use_matrix_profile_pruning=False)
 
     # Done. Garbage collect
     gc.collect()
