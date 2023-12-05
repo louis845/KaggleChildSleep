@@ -116,8 +116,8 @@ class CompetitionModels:
             print(confidence_cfg["model_name"])
 
             assert confidence_cfg["input_data"] in ["anglez", "enmo", "both"]
-
-            model = model_event_density_unet.EventDensityUnet(in_channels=2 if "both" else 1,
+            in_channels = 2 if (confidence_cfg["input_data"] == "both") else 1
+            model = model_event_density_unet.EventDensityUnet(in_channels=in_channels,
                                                          attention_blocks=confidence_cfg["attention_blocks"],
                                                          attention_mode=confidence_cfg["attention_mode"],
                                                          use_time_input=confidence_cfg["use_time_information"],
