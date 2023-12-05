@@ -13,6 +13,8 @@ density_models_enmo = ["event5fold_density_enmo_2elastic_length3_drop_model_fold
 density_models_bdfix_swa_5cv = ["event5fold_density_bdfix_swa_2elastic_length3_drop_model_fold{}", "event5fold_density_bdfix_swa_time_2elastic_length2_drop_model_fold{}"]
 density_models_bdfix_enmo = ["event5fold_density_bdfix_enmo_2elastic_length3_drop_model_fold{}"]
 
+density_models_both_5cv = ["event5fold_noprune_2elastic_length3_drop_model_fold{}", "event5fold_noprune_time_2elastic_length2_drop_model_fold{}"]
+
 density_models_10cv = ["event10fold_2elastic_length3_drop_model_fold{}", "event10fold_time_2elastic_length2_drop_model_fold{}", "event10fold_enmo_2elastic_length3_drop_model_fold{}"]
 density_models_swa_10cv = ["event10fold_swa_2elastic_length3_drop_model_fold{}", "event10fold_swa_time_2elastic_length2_drop_model_fold{}", "event10fold_swa_enmo_2elastic_length3_drop_model_fold{}"]
 density_models_epochs = [
@@ -95,6 +97,20 @@ if __name__ == "__main__":
             val_mAP = val_metrics["val_onset_dense_loc_softmax_mAP"] + val_metrics["val_wakeup_dense_loc_softmax_mAP"]
             best_model_idx = int(val_mAP.idxmax())
             shutil.copy(os.path.join(model_dir, "swa_model_{}.pt".format(best_model_idx)), os.path.join(out_folder, model_name + "_best.pt"))
+
+    for model in tqdm.tqdm(density_models_both_5cv):
+        for k in range(1, 6):
+            # usual model
+            model_name = model.format(k)
+            model_dir = os.path.join("models", model.format(k))
+
+            shutil.copy(os.path.join(model_dir, "model.pt"), os.path.join(out_folder, model_name + ".pt"))
+
+            # best model (pick early stopped best epoch)
+            val_metrics = pd.read_csv(os.path.join(model_dir, "val_metrics.csv"), index_col=0)
+            val_mAP = val_metrics["val_onset_dense_loc_softmax_mAP"] + val_metrics["val_wakeup_dense_loc_softmax_mAP"]
+            best_model_idx = int(val_mAP.idxmax())
+            shutil.copy(os.path.join(model_dir, "model_{}.pt".format(best_model_idx)), os.path.join(out_folder, model_name + "_best.pt"))
 
 
     for i, model in tqdm.tqdm(enumerate(density_models_10cv)):
