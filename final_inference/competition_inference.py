@@ -219,9 +219,9 @@ if __name__ == "__main__":
 
 
     # for debugging and comparison with the kaggle script
-    """Onset Average Precision: 0.8474360766019181
-       Wakeup Average Precision: 0.8451342579179949
-       Combined Average Precision: 0.8462851672599565"""
+    """Onset Average Precision: 0.8202315361864594
+Wakeup Average Precision: 0.8159815777928676
+Combined Average Precision: 0.8181065569896635"""
 
     import sys
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

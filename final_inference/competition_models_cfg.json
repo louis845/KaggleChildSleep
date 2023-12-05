@@ -129,7 +129,7 @@
   ],
   "confidence_models": [
     {
-      "model_name": "event5fold_density_swa_2elastic_length3_drop_model_fold1",
+      "model_name": "event5fold_density_bdfix_swa_2elastic_length3_drop_model_fold1_best",
       "attention_blocks": 3,
       "stride_count": 8,
       "use_time_information": false,
@@ -137,7 +137,7 @@
       "input_data": "anglez"
     },
     {
-      "model_name": "event5fold_density_swa_time_2elastic_length2_drop_model_fold1",
+      "model_name": "event5fold_density_bdfix_swa_time_2elastic_length2_drop_model_fold1_best",
       "attention_blocks": 2,
       "stride_count": 8,
       "use_time_information": true,
@@ -145,7 +145,7 @@
       "input_data": "anglez"
     },
     {
-      "model_name": "event5fold_density_enmo_2elastic_length3_drop_model_fold1",
+      "model_name": "event5fold_density_bdfix_enmo_2elastic_length3_drop_model_fold1",
       "attention_blocks": 3,
       "stride_count": 8,
       "use_time_information": false,
@@ -153,7 +153,7 @@
       "input_data": "enmo"
     },
     {
-      "model_name": "event5fold_density_swa_2elastic_length3_drop_model_fold2",
+      "model_name": "event5fold_density_bdfix_swa_2elastic_length3_drop_model_fold2_best",
       "attention_blocks": 3,
       "stride_count": 8,
       "use_time_information": false,
@@ -161,7 +161,7 @@
       "input_data": "anglez"
     },
     {
-      "model_name": "event5fold_density_swa_time_2elastic_length2_drop_model_fold2",
+      "model_name": "event5fold_density_bdfix_swa_time_2elastic_length2_drop_model_fold2_best",
       "attention_blocks": 2,
       "stride_count": 8,
       "use_time_information": true,
@@ -169,7 +169,7 @@
       "input_data": "anglez"
     },
     {
-      "model_name": "event5fold_density_enmo_2elastic_length3_drop_model_fold2",
+      "model_name": "event5fold_density_bdfix_enmo_2elastic_length3_drop_model_fold2",
       "attention_blocks": 3,
       "stride_count": 8,
       "use_time_information": false,
@@ -177,7 +177,7 @@
       "input_data": "enmo"
     },
     {
-      "model_name": "event5fold_density_swa_2elastic_length3_drop_model_fold3",
+      "model_name": "event5fold_density_bdfix_swa_2elastic_length3_drop_model_fold3_best",
       "attention_blocks": 3,
       "stride_count": 8,
       "use_time_information": false,
@@ -185,7 +185,7 @@
       "input_data": "anglez"
     },
     {
-      "model_name": "event5fold_density_swa_time_2elastic_length2_drop_model_fold3",
+      "model_name": "event5fold_density_bdfix_swa_time_2elastic_length2_drop_model_fold3_best",
       "attention_blocks": 2,
       "stride_count": 8,
       "use_time_information": true,
@@ -193,7 +193,7 @@
       "input_data": "anglez"
     },
     {
-      "model_name": "event5fold_density_enmo_2elastic_length3_drop_model_fold3",
+      "model_name": "event5fold_density_bdfix_enmo_2elastic_length3_drop_model_fold3",
       "attention_blocks": 3,
       "stride_count": 8,
       "use_time_information": false,
@@ -201,7 +201,7 @@
       "input_data": "enmo"
     },
     {
-      "model_name": "event5fold_density_swa_2elastic_length3_drop_model_fold4",
+      "model_name": "event5fold_density_bdfix_swa_2elastic_length3_drop_model_fold4_best",
       "attention_blocks": 3,
       "stride_count": 8,
       "use_time_information": false,
@@ -209,7 +209,7 @@
       "input_data": "anglez"
     },
     {
-      "model_name": "event5fold_density_swa_time_2elastic_length2_drop_model_fold4",
+      "model_name": "event5fold_density_bdfix_swa_time_2elastic_length2_drop_model_fold4_best",
       "attention_blocks": 2,
       "stride_count": 8,
       "use_time_information": true,
@@ -217,7 +217,7 @@
       "input_data": "anglez"
     },
     {
-      "model_name": "event5fold_density_enmo_2elastic_length3_drop_model_fold4",
+      "model_name": "event5fold_density_bdfix_enmo_2elastic_length3_drop_model_fold4",
       "attention_blocks": 3,
       "stride_count": 8,
       "use_time_information": false,
@@ -225,7 +225,7 @@
       "input_data": "enmo"
     },
     {
-      "model_name": "event5fold_density_swa_2elastic_length3_drop_model_fold5",
+      "model_name": "event5fold_density_bdfix_swa_2elastic_length3_drop_model_fold5_best",
       "attention_blocks": 3,
       "stride_count": 8,
       "use_time_information": false,
@@ -233,7 +233,7 @@
       "input_data": "anglez"
     },
     {
-      "model_name": "event5fold_density_swa_time_2elastic_length2_drop_model_fold5",
+      "model_name": "event5fold_density_bdfix_swa_time_2elastic_length2_drop_model_fold5_best",
       "attention_blocks": 2,
       "stride_count": 8,
       "use_time_information": true,
@@ -241,12 +241,94 @@
       "input_data": "anglez"
     },
     {
-      "model_name": "event5fold_density_enmo_2elastic_length3_drop_model_fold5",
+      "model_name": "event5fold_density_bdfix_enmo_2elastic_length3_drop_model_fold5",
       "attention_blocks": 3,
       "stride_count": 8,
       "use_time_information": false,
       "use_swa": false,
       "input_data": "enmo"
+    },
+
+
+    {
+      "model_name": "event5fold_noprune_2elastic_length3_drop_model_fold1_best",
+      "attention_blocks": 3,
+      "stride_count": 8,
+      "use_time_information": false,
+      "use_swa": false,
+      "input_data": "both"
+    },
+    {
+      "model_name": "event5fold_noprune_time_2elastic_length2_drop_model_fold1_best",
+      "attention_blocks": 2,
+      "stride_count": 8,
+      "use_time_information": true,
+      "use_swa": false,
+      "input_data": "both"
+    },
+    {
+      "model_name": "event5fold_noprune_2elastic_length3_drop_model_fold2_best",
+      "attention_blocks": 3,
+      "stride_count": 8,
+      "use_time_information": false,
+      "use_swa": false,
+      "input_data": "both"
+    },
+    {
+      "model_name": "event5fold_noprune_time_2elastic_length2_drop_model_fold2_best",
+      "attention_blocks": 2,
+      "stride_count": 8,
+      "use_time_information": true,
+      "use_swa": false,
+      "input_data": "both"
+    },
+    {
+      "model_name": "event5fold_noprune_2elastic_length3_drop_model_fold3_best",
+      "attention_blocks": 3,
+      "stride_count": 8,
+      "use_time_information": false,
+      "use_swa": false,
+      "input_data": "both"
+    },
+    {
+      "model_name": "event5fold_noprune_time_2elastic_length2_drop_model_fold3_best",
+      "attention_blocks": 2,
+      "stride_count": 8,
+      "use_time_information": true,
+      "use_swa": false,
+      "input_data": "both"
+    },
+    {
+      "model_name": "event5fold_noprune_2elastic_length3_drop_model_fold4_best",
+      "attention_blocks": 3,
+      "stride_count": 8,
+      "use_time_information": false,
+      "use_swa": false,
+      "input_data": "both"
+    },
+    {
+      "model_name": "event5fold_noprune_time_2elastic_length2_drop_model_fold4_best",
+      "attention_blocks": 2,
+      "stride_count": 8,
+      "use_time_information": true,
+      "use_swa": false,
+      "input_data": "both"
+    },
+    {
+      "model_name": "event5fold_noprune_2elastic_length3_drop_model_fold5_best",
+      "attention_blocks": 3,
+      "stride_count": 8,
+      "use_time_information": false,
+      "use_swa": false,
+      "input_data": "both"
+    },
+    {
+      "model_name": "event5fold_noprune_time_2elastic_length2_drop_model_fold5_best",
+      "attention_blocks": 2,
+      "stride_count": 8,
+      "use_time_information": true,
+      "use_swa": false,
+      "input_data": "both"
     }
   ]
 }
