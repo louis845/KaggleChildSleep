@@ -112,7 +112,7 @@ class CompetitionModels:
             confidence_cfg["model_name"] = cfg["model_name"]
             print(confidence_cfg["model_name"])
 
-            assert confidence_cfg["input_data"] in ["anglez", "enmo"]
+            assert confidence_cfg["input_data"] in ["anglez", "enmo", "both"]
 
             model = model_event_density_unet.EventDensityUnet(in_channels=1,
                                                          attention_blocks=confidence_cfg["attention_blocks"],
@@ -264,6 +264,10 @@ class CompetitionModels:
                     accel_data = accel_data_anglez
                 elif input_data == "enmo":
                     accel_data = accel_data_enmo
+                else:
+                    accel_data = np.concatenate(
+                        [accel_data_anglez, accel_data_enmo], axis=1
+                    )
 
                 _, onset_locs_probas, wakeup_locs_probas = model_event_density_unet.event_density_inference(model=model,
                                                                  time_series=accel_data,
