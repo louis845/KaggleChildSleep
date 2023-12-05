@@ -98,7 +98,7 @@ def event_density_file_logit_iterator(selected_density_folder, series_id) -> Ite
 
 def validation_ap(gt_events, all_series_ids,
                   selected_density_folders: list[str], selected_regression_folders: list[str],
-                  cutoff, augmentation, augmentation_cutoff, matrix_values_pruning,
+                  cutoff, augmentation, augmentation_cutoff, matrix_values_pruning, temperature,
 
                   regression_pruning, regression_postpruning,
 
@@ -133,7 +133,8 @@ def validation_ap(gt_events, all_series_ids,
                                                                                     "onset": preds_locs_onset,
                                                                                     "wakeup": preds_locs_wakeup
                                                                              }],
-                                                                             return_probas=False)
+                                                                             return_probas=False,
+                                                                             temperature=temperature)
             if onset_locs_all_probas is None:
                 onset_locs_all_probas = onset_locs_probas[0]
                 wakeup_locs_all_probas = wakeup_locs_probas[0]
@@ -253,6 +254,9 @@ def run_validation_AP(config, all_series_ids, per_series_id_events):
     regression_postpruning = regression_cfg_content["postpruning"]
     augmentation = regression_cfg_content["augmentation"]
     augmentation_cutoff = regression_cfg_content["augmentation_cutoff"]
+    temperature = 1.0
+    if "temperature" in regression_cfg_content:
+        temperature = regression_cfg_content["temperature"]
 
     density_results = density_cfg_content["density_results"]
 
@@ -261,7 +265,9 @@ def run_validation_AP(config, all_series_ids, per_series_id_events):
                   selected_regression_folders=regression_kernels,
                   cutoff=0.0, augmentation=augmentation, augmentation_cutoff=augmentation_cutoff, matrix_values_pruning=False,
 
-                  regression_pruning=regression_pruning, regression_postpruning=regression_postpruning)
+                  regression_pruning=regression_pruning, regression_postpruning=regression_postpruning,
+
+                  temperature=temperature)
 
 if __name__ == "__main__":
     # load gt values and list of series ids

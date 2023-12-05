@@ -4,10 +4,11 @@ import torch.nn
 
 from model_event_unet import *
 
-def stable_softmax(x: np.ndarray) -> np.ndarray:
+def stable_softmax(x: np.ndarray, temperature=1.0) -> np.ndarray:
     assert isinstance(x, np.ndarray), "x must be a numpy array"
     assert len(x.shape) == 1, "x must be a 1D array"
     x = x - np.max(x)
+    x = x / temperature
     exp_x = np.exp(x)
     return exp_x / np.sum(exp_x)
 
@@ -339,7 +340,8 @@ def event_density_single_logit_iterator(model: EventDensityUnet, time_series: np
 def event_density_probas_from_interval_info(interval_info_stream: Iterator[dict[str, np.ndarray]],
                                             total_length: int,
                                             predicted_locations: Optional[list[dict[str, np.ndarray]]]=None,
-                                            return_probas=True):
+                                            return_probas=True,
+                                            temperature=1.0):
     if return_probas:
         probas = np.zeros((2, total_length), dtype=np.float32)
         multiplicities = np.zeros((total_length,), dtype=np.int32)
@@ -392,7 +394,7 @@ def event_density_probas_from_interval_info(interval_info_stream: Iterator[dict[
                     if onset_locs_idxs[0] < onset_locs_idxs[1] - 1:
                         onset_locs_of_interest = onset_locations[onset_locs_idxs[0]:onset_locs_idxs[1]] - interval_start
                         interval_logits_of_interest = interval_logits[0, onset_locs_of_interest]
-                        interval_probas_of_interest = stable_softmax(interval_logits_of_interest)
+                        interval_probas_of_interest = stable_softmax(interval_logits_of_interest, temperature=temperature)
 
                         onset_locs_probas[k][onset_locs_idxs[0]:onset_locs_idxs[1]] += interval_probas_of_interest * event_presence_score
                         onset_locs_multiplicities[k][onset_locs_idxs[0]:onset_locs_idxs[1]] += 1
@@ -406,7 +408,7 @@ def event_density_probas_from_interval_info(interval_info_stream: Iterator[dict[
                     if wakeup_locs_idxs[0] < wakeup_locs_idxs[1] - 1:
                         wakeup_locs_of_interest = wakeup_locations[wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] - interval_start
                         interval_logits_of_interest = interval_logits[1, wakeup_locs_of_interest]
-                        interval_probas_of_interest = stable_softmax(interval_logits_of_interest)
+                        interval_probas_of_interest = stable_softmax(interval_logits_of_interest, temperature=temperature)
 
                         wakeup_locs_probas[k][wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] += interval_probas_of_interest * event_presence_score
                         wakeup_locs_multiplicities[k][wakeup_locs_idxs[0]:wakeup_locs_idxs[1]] += 1
@@ -432,7 +434,9 @@ def event_density_probas_from_interval_info(interval_info_stream: Iterator[dict[
 def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
                                predicted_locations: Optional[list[dict[str, np.ndarray]]]=None, batch_size=32,
                                prediction_length=17280, expand=8640, times: Optional[dict[str, np.ndarray]]=None,
-                               stride_count=4, flip_augmentation=False, use_time_input=False, device=None):
+                               stride_count=4, flip_augmentation=False, use_time_input=False, device=None,
+
+                               temperature=1.0):
 
     logit_stream = event_density_logit_iterator(model, time_series, batch_size=batch_size,
                                  prediction_length=prediction_length, expand=expand,
@@ -440,7 +444,8 @@ def event_density_inference(model: EventDensityUnet, time_series: np.ndarray,
                                  flip_augmentation=flip_augmentation,
                                  use_time_input=use_time_input, device=device)
 
-    return event_density_probas_from_interval_info(logit_stream, time_series.shape[1], predicted_locations=predicted_locations)
+    return event_density_probas_from_interval_info(logit_stream, time_series.shape[1], predicted_locations=predicted_locations,
+                                                   temperature=temperature)
 
 class ProbasDilationConverter:
     def __init__(self, sigma: int, device: torch.device):

@@ -1,84 +1,94 @@
 {
   "regressions": {
-    "All, 72 Pruning, 12 Kernel, No Augmentation": {
+    "All, 72 Pruning, 12 Kernel, No Augmentation, 1.0 Temp": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
       "pruning": 72,
       "postpruning": 0,
       "kernel_width": 12,
       "augmentation": false,
-      "augmentation_cutoff": 1.0
+      "augmentation_cutoff": 1.0,
+      "temperature": 1.0
     },
-    "All, 72 Pruning, 12 Kernel, 1.0 Augmentation": {
+    "All, 72 Pruning, 12 Kernel, 0.5 Augmentation, 1.0 Temp": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
       "pruning": 72,
       "postpruning": 0,
       "kernel_width": 12,
       "augmentation": true,
-      "augmentation_cutoff": 1.0
+      "augmentation_cutoff": 0.5,
+      "temperature": 1.0
     },
-    "All, 72 Pruning, 12 Kernel, 0.875 Augmentation": {
+    "All, 72 Pruning, 12 Kernel, No Augmentation, 0.75 Temp": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 72,
+      "postpruning": 0,
+      "kernel_width": 12,
+      "augmentation": false,
+      "augmentation_cutoff": 1.0,
+      "temperature": 0.75
+    },
+    "All, 72 Pruning, 12 Kernel, 0.5 Augmentation, 0.75 Temp": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
       "pruning": 72,
       "postpruning": 0,
       "kernel_width": 12,
       "augmentation": true,
-      "augmentation_cutoff": 0.875
+      "augmentation_cutoff": 0.5,
+      "temperature": 0.75
     },
-    "All, 72 Pruning, 12 Kernel, 0.75 Augmentation": {
+    "All, 72 Pruning, 12 Kernel, No Augmentation, 0.5 Temp": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 72,
+      "postpruning": 0,
+      "kernel_width": 12,
+      "augmentation": false,
+      "augmentation_cutoff": 1.0,
+      "temperature": 0.5
+    },
+    "All, 72 Pruning, 12 Kernel, 0.5 Augmentation, 0.5 Temp": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
       "pruning": 72,
       "postpruning": 0,
       "kernel_width": 12,
       "augmentation": true,
-      "augmentation_cutoff": 0.75
+      "augmentation_cutoff": 0.5,
+      "temperature": 0.5
     },
-    "All, 72 Pruning, 12 Kernel, 0.625 Augmentation": {
+    "All, 72 Pruning, 12 Kernel, No Augmentation, 1.25 Temp": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 72,
+      "postpruning": 0,
+      "kernel_width": 12,
+      "augmentation": false,
+      "augmentation_cutoff": 1.0,
+      "temperature": 1.25
+    },
+    "All, 72 Pruning, 12 Kernel, 0.5 Augmentation, 1.25 Temp": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
       "pruning": 72,
       "postpruning": 0,
       "kernel_width": 12,
       "augmentation": true,
-      "augmentation_cutoff": 0.625
+      "augmentation_cutoff": 0.5,
+      "temperature": 1.25
     },
-    "All, 72 Pruning, 12 Kernel, 0.5 Augmentation": {
+    "All, 72 Pruning, 12 Kernel, No Augmentation, 1.5 Temp": {
+      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
+      "pruning": 72,
+      "postpruning": 0,
+      "kernel_width": 12,
+      "augmentation": false,
+      "augmentation_cutoff": 1.0,
+      "temperature": 1.5
+    },
+    "All, 72 Pruning, 12 Kernel, 0.5 Augmentation, 1.5 Temp": {
       "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
       "pruning": 72,
       "postpruning": 0,
       "kernel_width": 12,
       "augmentation": true,
-      "augmentation_cutoff": 0.5
-    },
-    "All, 72 Pruning, 12 Kernel, 0.375 Augmentation": {
-      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
-      "pruning": 72,
-      "postpruning": 0,
-      "kernel_width": 12,
-      "augmentation": true,
-      "augmentation_cutoff": 0.375
-    },
-    "All, 72 Pruning, 12 Kernel, 0.25 Augmentation": {
-      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
-      "pruning": 72,
-      "postpruning": 0,
-      "kernel_width": 12,
-      "augmentation": true,
-      "augmentation_cutoff": 0.25
-    },
-    "All, 72 Pruning, 12 Kernel, 0.125 Augmentation": {
-      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
-      "pruning": 72,
-      "postpruning": 0,
-      "kernel_width": 12,
-      "augmentation": true,
-      "augmentation_cutoff": 0.125
-    },
-    "All, 72 Pruning, 12 Kernel, 0.0 Augmentation": {
-      "regression_kernels": ["Standard_5CV", "Standard_5CV_Mid", "Standard_5CV_Wide"],
-      "pruning": 72,
-      "postpruning": 0,
-      "kernel_width": 12,
-      "augmentation": true,
-      "augmentation_cutoff": 0.0
+      "augmentation_cutoff": 0.5,
+      "temperature": 1.5
     }
   },
   "densities": {
