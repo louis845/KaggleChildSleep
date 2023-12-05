@@ -88,7 +88,8 @@ class CompetitionModels:
                 "training_strategy": "density_only",
                 "input_length": 17280,
                 "expand": 8640,
-                "use_swa": False
+                "use_swa": False,
+                "weight": 1.0
             }
 
             if "attention_blocks" in cfg:
@@ -109,6 +110,8 @@ class CompetitionModels:
                 confidence_cfg["expand"] = cfg["expand"]
             if "use_swa" in cfg:
                 confidence_cfg["use_swa"] = cfg["use_swa"]
+            if "weight" in cfg:
+                confidence_cfg["weight"] = cfg["weight"]
             confidence_cfg["model_name"] = cfg["model_name"]
             print(confidence_cfg["model_name"])
 
@@ -137,7 +140,8 @@ class CompetitionModels:
                 "use_time_information": confidence_cfg["use_time_information"],
                 "input_data": confidence_cfg["input_data"],
                 "use_swa": confidence_cfg["use_swa"],
-                "stride_count": confidence_cfg["stride_count"]
+                "stride_count": confidence_cfg["stride_count"],
+                "weight": confidence_cfg["weight"]
             }
 
             self.confidence_models.append(model_pkg)
@@ -249,10 +253,11 @@ class CompetitionModels:
             use_time_information = confidence_model_pkg["use_time_information"]
             stride_count = confidence_model_pkg["stride_count"]
             input_data = confidence_model_pkg["input_data"]
+            weight = confidence_model_pkg["weight"]
 
             if models_subset is not None and model_name not in models_subset:
                 continue
-            num_confidence_models += 1
+            num_confidence_models += weight
 
             with torch.no_grad():
                 if use_time_information:
@@ -285,11 +290,11 @@ class CompetitionModels:
                                                                  device=self.device)
 
             if onset_confidence_probas is None:
-                onset_confidence_probas = onset_locs_probas[0]
-                wakeup_confidence_probas = wakeup_locs_probas[0]
+                onset_confidence_probas = onset_locs_probas[0] * weight
+                wakeup_confidence_probas = wakeup_locs_probas[0] * weight
             else:
-                onset_confidence_probas += onset_locs_probas[0]
-                wakeup_confidence_probas += wakeup_locs_probas[0]
+                onset_confidence_probas += (onset_locs_probas[0] * weight)
+                wakeup_confidence_probas += (wakeup_locs_probas[0] * weight)
         onset_confidence_probas /= num_confidence_models
         wakeup_confidence_probas /= num_confidence_models
 
