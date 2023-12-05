@@ -271,7 +271,7 @@ class CompetitionModels:
                     accel_data = accel_data_enmo
                 else:
                     accel_data = np.concatenate(
-                        [accel_data_anglez, accel_data_enmo], axis=1
+                        [accel_data_anglez, accel_data_enmo], axis=0
                     )
 
                 _, onset_locs_probas, wakeup_locs_probas = model_event_density_unet.event_density_inference(model=model,
