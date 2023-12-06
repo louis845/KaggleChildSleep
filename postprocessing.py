@@ -358,3 +358,17 @@ def get_time_binned_probas(preds_locs, preds_score, score_cut: float, day_multip
             time_proba_bins[mask] += (i * (MAX_DAY_MULTIPLE + 1))
 
     return preds_score + time_proba_bins * 61.0
+
+def chris_postprocessing(preds_locs: np.ndarray, preds_score: np.ndarray, series_length: int):
+    idxsort = np.argsort(preds_score)[::-1]
+    num_expected_events = int(np.ceil(series_length / DAY_STEPS))
+
+    processed = 0
+    exponent = 0
+    while processed < len(preds_locs):
+        processed_end = min(processed + num_expected_events, len(preds_locs))
+        preds_score[idxsort[processed:processed_end]] = preds_score[idxsort[processed:processed_end]] * (2.0 ** exponent)
+        processed = processed_end
+        exponent -= 1
+
+    return preds_score
