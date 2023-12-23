@@ -28,27 +28,6 @@ import model_unet
 import model_event_density_unet
 import postprocessing
 
-def focal_loss(preds: torch.Tensor, ground_truth: torch.Tensor):
-    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
-
-    ce = torch.nn.functional.binary_cross_entropy_with_logits(preds, ground_truth, reduction="none")
-    preds_probas = torch.sigmoid(preds)
-
-    return (((preds_probas - ground_truth) ** 2) * ce).mean(dim=-1).sum()
-
-def focal_kl_loss(preds: torch.Tensor, ground_truth: torch.Tensor):
-    assert preds.shape == ground_truth.shape, "preds.shape = {}, ground_truth.shape = {}".format(preds.shape, ground_truth.shape)
-    with torch.no_grad():
-        entropy = torch.sum(ground_truth * torch.where(ground_truth > 0.0, torch.log(ground_truth), torch.zeros_like(ground_truth)), dim=1)
-
-    ce = torch.nn.functional.cross_entropy(preds, ground_truth, reduction="none")
-    kl = ce + entropy
-
-    preds_probas = torch.softmax(preds, dim=1)
-    l2 = torch.sum((preds_probas - ground_truth) ** 2, dim=1)
-
-    return 200.0 * (l2 * kl).mean(dim=-1).sum()
-
 
 def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimizer,
                             accel_data_batch: torch.Tensor, labels_density_batch: torch.Tensor,
@@ -62,14 +41,8 @@ def single_training_step(model_: torch.nn.Module, optimizer_: torch.optim.Optimi
         deep_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_token_confidence, labels_segmentation_batch, reduction="none").mean(dim=-1).sum()
     else:
         pred_density_logits, pred_occurences = model_(accel_data_batch, time=times_input)
-    if use_focal_loss:
-        entropy_loss = focal_kl_loss(pred_density_logits, labels_density_batch)
-    else:
-        entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
-    if use_focal_loss:
-        class_loss = focal_loss(pred_occurences, labels_occurrence_batch)
-    else:
-        class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch, reduction="none").mean(dim=-1).sum()
+    entropy_loss = torch.nn.functional.cross_entropy(pred_density_logits, labels_density_batch, reduction="none").mean(dim=-1).sum()
+    class_loss = torch.nn.functional.binary_cross_entropy_with_logits(pred_occurences, labels_occurrence_batch, reduction="none").mean(dim=-1).sum()
     if use_center_softmax:
         loss = entropy_loss + class_loss + deep_loss
         deep_loss_ret = deep_loss.item()
@@ -515,7 +488,6 @@ if __name__ == "__main__":
     parser.add_argument("--expand", type=int, default=8640, help="Expand the intervals by this amount. Default 8640.")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate. Default 0.1.")
     parser.add_argument("--attn_dropout", type=float, default=0.1, help="Attention dropout rate. Default 0.1.")
-    parser.add_argument("--use_focal_loss", action="store_true", help="Whether to use focal loss. Default False.")
     parser.add_argument("--use_time_information", action="store_true", help="Whether to use time information. Default False.")
     parser.add_argument("--use_elastic_deformation", action="store_true", help="Whether to use elastic deformation. Default False.")
     parser.add_argument("--use_velastic_deformation", action="store_true", help="Whether to use velastic deformation (only available for anglez). Default False.")
@@ -570,7 +542,6 @@ if __name__ == "__main__":
     expand = args.expand
     dropout = args.dropout
     attn_dropout = args.attn_dropout
-    use_focal_loss = args.use_focal_loss
     use_time_information = args.use_time_information
     use_elastic_deformation = args.use_elastic_deformation
     use_velastic_deformation = args.use_velastic_deformation
@@ -650,7 +621,7 @@ if __name__ == "__main__":
     model = model.to(config.device)
 
     # initialize optimizer
-    print("Loss: Day KL Divergence (Focal)" if use_focal_loss else "Loss: Day KL Divergence")
+    print("Loss: Day KL Divergence")
     print("Learning rate: " + str(learning_rate))
     print("Momentum: " + str(momentum))
     print("Second momentum: " + str(second_momentum))
@@ -723,7 +694,6 @@ if __name__ == "__main__":
         "expand": expand,
         "dropout": dropout,
         "attn_dropout": attn_dropout,
-        "use_focal_loss": use_focal_loss,
         "use_time_information": use_time_information,
         "use_elastic_deformation": use_elastic_deformation,
         "use_velastic_deformation": use_velastic_deformation,
